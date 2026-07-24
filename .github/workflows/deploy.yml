@@ -1,0 +1,99 @@
+name: Deploy KPISJS
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, kpisjs]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect Docker environment changes
+        id: docker-changes
+        run: |
+          echo "🔍 Checking for Docker environment changes..."
+          DOCKER_FILES="Dockerfile docker-compose.yml package.json package-lock.json next.config.ts"
+          REBUILD=false
+
+          # Handle first commit (no HEAD~1)
+          if git rev-parse HEAD~1 >/dev/null 2>&1; then
+            for f in $DOCKER_FILES; do
+              if git diff HEAD~1 --name-only | grep -q "^${f}$"; then
+                REBUILD=true
+                echo "  🔄 Changed: $f"
+              fi
+            done
+          else
+            echo "  🆕 First deployment — full build required"
+            REBUILD=true
+          fi
+
+          echo "rebuild=$REBUILD" >> "$GITHUB_OUTPUT"
+          echo "Result: rebuild=$REBUILD"
+
+      - name: Full Docker rebuild
+        if: steps.docker-changes.outputs.rebuild == 'true'
+        run: |
+          echo "🐳 Docker environment changed — rebuilding image..."
+          docker compose down || true
+          docker compose build --no-cache
+          docker compose up -d
+          echo "✅ Container rebuilt and started"
+
+      - name: Quick deploy (no rebuild)
+        if: steps.docker-changes.outputs.rebuild == 'false'
+        run: |
+          echo "⚡ No Docker environment changes — quick deploy..."
+          CONTAINER=kpisjs
+
+          # Check if container exists and is running
+          if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
+            echo "⚠️ Container not running, doing full build instead..."
+            docker compose up -d --build
+          else
+            # Copy updated source into running container
+            docker cp ./src $CONTAINER:/app/src
+            docker cp ./public $CONTAINER:/app/public
+            docker cp ./next.config.ts $CONTAINER:/app/next.config.ts
+            docker cp ./tsconfig.json $CONTAINER:/app/tsconfig.json
+
+            # Copy Excel templates if changed
+            docker cp ./template.xlsx $CONTAINER:/app/template.xlsx
+            docker cp ./absensi.xlsx $CONTAINER:/app/absensi.xlsx
+            docker cp ./employe.xlsx $CONTAINER:/app/employe.xlsx
+
+            # Rebuild Next.js inside container
+            docker exec $CONTAINER npm run build
+
+            # Restart to pick up new build
+            docker compose restart
+          fi
+          echo "✅ Quick deploy completed"
+
+      - name: Health check
+        run: |
+          echo "🏥 Running health check..."
+          sleep 5
+          for i in 1 2 3 4 5 6; do
+            if curl -sf http://localhost:7101/login > /dev/null 2>&1; then
+              echo "✅ Application is healthy and running on port 7101!"
+              exit 0
+            fi
+            echo "⏳ Waiting for app to start... ($i/6)"
+            sleep 5
+          done
+          echo "❌ Health check failed! Container logs:"
+          docker compose logs --tail=80
+          exit 1
+
+      - name: Cleanup dangling images
+        if: steps.docker-changes.outputs.rebuild == 'true'
+        run: |
+          docker image prune -f
+          echo "🧹 Cleaned up dangling images"
