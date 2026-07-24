@@ -333,7 +333,7 @@ export function KpiReportsClient({
                               href={`/tickets/${t.relatedTicketId}`}
                               className="text-brand hover:underline"
                             >
-                              {t.relatedCode ?? "Lihat"}
+                              {(t as any).relatedCode ?? "Lihat"}
                             </Link>
                           ) : (
                             "—"
