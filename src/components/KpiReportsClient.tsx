@@ -21,8 +21,8 @@ import type { Agent, Department, StaffMember, Ticket } from "@/lib/types";
 
 type Tab = "kpi" | "repeat";
 
-function filterByDepartment(
-  tickets: Ticket[],
+function filterByDepartment<T extends Ticket>(
+  tickets: T[],
   departmentId: string,
   departments: Department[],
   staff: StaffMember[],
