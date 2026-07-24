@@ -1,17 +1,10 @@
-# Stage 1: Install dependencies
-FROM node:22-slim AS deps
-WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm install
-
-# Stage 2: Build the Next.js application
+# Stage 1: Build Next.js (node_modules from host)
 FROM node:22-slim AS builder
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
-# Stage 3: Production runtime (minimal image)
+# Stage 2: Production runtime (minimal image)
 FROM node:22-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
