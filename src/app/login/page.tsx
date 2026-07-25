@@ -1,116 +1,12 @@
-"use client";
+import { redirect } from "next/navigation";
+import { getSessionUser } from "@/lib/session";
+import LoginClient from "./login-client";
 
-import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, Suspense, useState } from "react";
-import { ROLE_LABEL } from "@/lib/types";
-
-function LoginForm() {
-  const router = useRouter();
-  const params = useSearchParams();
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  async function onSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    const fd = new FormData(e.currentTarget);
-    const res = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: fd.get("username"),
-        password: fd.get("password"),
-      }),
-    });
-    const data = await res.json();
-    setLoading(false);
-    if (!res.ok) {
-      setError(data.error || "Login gagal");
-      return;
-    }
-    router.push(params.get("next") || "/");
-    router.refresh();
+export default async function LoginPage() {
+  const user = await getSessionUser();
+  if (user) {
+    redirect("/");
   }
 
-  return (
-    <div className="relative flex min-h-screen items-center justify-center px-4 py-10">
-      <div className="panel w-full max-w-md p-6 md:p-8">
-        <p className="mono text-[11px] tracking-[0.18em] text-brand uppercase">
-          SJS · IT Systems
-        </p>
-        <h1
-          className="mt-2 text-3xl font-semibold tracking-tight"
-          style={{ fontFamily: "var(--font-accent), serif" }}
-        >
-          KPI & IT Helpdesk
-        </h1>
-        <p className="mt-2 text-sm text-ink-muted">
-          Masuk dengan akun sesuai role: Admin, Manager, Staf, atau IT Staf.
-        </p>
-
-        <form onSubmit={onSubmit} className="mt-6 space-y-4">
-          <label className="block text-sm">
-            <span className="text-xs tracking-wide text-ink-muted uppercase">
-              Username
-            </span>
-            <input
-              name="username"
-              required
-              autoComplete="username"
-              className="mt-1.5 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2.5 outline-none focus:border-brand"
-              placeholder="admin"
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="text-xs tracking-wide text-ink-muted uppercase">
-              Password
-            </span>
-            <input
-              name="password"
-              type="password"
-              required
-              autoComplete="current-password"
-              className="mt-1.5 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2.5 outline-none focus:border-brand"
-              placeholder="••••••••"
-            />
-          </label>
-
-          {error ? <p className="text-sm text-danger">{error}</p> : null}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-xl bg-brand py-2.5 text-sm font-medium text-white hover:bg-brand-deep disabled:opacity-60"
-          >
-            {loading ? "Masuk..." : "Masuk"}
-          </button>
-        </form>
-
-        <div className="mt-6 rounded-xl bg-bg px-3 py-3 text-xs text-ink-muted">
-          <p className="font-medium text-ink">Akun demo</p>
-          <ul className="mono mt-2 space-y-1">
-            <li>admin / admin123 — {ROLE_LABEL.admin}</li>
-            <li>manager / manager123 — {ROLE_LABEL.manager}</li>
-            <li>staff / staff123 — {ROLE_LABEL.staff}</li>
-            <li>itstaff / itstaff123 — {ROLE_LABEL.it_staff}</li>
-          </ul>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export default function LoginPage() {
-  return (
-    <Suspense
-      fallback={
-        <div className="flex min-h-screen items-center justify-center text-sm text-ink-muted">
-          Memuat...
-        </div>
-      }
-    >
-      <LoginForm />
-    </Suspense>
-  );
+  return <LoginClient />;
 }

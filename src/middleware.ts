@@ -29,11 +29,6 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (token && pathname === "/login") {
-    const url = req.nextUrl.clone();
-    url.pathname = "/";
-    return NextResponse.redirect(url);
-  }
 
   return NextResponse.next();
 }
