@@ -1334,6 +1334,69 @@ export function login(
   return { token, user: sessionUser };
 }
 
+/**
+ * Reset password mandiri: username + kode karyawan (staf yang terhubung akun).
+ * Akun tanpa master staf harus minta Admin.
+ */
+export function resetPasswordWithStaffCode(input: {
+  username: string;
+  employeeCode: string;
+  newPassword: string;
+}): { ok: true } | { error: string } {
+  ensureDb();
+  const username = input.username.trim().toLowerCase();
+  const employeeCode = input.employeeCode.trim();
+  const newPassword = input.newPassword;
+
+  if (!username) return { error: "Username wajib diisi" };
+  if (!employeeCode) return { error: "Kode karyawan wajib diisi" };
+  if (newPassword.length < 6) {
+    return { error: "Password baru minimal 6 karakter" };
+  }
+
+  const row = getDb()
+    .prepare("SELECT * FROM users WHERE lower(username) = lower(?)")
+    .get(username) as UserRow | undefined;
+  if (!row || !intToBool(row.active)) {
+    return {
+      error:
+        "Data tidak cocok. Periksa username & kode karyawan, atau hubungi Admin.",
+    };
+  }
+
+  const user = mapUser(row);
+  if (!user.staffId) {
+    return {
+      error:
+        "Akun ini belum terhubung master staf. Hubungi Admin untuk reset password.",
+    };
+  }
+
+  const staff = listStaff().find((s) => s.id === user.staffId);
+  if (
+    !staff ||
+    !staff.active ||
+    staff.employeeCode.trim().toLowerCase() !== employeeCode.toLowerCase()
+  ) {
+    return {
+      error:
+        "Data tidak cocok. Periksa username & kode karyawan, atau hubungi Admin.",
+    };
+  }
+
+  const now = new Date().toISOString();
+  getDb()
+    .prepare(
+      `UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`,
+    )
+    .run(hashPassword(newPassword), now, user.id);
+
+  // Invalidate semua sesi aktif agar wajib login ulang
+  getDb().prepare("DELETE FROM sessions WHERE user_id = ?").run(user.id);
+
+  return { ok: true };
+}
+
 export function logout(token: string | undefined) {
   if (!token) return;
   ensureDb();

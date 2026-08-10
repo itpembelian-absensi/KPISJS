@@ -85,6 +85,15 @@ function LoginForm() {
           >
             {loading ? "Masuk..." : "Masuk"}
           </button>
+
+          <p className="text-center text-sm">
+            <a
+              href="/login/forgot-password"
+              className="font-medium text-brand hover:underline"
+            >
+              Lupa password?
+            </a>
+          </p>
         </form>
 
         <div className="mt-6 rounded-xl bg-bg px-3 py-3 text-xs text-ink-muted">
