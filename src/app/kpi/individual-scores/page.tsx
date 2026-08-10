@@ -5,7 +5,7 @@ import {
 import { listAttendanceSummaries } from "@/lib/attendance-ops";
 import { disciplinePeriodFromDate } from "@/lib/discipline-period";
 import { listKpiActivities, listKpiAssessments } from "@/lib/kpi-ops";
-import { listKpiIndicatorActuals } from "@/lib/kpi-indicator-actuals-ops";
+import { listKpiIndicatorActuals, syncTicketScoreActuals } from "@/lib/kpi-indicator-actuals-ops";
 import {
   ensureDepartmentScoreRules,
   listKpiScoreIndicators,
@@ -13,9 +13,11 @@ import {
 import { requireMenu } from "@/lib/session";
 import {
   listAdminStaffIds,
+  listAgents,
   listDepartments,
   listKpiFunctions,
   listStaff,
+  listTickets,
 } from "@/lib/store";
 import { IndividualScoreReportClient } from "@/components/IndividualScoreReportClient";
 import { redirect } from "next/navigation";
@@ -29,6 +31,7 @@ export default async function IndividualScoresPage() {
   if (deptScope !== "all" && deptScope.length === 0) redirect("/");
 
   ensureDepartmentScoreRules();
+  syncTicketScoreActuals();
 
   const allDepartments = listDepartments(true);
   const departments =
@@ -87,6 +90,8 @@ export default async function IndividualScoresPage() {
         assessments={assessments}
         disciplineSummaries={discipline}
         activities={activities}
+        tickets={listTickets()}
+        agents={listAgents()}
         adminStaffIds={listAdminStaffIds()}
         lockedDepartmentId={lockedDepartmentId}
         lockedStaffId={lockedStaffId}

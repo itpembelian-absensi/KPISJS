@@ -42,6 +42,49 @@ function groupHasActive(
   });
 }
 
+/** Folder tertutup — parent menu collapsed */
+function FolderClosedIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="currentColor"
+      aria-hidden
+      className={className}
+    >
+      <path d="M2.5 5.5A1.5 1.5 0 0 1 4 4h3.586a1.5 1.5 0 0 1 1.06.44l.828.828A.5.5 0 0 0 9.828 5.5H16a1.5 1.5 0 0 1 1.5 1.5v7.5A1.5 1.5 0 0 1 16 16H4a1.5 1.5 0 0 1-1.5-1.5v-9Z" />
+    </svg>
+  );
+}
+
+/** Folder terbuka — parent menu expanded (mirip Explorer) */
+function FolderOpenIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="currentColor"
+      aria-hidden
+      className={className}
+    >
+      <path d="M2.5 5.75A1.75 1.75 0 0 1 4.25 4h3.19c.3 0 .59.12.8.33l.84.84c.21.21.5.33.8.33h5.87A1.75 1.75 0 0 1 17.5 7.25v.5H5.1a1.5 1.5 0 0 0-1.44 1.1L2.5 13.4V5.75Z" />
+      <path d="M3.82 9.35A.75.75 0 0 1 4.54 8.8h12.2a.75.75 0 0 1 .72.97l-1.4 4.7A1.75 1.75 0 0 1 14.4 15.5H4.35a1.75 1.75 0 0 1-1.68-1.25l-1.05-3.5a.75.75 0 0 1 .72-.97c.16 0 .31.05.43.14l1.05 3.5Z" />
+    </svg>
+  );
+}
+
+function FolderIcon({
+  open,
+  className,
+}: {
+  open: boolean;
+  className?: string;
+}) {
+  return open ? (
+    <FolderOpenIcon className={className} />
+  ) : (
+    <FolderClosedIcon className={className} />
+  );
+}
+
 function NavLink({
   item,
   active,
@@ -116,13 +159,18 @@ function SidebarNav({
             <button
               type="button"
               onClick={() => toggleGroup(group.id)}
-              className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left transition ${
+              aria-expanded={open}
+              className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition ${
                 childActive
                   ? "bg-brand-soft text-brand-deep"
                   : "text-ink hover:bg-brand-soft"
               }`}
             >
-              <div>
+              <FolderIcon
+                open={open}
+                className="h-6 w-6 shrink-0 text-amber-500"
+              />
+              <div className="min-w-0 flex-1">
                 <div className="text-sm font-semibold">{group.label}</div>
                 <div className="text-xs text-ink-muted">{group.hint}</div>
               </div>
@@ -149,13 +197,18 @@ function SidebarNav({
                         <button
                           type="button"
                           onClick={() => toggleGroup(child.id)}
-                          className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left transition ${
+                          aria-expanded={subOpen}
+                          className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition ${
                             subActive
                               ? "bg-brand-soft/70 text-brand-deep"
                               : "text-ink hover:bg-brand-soft"
                           }`}
                         >
-                          <div>
+                          <FolderIcon
+                            open={subOpen}
+                            className="h-5 w-5 shrink-0 text-amber-500"
+                          />
+                          <div className="min-w-0 flex-1">
                             <div className="text-[13px] font-semibold">
                               {child.label}
                             </div>

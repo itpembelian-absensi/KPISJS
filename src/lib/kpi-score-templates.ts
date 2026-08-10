@@ -1,4 +1,5 @@
 import type {
+  KpiScoreBand,
   KpiScoreDataSource,
   KpiScoreIndicatorConfig,
   KpiScoreMetricType,
@@ -293,17 +294,22 @@ function opIndicator(
   description: string,
   target: number,
   sortOrder: number,
-  opts?: { notes?: string; dataSource?: KpiScoreDataSource },
+    opts?: {
+      notes?: string;
+      dataSource?: KpiScoreDataSource;
+      weightPercent?: number;
+      bandsPercent?: KpiScoreBand[];
+    },
 ): ScoreIndicatorTemplate {
   return {
     name,
     description,
-    weightPercent: 10,
+    weightPercent: opts?.weightPercent ?? 10,
     metricType: "scale_percent",
     sortOrder,
     config: {
       defaultTarget: target,
-      bandsPercent: PCT_BANDS_STRICT,
+      bandsPercent: opts?.bandsPercent ?? PCT_BANDS_STRICT,
       dataSource: opts?.dataSource ?? "manual",
       notes: opts?.notes,
     },
@@ -330,75 +336,85 @@ function leafIndicator(
   };
 }
 
+/** Skala kepuasan user: capaian = (rata-rata / 5) × 100 */
+const SATISFACTION_BANDS = [
+  { min: 100, score: 100, label: "5,0 / 5" },
+  { min: 90, score: 95, label: "≥4,5" },
+  { min: 80, score: 85, label: "≥4,0" },
+  { min: 70, score: 75, label: "≥3,5" },
+  { min: 60, score: 65, label: "≥3,0" },
+  { min: 0, score: 50, label: "<3,0" },
+];
+
 /** Template aturan skor KPI IT / Manager IT */
 export const IT_SCORE_TEMPLATE: ScoreFunctionTemplate[] = [
   {
     name: "IT Operation / Support",
-    weightPercent: 30,
+    weightPercent: 40,
     focus:
-      "Server, jaringan, internet, helpdesk, hardware, printer, uptime, SLA, backup harian",
+      "Semua tiket support (semua kategori): SLA, response, satisfaction, repeat issue; plus uptime & backup",
     sortOrder: 1,
     indicators: [
-      opIndicator("Server Uptime", "Uptime server vs target", 99.5, 1, {
-        notes: "Target 99,5%",
-        dataSource: "manual",
-      }),
-      opIndicator("Internet Uptime", "Uptime internet vs target", 99, 2, {
-        notes: "Target 99%",
-        dataSource: "manual",
-      }),
-      opIndicator("Backup Harian", "Keberhasilan backup harian", 100, 3, {
-        dataSource: "activity",
-      }),
       opIndicator(
         "Ticket selesai SLA",
-        "Persentase tiket selesai sesuai SLA",
+        "Persentase semua tiket selesai sesuai SLA (semua kategori)",
         95,
-        4,
-        { notes: "Target 95%", dataSource: "ticket" },
+        1,
+        {
+          weightPercent: 30,
+          notes: "Target 95% · semua kategori tiket masuk",
+          dataSource: "ticket",
+        },
       ),
-      opIndicator(
-        "Printer Normal",
-        "Printer dalam kondisi normal/operasional",
-        95,
-        5,
-        { dataSource: "manual" },
-      ),
-      opIndicator("Monitoring Server", "Kelengkapan monitoring server", 100, 6, {
-        dataSource: "activity",
-      }),
-      opIndicator(
-        "Monitoring Jaringan",
-        "Kelengkapan monitoring jaringan",
-        100,
-        7,
-        { dataSource: "activity" },
-      ),
-      opIndicator("Monitoring CCTV", "Kelengkapan monitoring CCTV", 100, 8, {
-        dataSource: "activity",
-      }),
       opIndicator(
         "Response User",
         "Pemenuhan response time user (target ≤30 menit)",
         100,
-        9,
+        2,
         {
+          weightPercent: 25,
           notes: "Dihitung sebagai % kepatuhan response ≤30 menit",
           dataSource: "ticket",
         },
       ),
       opIndicator(
-        "Dokumentasi Operasional",
-        "Kelengkapan dokumentasi operasional",
-        100,
-        10,
-        { dataSource: "manual" },
+        "User Satisfaction",
+        "Rata-rata kepuasan user dari rating tiket (skala 1–5 → %)",
+        90,
+        3,
+        {
+          weightPercent: 20,
+          notes: "Capaian = (avg satisfaction / 5) × 100 · target 90% (≈4,5)",
+          dataSource: "ticket",
+          bandsPercent: SATISFACTION_BANDS,
+        },
       ),
+      opIndicator(
+        "Non-repeat Issue",
+        "Persentase tiket yang bukan repeat issue",
+        95,
+        4,
+        {
+          weightPercent: 15,
+          notes:
+            "Capaian = % tiket non-repeat · target 95% (repeat rate ≤5%)",
+          dataSource: "ticket",
+        },
+      ),
+      opIndicator("Server Uptime", "Uptime server vs target", 99.5, 5, {
+        weightPercent: 5,
+        notes: "Target 99,5%",
+        dataSource: "manual",
+      }),
+      opIndicator("Backup Harian", "Keberhasilan backup harian", 100, 6, {
+        weightPercent: 5,
+        dataSource: "activity",
+      }),
     ],
   },
   {
     name: "IT Project",
-    weightPercent: 25,
+    weightPercent: 20,
     focus:
       "ERP, Website, Aplikasi Internal, Dashboard, Integrasi, Implementasi Project",
     sortOrder: 2,
@@ -438,7 +454,7 @@ export const IT_SCORE_TEMPLATE: ScoreFunctionTemplate[] = [
   },
   {
     name: "Improvement & Innovation",
-    weightPercent: 15,
+    weightPercent: 10,
     focus:
       "Digitalisasi proses, otomatisasi, AI, efisiensi kerja, improvement sistem",
     sortOrder: 3,
@@ -568,7 +584,7 @@ export const DATA_SOURCE_LABEL: Record<KpiScoreDataSource, string> = {
 export const DATA_SOURCE_WIRED: Record<KpiScoreDataSource, boolean> = {
   manual: false,
   attendance: true,
-  ticket: false,
+  ticket: true,
   activity: false,
   project: false,
 };

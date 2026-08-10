@@ -1,5 +1,13 @@
 import { computeFunctionScoreFromIndicators } from "./kpi-score-compute";
+import {
+  agentIdsForStaff,
+  computeTicketScoreMetrics,
+  filterTicketsForScoreMetrics,
+  isTicketSourcedIndicator,
+  ticketActualValueForIndicator,
+} from "./ticket-score-metrics";
 import type {
+  Agent,
   AttendancePeriodSummary,
   KpiActivity,
   KpiAssessment,
@@ -7,6 +15,7 @@ import type {
   KpiIndicatorActual,
   KpiScoreIndicator,
   StaffMember,
+  Ticket,
 } from "./types";
 
 export type IndividualFunctionScore = {
@@ -70,6 +79,8 @@ export function computeIndividualScore(input: {
   assessments: KpiAssessment[];
   discipline: AttendancePeriodSummary | null;
   activities: KpiActivity[];
+  tickets?: Ticket[];
+  agents?: Agent[];
 }): IndividualScoreRow {
   const {
     staff,
@@ -80,6 +91,8 @@ export function computeIndividualScore(input: {
     assessments,
     discipline,
     activities,
+    tickets = [],
+    agents = [],
   } = input;
 
   const deptFns = functions
@@ -97,6 +110,13 @@ export function computeIndividualScore(input: {
       a.assigneeStaffId === staff.id &&
       a.status !== "cancelled" &&
       activityInPeriod(a.activityDate, a.createdAt, periodLabel),
+  );
+
+  const ticketMetrics = computeTicketScoreMetrics(
+    filterTicketsForScoreMetrics(tickets, {
+      periodYm: periodLabel,
+      assigneeIds: agentIdsForStaff(agents, staff.id),
+    }),
   );
 
   const fnScores: IndividualFunctionScore[] = deptFns.map((fn) => {
@@ -120,6 +140,18 @@ export function computeIndividualScore(input: {
             if (discScore != null && Number.isFinite(discScore)) {
               return { actualValue: Number(discScore) };
             }
+            return null;
+          }
+          if (isTicketSourcedIndicator(ind)) {
+            const fromDb = actualMap.get(ind.id);
+            if (fromDb?.actualValue != null) {
+              return {
+                actualValue: fromDb.actualValue,
+                targetOverride: fromDb.targetOverride,
+              };
+            }
+            const auto = ticketActualValueForIndicator(ind, ticketMetrics);
+            if (auto != null) return { actualValue: auto };
             return null;
           }
           const a = actualMap.get(ind.id);
@@ -235,6 +267,8 @@ export function buildIndividualScoreReport(input: {
   disciplineByStaff: Map<string, AttendancePeriodSummary>;
   activities: KpiActivity[];
   adminStaffIds?: string[];
+  tickets?: Ticket[];
+  agents?: Agent[];
 }): IndividualScoreRow[] {
   const adminSet = new Set(input.adminStaffIds ?? []);
   const functions = input.functions;
@@ -256,6 +290,8 @@ export function buildIndividualScoreReport(input: {
         activities: input.activities.filter(
           (a) => a.departmentId === staff.departmentId,
         ),
+        tickets: input.tickets,
+        agents: input.agents,
       }),
     )
     .sort((a, b) => {

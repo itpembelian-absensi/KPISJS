@@ -290,7 +290,10 @@ export function createTemplateFromDepartment(input: {
   });
 }
 
-/** Seed template bawaan IT & MTR ke DB jika belum ada */
+/**
+ * Seed / sync template bawaan IT & MTR ke DB.
+ * Template kode bawaan selalu diselaraskan ke definisi di kode sumber.
+ */
 export function ensureBuiltInScoreTemplates() {
   const db = getDb();
   const now = new Date().toISOString();
@@ -299,7 +302,8 @@ export function ensureBuiltInScoreTemplates() {
       {
         code: "IT",
         label: "IT / Manager IT",
-        description: "Template bawaan skor KPI IT Support & Manager IT",
+        description:
+          "Template bawaan skor KPI IT — support tiket (SLA, response, satisfaction, repeat) sebagai bobot utama",
       },
       {
         code: "MTR",
@@ -316,7 +320,15 @@ export function ensureBuiltInScoreTemplates() {
         "SELECT id FROM kpi_score_templates WHERE upper(code) = ? LIMIT 1",
       )
       .get(meta.code) as { id: string } | undefined;
-    if (existing) continue;
+    const functionsJson = JSON.stringify(built);
+    if (existing) {
+      db.prepare(
+        `UPDATE kpi_score_templates SET
+          label = ?, description = ?, functions_json = ?, active = 1, updated_at = ?
+         WHERE id = ?`,
+      ).run(meta.label, meta.description, functionsJson, now, existing.id);
+      continue;
+    }
     db.prepare(
       `INSERT INTO kpi_score_templates (
         id, code, label, description, functions_json, active, created_at, updated_at
@@ -326,7 +338,7 @@ export function ensureBuiltInScoreTemplates() {
       meta.code,
       meta.label,
       meta.description,
-      JSON.stringify(built),
+      functionsJson,
       now,
       now,
     );

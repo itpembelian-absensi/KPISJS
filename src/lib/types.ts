@@ -69,7 +69,8 @@ export type KpiScoreMetricType =
  * Sumber capaian indikator:
  * - manual: diisi manager di Penilaian & Skor
  * - attendance: otomatis dari absensi (sudah terhubung)
- * - ticket / activity / project: dirancang otomatis dari modul terkait
+ * - ticket: otomatis dari modul tiket (SLA, response, satisfaction, non-repeat)
+ * - activity / project: dirancang otomatis dari modul terkait
  *   (jika belum terhubung, masih bisa diisi manual sebagai cadangan)
  */
 export type KpiScoreDataSource =

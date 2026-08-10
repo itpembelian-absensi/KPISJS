@@ -10,21 +10,21 @@ export const DEPT_KPI_TEMPLATES: Record<string, KpiTemplateItem[]> = {
   IT: [
     {
       name: "IT Operation / Support",
-      weightPercent: 30,
+      weightPercent: 40,
       focus:
-        "Server, jaringan, internet, helpdesk, hardware, printer, uptime, SLA, backup harian",
+        "Semua tiket support (semua kategori): SLA, response, satisfaction, repeat issue; plus uptime & backup",
       sortOrder: 1,
     },
     {
       name: "IT Project",
-      weightPercent: 25,
+      weightPercent: 20,
       focus:
         "ERP, Website, Aplikasi Internal, Dashboard, Integrasi, Implementasi Project",
       sortOrder: 2,
     },
     {
       name: "Improvement & Innovation",
-      weightPercent: 15,
+      weightPercent: 10,
       focus:
         "Digitalisasi proses, otomatisasi, AI, efisiensi kerja, improvement sistem",
       sortOrder: 3,

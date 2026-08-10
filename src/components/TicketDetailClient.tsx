@@ -34,6 +34,7 @@ export function TicketDetailClient({
   const [comment, setComment] = useState("");
   const [resolution, setResolution] = useState(initial.resolution ?? "");
   const [rootCause, setRootCause] = useState(initial.rootCause ?? "");
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const end = ticket.resolvedAt ?? new Date().toISOString();
   const elapsed = hoursBetween(ticket.createdAt, end);
@@ -48,22 +49,55 @@ export function TicketDetailClient({
     [ticket.events],
   );
 
-  async function patch(body: Record<string, unknown>) {
+  async function patch(
+    body: Record<string, unknown>,
+    opts?: { refresh?: boolean },
+  ): Promise<boolean> {
     setSaving(true);
-    const res = await fetch(`/api/tickets/${ticket.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...body,
-        actorId: body.actorId ?? actorId ?? undefined,
-      }),
-    });
-    const data = await res.json();
-    setSaving(false);
-    if (res.ok) {
-      setTicket(data.ticket);
-      router.refresh();
+    setSaveError(null);
+    try {
+      const res = await fetch(`/api/tickets/${ticket.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...body,
+          actorId: body.actorId ?? actorId ?? undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSaveError(
+          typeof data.error === "string" ? data.error : "Gagal menyimpan",
+        );
+        return false;
+      }
+      if (data.ticket) setTicket(data.ticket);
+      if (opts?.refresh !== false) router.refresh();
+      return true;
+    } catch {
+      setSaveError("Koneksi gagal — coba lagi");
+      return false;
+    } finally {
+      setSaving(false);
     }
+  }
+
+  async function addComment() {
+    const text = comment.trim();
+    if (!text) {
+      setSaveError("Isi catatan/komentar dulu sebelum Tambah");
+      return;
+    }
+    const ok = await patch(
+      {
+        comment: text,
+        rootCause,
+        resolution,
+        actorId: ticket.assigneeId || actorId || undefined,
+      },
+      { refresh: true },
+    );
+    if (ok) setComment("");
   }
 
   async function handleDelete() {
@@ -282,30 +316,41 @@ export function TicketDetailClient({
                 <span className="text-xs text-ink-muted">Catatan / komentar</span>
                 <input
                   value={comment}
-                  onChange={(e) => setComment(e.target.value)}
+                  onChange={(e) => {
+                    setComment(e.target.value);
+                    if (saveError) setSaveError(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void addComment();
+                    }
+                  }}
                   placeholder="Update progress untuk timeline..."
                   className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
                 />
               </label>
               <button
                 type="button"
-                disabled={saving || !comment.trim()}
-                onClick={async () => {
-                  await patch({
-                    comment: comment.trim(),
-                    actorId: ticket.assigneeId,
-                  });
-                  setComment("");
-                }}
+                disabled={saving}
+                onClick={() => void addComment()}
                 className="self-end rounded-xl bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
               >
-                Tambah
+                {saving ? "Menyimpan..." : "Tambah"}
               </button>
             </div>
 
+            {saveError ? (
+              <p className="text-xs text-danger">{saveError}</p>
+            ) : null}
             {saving ? (
               <p className="text-xs text-ink-muted">Menyimpan perubahan...</p>
-            ) : null}
+            ) : (
+              <p className="text-xs text-ink-muted">
+                Tombol Tambah menulis catatan ke timeline (boleh sekaligus
+                menyimpan root cause &amp; resolusi).
+              </p>
+            )}
           </div>
         ) : (
           <div className="mt-6 space-y-3 border-t border-line pt-5">

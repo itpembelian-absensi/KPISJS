@@ -10,7 +10,17 @@ import {
   METRIC_TYPE_LABEL,
   dataSourceBadgeLabel,
 } from "@/lib/kpi-score-templates";
+import {
+  agentIdsForStaff,
+  computeTicketScoreMetrics,
+  filterTicketsForScoreMetrics,
+  isTicketSourcedIndicator,
+  ticketActualValueForIndicator,
+  ticketPeriodLabels,
+} from "@/lib/ticket-score-metrics";
+import { buildFunctionScoreFormula } from "@/lib/score-formula";
 import type {
+  Agent,
   AttendancePeriodSummary,
   Department,
   KpiActivity,
@@ -21,6 +31,7 @@ import type {
   KpiProject,
   KpiScoreIndicator,
   StaffMember,
+  Ticket,
 } from "@/lib/types";
 
 type Tab = "fungsi" | "project" | "kegiatan" | "penilaian" | "kedisiplinan";
@@ -78,6 +89,79 @@ const ACTIVITY_FREQ_TABS: { id: KpiActivityFrequency; label: string }[] = [
   { id: "monthly", label: "Bulanan" },
 ];
 
+/** Label sumber skor di tabel Penilaian & Skor */
+const SCORE_SOURCE_META = {
+  tiket: {
+    mode: "otomatis" as const,
+    label: "Otomatis · Tiket",
+    hint: "Job desk support — dihitung dari antrian tiket (SLA, response, satisfaction, repeat)",
+    className: "bg-ok/15 text-ok ring-1 ring-ok/25",
+    formula: [
+      "Skor fungsi = Σ (skor indikator × bobot) ÷ Σ bobot indikator yang terisi",
+      "Ticket selesai SLA: % tiket resolved/closed sesuai target SLA prioritas → skor skala",
+      "Response User: % first response ≤ 30 menit → skor skala",
+      "User Satisfaction: (rata-rata rating ÷ 5) × 100 → skor skala",
+      "Non-repeat Issue: % tiket yang bukan repeat → skor skala",
+      "Kontribusi total = skor fungsi × bobot fungsi ÷ 100",
+    ],
+  },
+  indikator: {
+    mode: "otomatis" as const,
+    label: "Otomatis · Job desk",
+    hint: "Dari capaian indikator Aturan Skor KPI (tersimpan / terhubung modul)",
+    className: "bg-ok/15 text-ok ring-1 ring-ok/25",
+    formula: [
+      "Skor fungsi = Σ (skor indikator × bobot) ÷ Σ bobot indikator yang terisi",
+      "scale_percent: % capaian vs target → bandingkan ke tabel skala (bands)",
+      "scale_count: jumlah capaian vs target → skor skala",
+      "weighted_leaf / attendance: nilai 0–100 langsung",
+      "Sumber per indikator: manual, absensi, tiket, kegiatan, atau project",
+      "Kontribusi total = skor fungsi × bobot fungsi ÷ 100",
+    ],
+  },
+  absensi: {
+    mode: "otomatis" as const,
+    label: "Otomatis · Absensi",
+    hint: "Dari impor absensi & kedisiplinan",
+    className: "bg-ok/15 text-ok ring-1 ring-ok/25",
+    formula: [
+      "Skor fungsi = skor absensi periode (maks 100)",
+      "Mulai dari 100",
+      "− (hari absen ÷ hari kerja) × 45",
+      "− min(jumlah telat × 2,5, 20)",
+      "− min(menit telat ÷ 30, 15)",
+      "+ min(menit lembur ÷ 120, 5)",
+      "Kontribusi total = skor fungsi × bobot fungsi ÷ 100",
+    ],
+  },
+  kegiatan: {
+    mode: "otomatis" as const,
+    label: "Otomatis · Kegiatan",
+    hint: "Dari status kegiatan yang dilink ke fungsi (selesai 100%, berjalan 50%)",
+    className: "bg-brand-soft text-brand-deep ring-1 ring-brand/25",
+    formula: [
+      "Skor fungsi = rata-rata nilai kegiatan yang dilink ke fungsi",
+      "Selesai = 100%",
+      "Berjalan = 50%",
+      "Lainnya / batal = 0% (PIC admin tidak dihitung)",
+      "Kontribusi total = skor fungsi × bobot fungsi ÷ 100",
+    ],
+  },
+  manual: {
+    mode: "manual" as const,
+    label: "Manual",
+    hint: "Diisi lewat Input penilaian manual di bawah",
+    className: "bg-warn/15 text-warn ring-1 ring-warn/30",
+    formula: [
+      "Skor fungsi = nilai yang diinput di form penilaian manual (0–100)",
+      "Tidak dihitung dari tiket / kegiatan / absensi",
+      "Kontribusi total = skor fungsi × bobot fungsi ÷ 100",
+    ],
+  },
+} as const;
+
+type ScoreSourceKey = keyof typeof SCORE_SOURCE_META;
+
 /** Filter list: semua / pending (belum selesai) / selesai */
 type ProgressFilter = "all" | "pending" | "done";
 
@@ -116,6 +200,8 @@ export function DepartmentKpiWorkspace({
   disciplineSummaries: initialDiscipline,
   scoreIndicators: initialIndicators = [],
   indicatorActuals: initialActuals = [],
+  tickets: initialTickets = [],
+  agents: initialAgents = [],
   staff,
   defaultDepartmentId,
   assessorName,
@@ -134,6 +220,8 @@ export function DepartmentKpiWorkspace({
   disciplineSummaries: DisciplineRow[];
   scoreIndicators?: KpiScoreIndicator[];
   indicatorActuals?: KpiIndicatorActual[];
+  tickets?: Ticket[];
+  agents?: Agent[];
   staff: StaffMember[];
   defaultDepartmentId: string;
   assessorName: string;
@@ -177,6 +265,8 @@ export function DepartmentKpiWorkspace({
   const [indicatorActuals, setIndicatorActuals] = useState(initialActuals);
   /** Draft capaian: indicatorId → string input */
   const [actualDrafts, setActualDrafts] = useState<Record<string, string>>({});
+  const [openSourceFormula, setOpenSourceFormula] =
+    useState<ScoreSourceKey | null>(null);
 
   useEffect(() => {
     setScoreIndicators((prev) =>
@@ -471,21 +561,98 @@ export function DepartmentKpiWorkspace({
       .sort()
       .reverse()[0] ?? null;
 
+    const latestTicketPeriod = ticketPeriodLabels(initialTickets)[0] ?? null;
+    const latestActualPeriod =
+      [...deptActuals]
+        .filter((a) => (staffFilter ? a.staffId === staffFilter : true))
+        .map((a) => a.periodLabel)
+        .sort()
+        .reverse()[0] ?? null;
+
     const periodForRules =
       scorePeriod !== "all"
         ? scorePeriod
-        : latestDiscPeriod ||
-          latestAssessPeriod ||
-          deptActuals.find((a) =>
-            staffFilter ? a.staffId === staffFilter : true,
-          )?.periodLabel ||
-          null;
+        : (
+            [
+              latestDiscPeriod,
+              latestAssessPeriod,
+              latestActualPeriod,
+              latestTicketPeriod,
+            ].filter(Boolean) as string[]
+          )
+            .sort()
+            .reverse()[0] ?? null;
 
     const staffIdsForRules = staffFilter
       ? [staffFilter]
       : kpiDeptStaff.map((s) => s.id);
 
-    type ScoreSource = "indikator" | "manual" | "absensi" | "kegiatan";
+    type ScoreSource =
+      | "tiket"
+      | "indikator"
+      | "manual"
+      | "absensi"
+      | "kegiatan";
+
+    const ticketMetricsForStaff = (sid: string | null) => {
+      if (!periodForRules) return computeTicketScoreMetrics([]);
+      if (sid == null) {
+        return computeTicketScoreMetrics(
+          filterTicketsForScoreMetrics(initialTickets, {
+            periodYm: periodForRules,
+            assigneeIds: null,
+          }),
+        );
+      }
+      const assigneeIds = agentIdsForStaff(initialAgents, sid);
+      return computeTicketScoreMetrics(
+        filterTicketsForScoreMetrics(initialTickets, {
+          periodYm: periodForRules,
+          assigneeIds,
+        }),
+      );
+    };
+
+    const resolveActualForIndicator = (
+      ind: (typeof deptIndicators)[number],
+      actualMap: Map<string, (typeof deptActuals)[number]>,
+      disc: number | undefined,
+      ticketMetrics: ReturnType<typeof computeTicketScoreMetrics>,
+    ) => {
+      if (ind.metricType === "attendance") {
+        const fromDb = actualMap.get(ind.id);
+        if (fromDb?.actualValue != null) {
+          return {
+            actualValue: fromDb.actualValue,
+            targetOverride: fromDb.targetOverride,
+          };
+        }
+        if (disc != null && Number.isFinite(disc)) {
+          return { actualValue: Number(disc) };
+        }
+        return null;
+      }
+
+      if (isTicketSourcedIndicator(ind)) {
+        const fromDb = actualMap.get(ind.id);
+        if (fromDb?.actualValue != null) {
+          return {
+            actualValue: fromDb.actualValue,
+            targetOverride: fromDb.targetOverride,
+          };
+        }
+        const auto = ticketActualValueForIndicator(ind, ticketMetrics);
+        if (auto != null) return { actualValue: auto };
+        return null;
+      }
+
+      const a = actualMap.get(ind.id);
+      if (!a || a.actualValue == null) return null;
+      return {
+        actualValue: a.actualValue,
+        targetOverride: a.targetOverride,
+      };
+    };
 
     /** Ambil skor dari penilaian manual untuk satu fungsi */
     const resolveManualScore = (
@@ -557,6 +724,9 @@ export function DepartmentKpiWorkspace({
       if (hasScoreRules && fnIndicators.length > 0 && periodForRules) {
         const scores: number[] = [];
         let filledTotal = 0;
+        let ticketCountUsed = 0;
+        const usesTicket = fnIndicators.some((i) => isTicketSourcedIndicator(i));
+
         for (const sid of staffIdsForRules) {
           const disc = deptDiscipline.find(
             (d) => d.staffId === sid && d.periodLabel === periodForRules,
@@ -567,47 +737,53 @@ export function DepartmentKpiWorkspace({
           const actualMap = new Map(
             staffActuals.map((a) => [a.indicatorId, a]),
           );
+          const ticketMetrics = ticketMetricsForStaff(sid);
+          ticketCountUsed = Math.max(ticketCountUsed, ticketMetrics.ticketCount);
           const result = computeFunctionScoreFromIndicators(
             fn.id,
             fnIndicators,
-            (ind) => {
-              if (ind.metricType === "attendance") {
-                const fromDb = actualMap.get(ind.id);
-                if (fromDb?.actualValue != null) {
-                  return {
-                    actualValue: fromDb.actualValue,
-                    targetOverride: fromDb.targetOverride,
-                  };
-                }
-                if (disc != null && Number.isFinite(disc)) {
-                  return { actualValue: Number(disc) };
-                }
-                return null;
-              }
-              const a = actualMap.get(ind.id);
-              if (!a || a.actualValue == null) return null;
-              return {
-                actualValue: a.actualValue,
-                targetOverride: a.targetOverride,
-              };
-            },
+            (ind) =>
+              resolveActualForIndicator(ind, actualMap, disc, ticketMetrics),
           );
           if (result.filledCount > 0) {
             scores.push(result.score);
             filledTotal += result.filledCount;
           }
         }
+
+        // Agregat dept: jika tidak ada staf handler, pakai semua tiket periode
+        if (scores.length === 0 && usesTicket && !staffFilter) {
+          const deptMetrics = ticketMetricsForStaff(null);
+          ticketCountUsed = deptMetrics.ticketCount;
+          const result = computeFunctionScoreFromIndicators(
+            fn.id,
+            fnIndicators,
+            (ind) =>
+              resolveActualForIndicator(ind, new Map(), undefined, deptMetrics),
+          );
+          if (result.filledCount > 0) {
+            scores.push(result.score);
+            filledTotal += result.filledCount;
+          }
+        }
+
         if (scores.length > 0) {
           const score =
             Math.round(
               (scores.reduce((s, v) => s + v, 0) / scores.length) * 10,
             ) / 10;
+          const ticketHint =
+            usesTicket && ticketCountUsed > 0
+              ? ` · tiket ${ticketCountUsed}`
+              : "";
           return {
             id: fn.id,
             name: fn.name,
             focus: fn.focus,
             weight: fn.weightPercent,
-            source: "indikator" as ScoreSource,
+            source: (usesTicket && ticketCountUsed > 0
+              ? "tiket"
+              : "indikator") as ScoreSource,
             total: filledTotal,
             done: scores.length,
             inProgress: 0,
@@ -615,8 +791,10 @@ export function DepartmentKpiWorkspace({
             percent: score,
             score,
             detail: staffFilter
-              ? `${fnIndicators.length} indikator · ${periodForRules}`
-              : `rata-rata ${scores.length} staf · ${periodForRules}`,
+              ? `${fnIndicators.length} indikator · ${periodForRules}${ticketHint}`
+              : scores.length === 1 && usesTicket && !staffFilter
+                ? `otomatis tiket · ${periodForRules}${ticketHint}`
+                : `rata-rata ${scores.length} staf · ${periodForRules}${ticketHint}`,
           };
         }
       }
@@ -700,7 +878,20 @@ export function DepartmentKpiWorkspace({
         totalW += r.weight;
         weighted += (r.score ?? 0) * r.weight;
       }
-      return { ...r, contribution };
+      const fn = functions.find((f) => f.id === r.id);
+      const formula = fn
+        ? buildFunctionScoreFormula({
+            fn,
+            indicators: deptIndicators,
+            source: r.source,
+          })
+        : { summary: "", lines: [] as string[] };
+      return {
+        ...r,
+        contribution,
+        formulaSummary: formula.summary,
+        formulaLines: formula.lines,
+      };
     });
 
     const overall =
@@ -733,6 +924,8 @@ export function DepartmentKpiWorkspace({
     deptIndicators,
     deptActuals,
     hasScoreRules,
+    initialTickets,
+    initialAgents,
   ]);
 
   const scorePeriods = useMemo(() => {
@@ -744,8 +937,15 @@ export function DepartmentKpiWorkspace({
       const d = a.activityDate || a.createdAt.slice(0, 10);
       if (d.length >= 7) set.add(d.slice(0, 7));
     }
+    for (const p of ticketPeriodLabels(initialTickets)) set.add(p);
     return [...set].sort().reverse();
-  }, [deptDiscipline, deptActivities, deptActuals, deptAssessments]);
+  }, [
+    deptDiscipline,
+    deptActivities,
+    deptActuals,
+    deptAssessments,
+    initialTickets,
+  ]);
 
   const canInputActuals =
     hasScoreRules &&
@@ -760,6 +960,13 @@ export function DepartmentKpiWorkspace({
       return;
     }
     const drafts: Record<string, string> = {};
+    const assigneeIds = agentIdsForStaff(initialAgents, scoreStaffId);
+    const ticketMetrics = computeTicketScoreMetrics(
+      filterTicketsForScoreMetrics(initialTickets, {
+        periodYm: scorePeriod,
+        assigneeIds,
+      }),
+    );
     for (const ind of deptIndicators) {
       const existing = deptActuals.find(
         (a) =>
@@ -777,6 +984,14 @@ export function DepartmentKpiWorkspace({
             ? String(existing.actualValue)
             : disc != null
               ? String(disc.disciplineScore)
+              : "";
+      } else if (isTicketSourcedIndicator(ind)) {
+        const auto = ticketActualValueForIndicator(ind, ticketMetrics);
+        drafts[ind.id] =
+          existing?.actualValue != null
+            ? String(existing.actualValue)
+            : auto != null
+              ? String(auto)
               : "";
       } else {
         drafts[ind.id] =
@@ -801,6 +1016,8 @@ export function DepartmentKpiWorkspace({
     deptDiscipline,
     scoreStaffId,
     scorePeriod,
+    initialTickets,
+    initialAgents,
   ]);
 
   async function saveIndicatorActuals() {
@@ -809,7 +1026,10 @@ export function DepartmentKpiWorkspace({
     setError(null);
     try {
       const items = deptIndicators
-        .filter((i) => i.metricType !== "attendance")
+        .filter(
+          (i) =>
+            i.metricType !== "attendance" && !isTicketSourcedIndicator(i),
+        )
         .map((ind) => {
           const raw = actualDrafts[ind.id]?.trim();
           return {
@@ -2014,7 +2234,7 @@ export function DepartmentKpiWorkspace({
                   <h3 className="font-semibold">Skor otomatis (Master Fungsi KPI)</h3>
                   <p className="mt-1 text-xs text-ink-muted">
                     {hasScoreRules
-                      ? "Prioritas: capaian indikator → penilaian manual → kegiatan / absensi."
+                      ? "Prioritas: capaian indikator (absensi & tiket otomatis) → penilaian manual → kegiatan."
                       : "Filter per departemen & karyawan. Penilaian manual dipakai jika ada; selain itu kegiatan (Selesai 100% · Berjalan 50%) / absensi."}
                   </p>
                 </div>
@@ -2087,9 +2307,11 @@ export function DepartmentKpiWorkspace({
 
               {hasScoreRules && !canInputActuals ? (
                 <p className="mt-3 rounded-lg border border-line bg-surface/80 px-3 py-2 text-xs text-ink-muted">
-                  Pilih <strong>satu karyawan</strong> dan{" "}
-                  <strong>satu periode</strong> untuk mengisi capaian indikator
-                  Aturan Skor KPI.
+                  Indikator tiket (SLA, response, satisfaction, non-repeat)
+                  terisi otomatis dari antrian tiket. Pilih{" "}
+                  <strong>satu karyawan</strong> dan{" "}
+                  <strong>satu periode</strong> untuk melihat detail / isi
+                  indikator manual.
                 </p>
               ) : null}
 
@@ -2102,8 +2324,8 @@ export function DepartmentKpiWorkspace({
                       </h4>
                       <p className="mt-0.5 text-xs text-ink-muted">
                         {autoScores.selectedStaff?.name} ·{" "}
-                        {formatDisciplinePeriodLabel(scorePeriod)}. Absensi
-                        terisi otomatis. Simpan untuk menghitung skor fungsi.
+                        {formatDisciplinePeriodLabel(scorePeriod)}. Absensi &amp;
+                        tiket terisi otomatis. Simpan untuk indikator manual.
                       </p>
                     </div>
                     <button
@@ -2152,7 +2374,8 @@ export function DepartmentKpiWorkspace({
                                   const target =
                                     ind.config.defaultTarget ?? null;
                                   const readonly =
-                                    ind.metricType === "attendance";
+                                    ind.metricType === "attendance" ||
+                                    isTicketSourcedIndicator(ind);
                                   const srcBadge = dataSourceBadgeLabel(
                                     ind.metricType,
                                     ind.config,
@@ -2228,7 +2451,80 @@ export function DepartmentKpiWorkspace({
                   Belum ada fungsi KPI aktif di master.
                 </p>
               ) : (
-                <div className="mt-3 overflow-x-auto rounded-xl border border-line bg-surface">
+                <div className="mt-3 space-y-3">
+                  <div className="rounded-xl border border-line bg-bg-elevated/50 px-3 py-2.5 text-xs text-ink-muted">
+                    <p className="font-medium text-ink">
+                      Arti kolom Sumber — klik tombol untuk lihat rumus
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {(
+                        [
+                          "tiket",
+                          "indikator",
+                          "absensi",
+                          "kegiatan",
+                          "manual",
+                        ] as const
+                      ).map((key) => {
+                        const meta = SCORE_SOURCE_META[key];
+                        const active = openSourceFormula === key;
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            title={meta.hint}
+                            aria-expanded={active}
+                            onClick={() =>
+                              setOpenSourceFormula((prev) =>
+                                prev === key ? null : key,
+                              )
+                            }
+                            className={`rounded-lg px-2.5 py-1.5 text-left text-[11px] font-medium transition ${meta.className} ${
+                              active
+                                ? "ring-2 ring-offset-1 ring-offset-bg-elevated"
+                                : "hover:opacity-90"
+                            }`}
+                          >
+                            <span className="block">{meta.label}</span>
+                            <span className="mt-0.5 block text-[10px] font-normal opacity-80">
+                              {active ? "Tutup rumus" : "Lihat rumus"}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {openSourceFormula ? (
+                      <div className="mt-3 rounded-lg border border-line bg-surface px-3 py-2.5">
+                        <p className="font-semibold text-ink">
+                          Rumus · {SCORE_SOURCE_META[openSourceFormula].label}
+                        </p>
+                        <p className="mt-1 leading-snug">
+                          {SCORE_SOURCE_META[openSourceFormula].hint}
+                        </p>
+                        <ul className="mt-2 space-y-1">
+                          {SCORE_SOURCE_META[openSourceFormula].formula.map(
+                            (line, i) => (
+                              <li
+                                key={i}
+                                className="border-l-2 border-brand/25 pl-2 leading-snug"
+                              >
+                                {line}
+                              </li>
+                            ),
+                          )}
+                        </ul>
+                        <p className="mt-2 text-[11px] text-ink-muted">
+                          Detail per fungsi (bobot indikator &amp; skala) ada di{" "}
+                          <strong>Rumus penilaian</strong> pada baris tabel —
+                          bisa dibuka/ditutup.
+                        </p>
+                      </div>
+                    ) : null}
+                    <p className="mt-2 border-t border-line pt-2 font-medium text-ink">
+                      Total tertimbang = Σ (skor fungsi × bobot) ÷ Σ bobot
+                    </p>
+                  </div>
+                  <div className="overflow-x-auto rounded-xl border border-line bg-surface">
                   <table className="w-full min-w-[560px] text-left text-sm">
                     <thead>
                       <tr className="border-b border-line bg-bg-elevated/70 text-xs text-ink-muted uppercase">
@@ -2246,7 +2542,12 @@ export function DepartmentKpiWorkspace({
                       </tr>
                     </thead>
                     <tbody>
-                      {autoScores.rows.map((r) => (
+                      {autoScores.rows.map((r) => {
+                        const srcMeta =
+                          SCORE_SOURCE_META[
+                            r.source as keyof typeof SCORE_SOURCE_META
+                          ] ?? SCORE_SOURCE_META.kegiatan;
+                        return (
                         <tr
                           key={r.id}
                           className="cursor-pointer border-b border-line transition hover:bg-brand-soft/40"
@@ -2264,18 +2565,48 @@ export function DepartmentKpiWorkspace({
                                 {r.focus}
                               </p>
                             ) : null}
+                            {r.formulaSummary ? (
+                              <details
+                                className="mt-2 max-w-lg rounded-lg border border-line/80 bg-surface/80 px-2.5 py-2"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <summary className="cursor-pointer text-[11px] font-semibold text-ink hover:text-brand">
+                                  Rumus penilaian
+                                </summary>
+                                <p className="mt-1.5 text-[11px] leading-snug text-ink-muted">
+                                  {r.formulaSummary}
+                                </p>
+                                <ul className="mt-1.5 space-y-1 text-[11px] leading-snug text-ink-muted">
+                                  {r.formulaLines.map((line, i) => (
+                                    <li key={i} className="border-l-2 border-brand/20 pl-2">
+                                      {line}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </details>
+                            ) : null}
                           </td>
                           <td className="px-3 py-2.5">{r.weight}%</td>
                           <td className="px-3 py-2.5">
-                            <span className="rounded-md bg-bg-elevated px-2 py-0.5 text-[11px] text-ink-muted">
-                              {r.source === "indikator"
-                                ? "Indikator"
-                                : r.source === "manual"
-                                  ? "Manual"
-                                  : r.source === "absensi"
-                                    ? "Absensi"
-                                    : "Kegiatan"}
-                            </span>
+                            <button
+                              type="button"
+                              title={`Klik untuk rumus: ${srcMeta.hint}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const key = (r.source in SCORE_SOURCE_META
+                                  ? r.source
+                                  : "kegiatan") as ScoreSourceKey;
+                                setOpenSourceFormula((prev) =>
+                                  prev === key ? null : key,
+                                );
+                              }}
+                              className={`inline-flex flex-col gap-0.5 rounded-md px-2 py-1 text-left text-[11px] font-medium transition hover:opacity-90 ${srcMeta.className}`}
+                            >
+                              <span>{srcMeta.label}</span>
+                              <span className="text-[10px] font-normal opacity-80 normal-case">
+                                Lihat rumus
+                              </span>
+                            </button>
                           </td>
                           <td className="px-3 py-2.5 text-xs text-ink-muted">
                             {r.detail}
@@ -2312,7 +2643,8 @@ export function DepartmentKpiWorkspace({
                             </span>
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                     <tfoot>
                       <tr className="border-t-2 border-line bg-bg-elevated/80">
@@ -2368,6 +2700,7 @@ export function DepartmentKpiWorkspace({
                   <p className="mt-2 px-4 pb-3 text-xs font-semibold text-blue-600">
                     Klik baris fungsi untuk membuka halaman riwayat penilaian.
                   </p>
+                </div>
                 </div>
               )}
             </div>

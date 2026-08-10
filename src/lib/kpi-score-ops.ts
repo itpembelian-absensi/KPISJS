@@ -311,13 +311,20 @@ export function ensureMekanikScoreRules() {
   applyScoreTemplateToDepartment(mtr.id, "MTR");
 }
 
-/** Jika dept IT belum punya indikator skor, terapkan template otomatis */
+/** Jika dept IT belum punya aturan skor support terbaru, terapkan template otomatis */
 export function ensureITScoreRules() {
   ensureDepartmentKpiTemplates();
+  ensureBuiltInScoreTemplates();
   const it = listDepartments(true).find((d) => d.code.toUpperCase() === "IT");
   if (!it) return;
-  const count = listKpiScoreIndicators(it.id).length;
-  if (count > 0) return;
+  const inds = listKpiScoreIndicators(it.id);
+  const hasSupportWeighted =
+    inds.some((i) => i.name === "User Satisfaction") &&
+    inds.some((i) => i.name === "Non-repeat Issue") &&
+    inds.some(
+      (i) => i.name === "Ticket selesai SLA" && i.weightPercent >= 30,
+    );
+  if (inds.length > 0 && hasSupportWeighted) return;
   applyScoreTemplateToDepartment(it.id, "IT");
 }
 

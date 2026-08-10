@@ -10,9 +10,11 @@ import {
 } from "@/lib/attendance-ops";
 import { requireMenu } from "@/lib/session";
 import {
+  listAgents,
   listDepartments,
   listKpiFunctions,
   listStaff,
+  listTickets,
   listUsers,
   listAdminStaffIds,
 } from "@/lib/store";
@@ -21,7 +23,7 @@ import {
   listKpiAssessments,
   listKpiProjects,
 } from "@/lib/kpi-ops";
-import { listKpiIndicatorActuals } from "@/lib/kpi-indicator-actuals-ops";
+import { listKpiIndicatorActuals, syncTicketScoreActuals } from "@/lib/kpi-indicator-actuals-ops";
 import {
   ensureDepartmentScoreRules,
   listKpiScoreIndicators,
@@ -41,6 +43,7 @@ export default async function DepartmentKpiPage() {
   if (!staffLimited) {
     ensureDisciplineKpiFunctions();
     ensureDepartmentScoreRules();
+    syncTicketScoreActuals();
   }
 
   const allDepartments = listDepartments(true);
@@ -104,6 +107,8 @@ export default async function DepartmentKpiPage() {
           }
           scoreIndicators={staffLimited ? [] : listKpiScoreIndicators()}
           indicatorActuals={staffLimited ? [] : listKpiIndicatorActuals()}
+          tickets={staffLimited ? [] : listTickets()}
+          agents={staffLimited ? [] : listAgents()}
           staff={listStaff(true)}
           defaultDepartmentId={defaultDepartmentId}
           assessorName={user.name}

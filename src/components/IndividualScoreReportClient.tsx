@@ -7,6 +7,7 @@ import {
 } from "@/lib/discipline-period";
 import { buildIndividualScoreReport } from "@/lib/individual-score-report";
 import type {
+  Agent,
   AttendancePeriodSummary,
   Department,
   KpiActivity,
@@ -15,13 +16,15 @@ import type {
   KpiIndicatorActual,
   KpiScoreIndicator,
   StaffMember,
+  Ticket,
 } from "@/lib/types";
+import { ticketPeriodLabels } from "@/lib/ticket-score-metrics";
 
 const SOURCE_LABEL = {
-  indikator: "Indikator",
+  indikator: "Otomatis · Job desk",
   manual: "Manual",
-  absensi: "Absensi",
-  kegiatan: "Kegiatan",
+  absensi: "Otomatis · Absensi",
+  kegiatan: "Otomatis · Kegiatan",
 } as const;
 
 export function IndividualScoreReportClient({
@@ -33,6 +36,8 @@ export function IndividualScoreReportClient({
   assessments,
   disciplineSummaries,
   activities,
+  tickets = [],
+  agents = [],
   adminStaffIds,
   lockedDepartmentId,
   lockedStaffId,
@@ -46,6 +51,8 @@ export function IndividualScoreReportClient({
   assessments: KpiAssessment[];
   disciplineSummaries: AttendancePeriodSummary[];
   activities: KpiActivity[];
+  tickets?: Ticket[];
+  agents?: Agent[];
   adminStaffIds: string[];
   lockedDepartmentId: string | null;
   lockedStaffId: string | null;
@@ -56,9 +63,10 @@ export function IndividualScoreReportClient({
       ...disciplineSummaries.map((d) => d.periodLabel),
       ...actuals.map((a) => a.periodLabel),
       ...assessments.map((a) => a.periodLabel),
+      ...ticketPeriodLabels(tickets),
     ];
     return buildDisciplinePeriodOptions(fromData);
-  }, [disciplineSummaries, actuals, assessments]);
+  }, [disciplineSummaries, actuals, assessments, tickets]);
 
   const [deptId, setDeptId] = useState(
     lockedDepartmentId || departments[0]?.id || "",
@@ -100,6 +108,8 @@ export function IndividualScoreReportClient({
         disciplineByStaff,
         activities,
         adminStaffIds,
+        tickets,
+        agents,
       }),
     [
       deptStaff,
@@ -111,6 +121,8 @@ export function IndividualScoreReportClient({
       disciplineByStaff,
       activities,
       adminStaffIds,
+      tickets,
+      agents,
     ],
   );
 
