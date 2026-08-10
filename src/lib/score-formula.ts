@@ -81,7 +81,7 @@ export function buildFunctionScoreFormula(input: {
 
   const contrib = `Kontribusi ke total = skor fungsi × ${fn.weightPercent}% ÷ 100`;
 
-  if (source === "manual" || (activeInds.length === 0 && source === "manual")) {
+  if ((source as string) === "manual") {
     return {
       summary: "Nilai diisi manual 0–100, lalu × bobot fungsi.",
       lines: [
