@@ -1,6 +1,6 @@
 import { computeFunctionScoreFromIndicators } from "./kpi-score-compute";
 import {
-  agentIdsForStaff,
+  assigneeIdsForTicketScore,
   computeTicketScoreMetrics,
   filterTicketsForScoreMetrics,
   isTicketSourcedIndicator,
@@ -9,6 +9,7 @@ import {
 import type {
   Agent,
   AttendancePeriodSummary,
+  ItMember,
   KpiActivity,
   KpiAssessment,
   KpiFunction,
@@ -81,6 +82,10 @@ export function computeIndividualScore(input: {
   activities: KpiActivity[];
   tickets?: Ticket[];
   agents?: Agent[];
+  /** Semua staf (untuk hitung tim manager) */
+  allStaff?: StaffMember[];
+  itTeam?: ItMember[];
+  managerUserStaffIds?: string[];
 }): IndividualScoreRow {
   const {
     staff,
@@ -93,6 +98,9 @@ export function computeIndividualScore(input: {
     activities,
     tickets = [],
     agents = [],
+    allStaff = [],
+    itTeam = [],
+    managerUserStaffIds = [],
   } = input;
 
   const deptFns = functions
@@ -112,10 +120,18 @@ export function computeIndividualScore(input: {
       activityInPeriod(a.activityDate, a.createdAt, periodLabel),
   );
 
+  const staffPool = allStaff.length > 0 ? allStaff : [staff];
+  const { assigneeIds } = assigneeIdsForTicketScore({
+    staffId: staff.id,
+    agents,
+    staff: staffPool,
+    itTeam,
+    managerUserStaffIds,
+  });
   const ticketMetrics = computeTicketScoreMetrics(
     filterTicketsForScoreMetrics(tickets, {
       periodYm: periodLabel,
-      assigneeIds: agentIdsForStaff(agents, staff.id),
+      assigneeIds,
     }),
   );
 
@@ -269,6 +285,9 @@ export function buildIndividualScoreReport(input: {
   adminStaffIds?: string[];
   tickets?: Ticket[];
   agents?: Agent[];
+  allStaff?: StaffMember[];
+  itTeam?: ItMember[];
+  managerUserStaffIds?: string[];
 }): IndividualScoreRow[] {
   const adminSet = new Set(input.adminStaffIds ?? []);
   const functions = input.functions;
@@ -292,6 +311,9 @@ export function buildIndividualScoreReport(input: {
         ),
         tickets: input.tickets,
         agents: input.agents,
+        allStaff: input.allStaff ?? input.staffList,
+        itTeam: input.itTeam,
+        managerUserStaffIds: input.managerUserStaffIds,
       }),
     )
     .sort((a, b) => {

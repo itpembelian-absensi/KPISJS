@@ -12,6 +12,7 @@ import { requireMenu } from "@/lib/session";
 import {
   listAgents,
   listDepartments,
+  listItTeam,
   listKpiFunctions,
   listStaff,
   listTickets,
@@ -109,6 +110,7 @@ export default async function DepartmentKpiPage() {
           indicatorActuals={staffLimited ? [] : listKpiIndicatorActuals()}
           tickets={staffLimited ? [] : listTickets()}
           agents={staffLimited ? [] : listAgents()}
+          itTeam={staffLimited ? [] : listItTeam(true)}
           staff={listStaff(true)}
           defaultDepartmentId={defaultDepartmentId}
           assessorName={user.name}

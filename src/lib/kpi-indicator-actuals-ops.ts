@@ -7,7 +7,7 @@ import {
 import { listKpiScoreIndicators } from "./kpi-score-ops";
 import { upsertKpiAssessment } from "./kpi-ops";
 import {
-  agentIdsForStaff,
+  assigneeIdsForTicketScore,
   computeTicketScoreMetrics,
   filterTicketsForScoreMetrics,
   isTicketSourcedIndicator,
@@ -15,7 +15,15 @@ import {
   ticketMetricItemsForIndicators,
   ticketPeriodLabels,
 } from "./ticket-score-metrics";
-import { listAgents, listDepartments, listKpiFunctions, listStaff, listTickets } from "./store";
+import {
+  listAgents,
+  listDepartments,
+  listItTeam,
+  listKpiFunctions,
+  listStaff,
+  listTickets,
+  listUsers,
+} from "./store";
 import type { KpiIndicatorActual, KpiScoreIndicator } from "./types";
 
 type ActualRow = {
@@ -360,12 +368,25 @@ export function scoreStaffPeriodFromIndicators(input: {
 
   const tickets = input.tickets ?? listTickets();
   const agents = input.agents ?? listAgents();
+  const staffList = listStaff(true);
+  const itTeam = listItTeam(true);
+  const managerUserStaffIds = listUsers()
+    .filter((u) => u.active && u.role === "manager" && u.staffId)
+    .map((u) => u.staffId as string);
+  const { assigneeIds, scope } = assigneeIdsForTicketScore({
+    staffId: input.staffId,
+    agents,
+    staff: staffList,
+    itTeam,
+    managerUserStaffIds,
+  });
   const ticketMetrics = computeTicketScoreMetrics(
     filterTicketsForScoreMetrics(tickets, {
       periodYm: input.periodLabel,
-      assigneeIds: agentIdsForStaff(agents, input.staffId),
+      assigneeIds,
     }),
   );
+  void scope;
 
   let weighted = 0;
   let usedW = 0;
@@ -449,6 +470,10 @@ export function syncTicketScoreActuals(opts?: {
   const tickets = listTickets();
   const agents = listAgents();
   const staff = listStaff(true);
+  const itTeam = listItTeam(true);
+  const managerUserStaffIds = listUsers()
+    .filter((u) => u.active && u.role === "manager" && u.staffId)
+    .map((u) => u.staffId as string);
   const depts = listDepartments(true).filter((d) =>
     opts?.departmentId ? d.id === opts.departmentId : true,
   );
@@ -472,13 +497,18 @@ export function syncTicketScoreActuals(opts?: {
     if (periodList.length === 0) continue;
 
     const deptStaff = staff.filter((s) => s.departmentId === dept.id);
-    const agentStaff = deptStaff.filter(
-      (s) => agentIdsForStaff(agents, s.id).length > 0,
-    );
+    const agentStaff = deptStaff.filter((s) => {
+      const { assigneeIds } = assigneeIdsForTicketScore({
+        staffId: s.id,
+        agents,
+        staff,
+        itTeam,
+        managerUserStaffIds,
+      });
+      return assigneeIds.length > 0;
+    });
     const targets =
-      agentStaff.length > 0
-        ? agentStaff
-        : deptStaff.slice(0, 1);
+      agentStaff.length > 0 ? agentStaff : deptStaff.slice(0, 1);
 
     for (const periodLabel of periodList) {
       periods += 1;
@@ -490,25 +520,27 @@ export function syncTicketScoreActuals(opts?: {
       );
 
       for (const member of targets) {
-        const assigneeIds = agentIdsForStaff(agents, member.id);
-        const metrics =
-          assigneeIds.length > 0
-            ? computeTicketScoreMetrics(
-                filterTicketsForScoreMetrics(tickets, {
-                  periodYm: periodLabel,
-                  assigneeIds,
-                }),
-              )
-            : deptMetrics;
+        const { assigneeIds, scope } = assigneeIdsForTicketScore({
+          staffId: member.id,
+          agents,
+          staff,
+          itTeam,
+          managerUserStaffIds,
+        });
+        if (assigneeIds.length === 0) continue;
 
-        // Jika staf tidak punya tiket, pakai metrik dept agar agregat terisi
-        const useMetrics =
-          metrics.ticketCount > 0 ? metrics : deptMetrics;
-        if (useMetrics.ticketCount <= 0) continue;
+        const metrics = computeTicketScoreMetrics(
+          filterTicketsForScoreMetrics(tickets, {
+            periodYm: periodLabel,
+            assigneeIds,
+          }),
+        );
+        // Staf: hanya tiket pribadi. Manager: tiket tim. Tanpa fallback dept.
+        if (metrics.ticketCount <= 0) continue;
 
         const items = ticketMetricItemsForIndicators(
           allIndicators,
-          useMetrics,
+          metrics,
         );
         if (items.length === 0) continue;
 
@@ -517,7 +549,10 @@ export function syncTicketScoreActuals(opts?: {
           staffId: member.id,
           periodLabel,
           items,
-          updatedBy: "Sistem · sync tiket",
+          updatedBy:
+            scope === "team"
+              ? "Sistem · sync tiket tim"
+              : "Sistem · sync tiket",
           syncAssessments: true,
         });
         if ("ok" in result && result.ok) {

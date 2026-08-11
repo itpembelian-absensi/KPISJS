@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { boolToInt, getDb, intToBool } from "./db";
+import { deleteSopUploadFolder } from "./sop-files";
 import type {
   SopAttachment,
   SopDisposition,
@@ -49,17 +50,39 @@ function parseSteps(raw: string | null | undefined): SopStep[] {
   }
 }
 
+function normalizeAttachment(a: Partial<SopAttachment>): SopAttachment | null {
+  const url = String(a.url || "").trim();
+  if (!url) return null;
+  const originalName = a.originalName
+    ? String(a.originalName).trim()
+    : undefined;
+  const mimeType = a.mimeType ? String(a.mimeType).trim() : undefined;
+  const kind: "link" | "file" =
+    a.kind === "file" || url.startsWith("/uploads/sops/") ? "file" : "link";
+  const label =
+    String(a.label || "").trim() ||
+    originalName ||
+    (kind === "file" ? url.split("/").pop() || url : url);
+  if (kind === "link" && !String(a.label || "").trim()) {
+    // Link manual tetap butuh label; fallback ke URL
+  }
+  return {
+    label,
+    url,
+    ...(originalName ? { originalName } : {}),
+    ...(mimeType ? { mimeType } : {}),
+    kind,
+  };
+}
+
 function parseAttachments(raw: string | null | undefined): SopAttachment[] {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw) as SopAttachment[];
     if (!Array.isArray(parsed)) return [];
     return parsed
-      .map((a) => ({
-        label: String(a.label || "").trim(),
-        url: String(a.url || "").trim(),
-      }))
-      .filter((a) => a.label || a.url);
+      .map((a) => normalizeAttachment(a))
+      .filter((a): a is SopAttachment => Boolean(a));
   } catch {
     return [];
   }
@@ -176,11 +199,9 @@ export function upsertSop(input: {
     .map((s, i) => ({ ...s, order: i + 1 }));
 
   const attachments = (input.attachments ?? [])
-    .map((a) => ({
-      label: String(a.label || "").trim(),
-      url: String(a.url || "").trim(),
-    }))
-    .filter((a) => a.label && a.url);
+    .map((a) => normalizeAttachment(a))
+    .filter((a): a is SopAttachment => Boolean(a))
+    .filter((a) => a.kind === "file" || (Boolean(a.label) && Boolean(a.url)));
 
   const dispositions = (input.dispositions ?? DEFAULT_SOP_DISPOSITIONS).map(
     (d) => ({
@@ -280,9 +301,77 @@ export function upsertSop(input: {
   return getSop(id)!;
 }
 
+export function appendSopAttachments(
+  sopId: string,
+  attachments: SopAttachment[],
+  maxTotal = 10,
+): SopDocument | { error: string } {
+  const existing = getSop(sopId);
+  if (!existing) return { error: "SOP tidak ditemukan" };
+  const current = existing.attachments;
+  if (current.length + attachments.length > maxTotal) {
+    return {
+      error: `Maksimal ${maxTotal} lampiran (sudah ${current.length})`,
+    };
+  }
+  const next = [...current, ...attachments];
+  const now = new Date().toISOString();
+  getDb()
+    .prepare(
+      `UPDATE sops SET attachments_json = ?, updated_at = ? WHERE id = ?`,
+    )
+    .run(JSON.stringify(next), now, sopId);
+  return getSop(sopId)!;
+}
+
+export function removeSopAttachment(
+  sopId: string,
+  url: string,
+): SopDocument | { error: string } {
+  const existing = getSop(sopId);
+  if (!existing) return { error: "SOP tidak ditemukan" };
+  const next = existing.attachments.filter((a) => a.url !== url);
+  const now = new Date().toISOString();
+  getDb()
+    .prepare(
+      `UPDATE sops SET attachments_json = ?, updated_at = ? WHERE id = ?`,
+    )
+    .run(JSON.stringify(next), now, sopId);
+  return getSop(sopId)!;
+}
+
+/** Ganti satu lampiran file (hapus URL lama, sisipkan lampiran baru) */
+export function replaceSopAttachment(
+  sopId: string,
+  oldUrl: string,
+  replacement: SopAttachment[],
+  maxTotal = 10,
+): SopDocument | { error: string } {
+  const existing = getSop(sopId);
+  if (!existing) return { error: "SOP tidak ditemukan" };
+  if (!oldUrl) return { error: "URL file lama wajib" };
+  if (replacement.length === 0) return { error: "File pengganti wajib" };
+
+  const withoutOld = existing.attachments.filter((a) => a.url !== oldUrl);
+  if (withoutOld.length + replacement.length > maxTotal) {
+    return {
+      error: `Maksimal ${maxTotal} lampiran`,
+    };
+  }
+  const next = [...withoutOld, ...replacement];
+  const now = new Date().toISOString();
+  getDb()
+    .prepare(
+      `UPDATE sops SET attachments_json = ?, updated_at = ? WHERE id = ?`,
+    )
+    .run(JSON.stringify(next), now, sopId);
+  return getSop(sopId)!;
+}
+
 export function deleteSop(id: string): { ok: true } | { error: string } {
   const existing = getSop(id);
   if (!existing) return { error: "SOP tidak ditemukan" };
   getDb().prepare("DELETE FROM sops WHERE id = ?").run(id);
+  deleteSopUploadFolder(id);
   return { ok: true };
 }

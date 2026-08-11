@@ -69,6 +69,7 @@ export function buildFunctionScoreFormula(input: {
   indicators: KpiScoreIndicator[];
   source:
     | "tiket"
+    | "tiket_tim"
     | "indikator"
     | "manual"
     | "absensi"
@@ -124,9 +125,11 @@ export function buildFunctionScoreFormula(input: {
   ];
 
   const summary =
-    source === "tiket"
-      ? "Otomatis dari tiket (SLA, response, satisfaction, repeat) + indikator lain."
-      : "Dari capaian indikator Aturan Skor KPI (otomatis/manual per indikator).";
+    source === "tiket_tim"
+      ? "Otomatis dari tiket tim (anak buah) — SLA, response, satisfaction, repeat."
+      : source === "tiket"
+        ? "Otomatis dari tiket (SLA, response, satisfaction, repeat) + indikator lain."
+        : "Dari capaian indikator Aturan Skor KPI (otomatis/manual per indikator).";
 
   return { summary, lines };
 }

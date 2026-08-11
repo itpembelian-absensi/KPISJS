@@ -15,9 +15,11 @@ import {
   listAdminStaffIds,
   listAgents,
   listDepartments,
+  listItTeam,
   listKpiFunctions,
   listStaff,
   listTickets,
+  listUsers,
 } from "@/lib/store";
 import { IndividualScoreReportClient } from "@/components/IndividualScoreReportClient";
 import { redirect } from "next/navigation";
@@ -62,6 +64,9 @@ export default async function IndividualScoresPage() {
     const s = staff.find((x) => x.id === d.staffId);
     return Boolean(s);
   });
+  const managerStaffIds = listUsers()
+    .filter((u) => u.active && u.role === "manager" && u.staffId)
+    .map((u) => u.staffId as string);
 
   return (
     <div className="space-y-5">
@@ -77,7 +82,8 @@ export default async function IndividualScoresPage() {
         </h1>
         <p className="mt-2 max-w-3xl text-sm text-ink-muted">
           Nilai / skor KPI per karyawan dalam satu periode. Sumber skor:
-          capaian indikator, penilaian manual, absensi, atau kegiatan.
+          capaian indikator, penilaian manual, absensi, atau kegiatan. Manager
+          IT memakai agregat tiket tim (anak buah).
         </p>
       </div>
 
@@ -92,6 +98,8 @@ export default async function IndividualScoresPage() {
         activities={activities}
         tickets={listTickets()}
         agents={listAgents()}
+        itTeam={listItTeam(true)}
+        managerStaffIds={managerStaffIds}
         adminStaffIds={listAdminStaffIds()}
         lockedDepartmentId={lockedDepartmentId}
         lockedStaffId={lockedStaffId}

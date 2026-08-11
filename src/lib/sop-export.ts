@@ -1,4 +1,6 @@
 import PDFDocument from "pdfkit";
+import { PDFDocument as PdfLibDocument } from "pdf-lib";
+import fs from "fs";
 import {
   BorderStyle,
   Document,
@@ -11,8 +13,9 @@ import {
   TextRun,
   WidthType,
 } from "docx";
-import type { SopDocument } from "./types";
+import type { SopAttachment, SopDocument } from "./types";
 import { formatSopDate } from "./sop-format";
+import { absolutePathFromSopPublicUrl } from "./sop-files";
 
 function collectBuffers(doc: PDFKit.PDFDocument): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -147,11 +150,12 @@ function writeFormalSopPdf(
   if (sop.attachments.length > 0) {
     ensureSpace(doc, 40);
     doc.moveDown(0.3);
-    doc.font("Helvetica-Bold").fontSize(10).text("LAMPIRAN / LINK");
+    doc.font("Helvetica-Bold").fontSize(10).text("LAMPIRAN / FILE");
     doc.moveDown(0.25);
     for (const att of sop.attachments) {
       doc.font("Helvetica").fontSize(8).fillColor("#0f172a");
-      doc.text(`• ${att.label}: ${att.url}`);
+      const name = att.originalName || att.label || att.url;
+      doc.text(`• ${name}${att.url ? ` — ${att.url}` : ""}`);
     }
   }
 
@@ -224,7 +228,30 @@ function writeFormalSopPdf(
   doc.y = y + tableH + 12;
 }
 
-export async function buildSopPdf(sops: SopDocument[]): Promise<Buffer> {
+function isPdfAttachment(att: SopAttachment) {
+  const name = `${att.originalName || ""} ${att.label || ""} ${att.url}`.toLowerCase();
+  return (
+    att.mimeType === "application/pdf" ||
+    name.includes(".pdf") ||
+    att.url.toLowerCase().endsWith(".pdf")
+  );
+}
+
+/** Path absolut file PDF lampiran SOP (jika ada di disk) */
+export function resolveSopPdfPath(sop: SopDocument): string | null {
+  for (const att of sop.attachments) {
+    if (!isPdfAttachment(att)) continue;
+    if (!(att.kind === "file" || att.url.startsWith("/uploads/sops/"))) {
+      continue;
+    }
+    const abs = absolutePathFromSopPublicUrl(att.url);
+    if (abs && fs.existsSync(abs)) return abs;
+  }
+  return null;
+}
+
+/** PDF formal A–E (fallback jika SOP belum punya file PDF) */
+export async function buildSopPdfFormal(sops: SopDocument[]): Promise<Buffer> {
   const doc = new PDFDocument({
     size: "A4",
     margin: 40,
@@ -248,6 +275,63 @@ export async function buildSopPdf(sops: SopDocument[]): Promise<Buffer> {
 
   doc.end();
   return done;
+}
+
+/**
+ * Export PDF: utamakan file PDF lampiran asli (sama persis),
+ * digabung berurutan. SOP tanpa PDF memakai layout formal A–E.
+ */
+export async function buildSopPdf(sops: SopDocument[]): Promise<Buffer> {
+  if (sops.length === 0) {
+    return buildSopPdfFormal([]);
+  }
+
+  // Satu SOP + ada file PDF → kirim byte file apa adanya
+  if (sops.length === 1) {
+    const only = resolveSopPdfPath(sops[0]);
+    if (only) return fs.readFileSync(only);
+  }
+
+  const allHavePdf = sops.every((s) => Boolean(resolveSopPdfPath(s)));
+  if (allHavePdf) {
+    const merged = await PdfLibDocument.create();
+    for (const sop of sops) {
+      const pdfPath = resolveSopPdfPath(sop)!;
+      const bytes = fs.readFileSync(pdfPath);
+      const src = await PdfLibDocument.load(bytes, {
+        ignoreEncryption: true,
+      });
+      const pages = await merged.copyPages(src, src.getPageIndices());
+      for (const page of pages) merged.addPage(page);
+    }
+    merged.setTitle(
+      sops.length === 1 ? `SOP — ${sops[0].title}` : "Kumpulan SOP IT",
+    );
+    merged.setAuthor("SJS IT Systems");
+    return Buffer.from(await merged.save());
+  }
+
+  // Campuran: gabungkan PDF asli + formal untuk yang tanpa file
+  const merged = await PdfLibDocument.create();
+  for (const sop of sops) {
+    const pdfPath = resolveSopPdfPath(sop);
+    if (pdfPath) {
+      const bytes = fs.readFileSync(pdfPath);
+      const src = await PdfLibDocument.load(bytes, {
+        ignoreEncryption: true,
+      });
+      const pages = await merged.copyPages(src, src.getPageIndices());
+      for (const page of pages) merged.addPage(page);
+    } else {
+      const formalBuf = await buildSopPdfFormal([sop]);
+      const src = await PdfLibDocument.load(formalBuf);
+      const pages = await merged.copyPages(src, src.getPageIndices());
+      for (const page of pages) merged.addPage(page);
+    }
+  }
+  merged.setTitle("Kumpulan SOP IT");
+  merged.setAuthor("SJS IT Systems");
+  return Buffer.from(await merged.save());
 }
 
 const thinBorder = {
@@ -424,13 +508,16 @@ function sopToDocxChildren(sop: SopDocument, withBreak: boolean) {
       new Paragraph({ text: "" }),
       new Paragraph({
         children: [
-          new TextRun({ text: "LAMPIRAN / LINK", bold: true, size: 20 }),
+          new TextRun({ text: "LAMPIRAN / FILE", bold: true, size: 20 }),
         ],
       }),
     );
     for (const att of sop.attachments) {
+      const name = att.originalName || att.label || att.url;
       children.push(
-        new Paragraph({ text: `• ${att.label}: ${att.url}` }),
+        new Paragraph({
+          text: `• ${name}${att.url ? ` — ${att.url}` : ""}`,
+        }),
       );
     }
   }

@@ -511,10 +511,14 @@ export interface SopStep {
   body: string;
 }
 
-/** Lampiran berupa link (opsional) */
+/** Lampiran: link eksternal atau file yang diunggah (PDF/Word/Excel/dll) */
 export interface SopAttachment {
   label: string;
   url: string;
+  /** Nama file asli saat unggah */
+  originalName?: string;
+  mimeType?: string;
+  kind?: "link" | "file";
 }
 
 /** Baris tabel disposisi / tanda tangan */

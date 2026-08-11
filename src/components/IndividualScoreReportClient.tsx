@@ -19,6 +19,7 @@ import type {
   Ticket,
 } from "@/lib/types";
 import { ticketPeriodLabels } from "@/lib/ticket-score-metrics";
+import type { ItMember } from "@/lib/types";
 
 const SOURCE_LABEL = {
   indikator: "Otomatis · Job desk",
@@ -38,6 +39,8 @@ export function IndividualScoreReportClient({
   activities,
   tickets = [],
   agents = [],
+  itTeam = [],
+  managerStaffIds = [],
   adminStaffIds,
   lockedDepartmentId,
   lockedStaffId,
@@ -53,6 +56,8 @@ export function IndividualScoreReportClient({
   activities: KpiActivity[];
   tickets?: Ticket[];
   agents?: Agent[];
+  itTeam?: ItMember[];
+  managerStaffIds?: string[];
   adminStaffIds: string[];
   lockedDepartmentId: string | null;
   lockedStaffId: string | null;
@@ -110,6 +115,9 @@ export function IndividualScoreReportClient({
         adminStaffIds,
         tickets,
         agents,
+        allStaff: staff,
+        itTeam,
+        managerUserStaffIds: managerStaffIds,
       }),
     [
       deptStaff,
@@ -123,6 +131,9 @@ export function IndividualScoreReportClient({
       adminStaffIds,
       tickets,
       agents,
+      staff,
+      itTeam,
+      managerStaffIds,
     ],
   );
 

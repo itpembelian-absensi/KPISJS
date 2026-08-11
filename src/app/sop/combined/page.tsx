@@ -20,7 +20,7 @@ export default async function SopCombinedPage({
   const idsQuery = ids.join(",");
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5">
+    <div className="mx-auto max-w-4xl space-y-5">
       <div>
         <p
           className="text-sm text-brand"
@@ -32,7 +32,17 @@ export default async function SopCombinedPage({
           Tampilan gabungan
         </h1>
         <p className="mt-2 text-sm text-ink-muted">
-          {sops.length} dokumen ditampilkan berurutan.
+          {sops.length} dokumen ditampilkan berurutan
+          {sops.some((s) =>
+            s.attachments.some(
+              (a) =>
+                (a.originalName || a.label || a.url)
+                  .toLowerCase()
+                  .includes(".pdf") || a.mimeType === "application/pdf",
+            ),
+          )
+            ? " — PDF lampiran ditampilkan apa adanya."
+            : "."}
         </p>
         {sops.length > 0 ? (
           <div className="mt-3 flex flex-wrap gap-2">
@@ -67,9 +77,14 @@ export default async function SopCombinedPage({
           lalu klik Lihat gabungan.
         </div>
       ) : (
-        <div className="space-y-6">
-          {sops.map((sop) => (
-            <SopDocumentView key={sop.id} sop={sop} showActions={false} />
+        <div className="space-y-8">
+          {sops.map((sop, i) => (
+            <SopDocumentView
+              key={sop.id}
+              sop={sop}
+              showActions={false}
+              pageLabel={`${i + 1} dari ${sops.length}`}
+            />
           ))}
         </div>
       )}

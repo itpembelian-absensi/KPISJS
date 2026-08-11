@@ -11,7 +11,7 @@ import {
   dataSourceBadgeLabel,
 } from "@/lib/kpi-score-templates";
 import {
-  agentIdsForStaff,
+  assigneeIdsForTicketScore,
   computeTicketScoreMetrics,
   filterTicketsForScoreMetrics,
   isTicketSourcedIndicator,
@@ -23,6 +23,7 @@ import type {
   Agent,
   AttendancePeriodSummary,
   Department,
+  ItMember,
   KpiActivity,
   KpiActivityFrequency,
   KpiAssessment,
@@ -94,14 +95,25 @@ const SCORE_SOURCE_META = {
   tiket: {
     mode: "otomatis" as const,
     label: "Otomatis · Tiket",
-    hint: "Job desk support — dihitung dari antrian tiket (SLA, response, satisfaction, repeat)",
+    hint: "Job desk support — dihitung dari antrian tiket (SLA, response, satisfaction, repeat). Manager: agregat tiket tim.",
     className: "bg-ok/15 text-ok ring-1 ring-ok/25",
     formula: [
       "Skor fungsi = Σ (skor indikator × bobot) ÷ Σ bobot indikator yang terisi",
+      "Staf: tiket yang dia handle. Manager / IT Manager: tiket yang di-handle anak buah (IT Staff) di dept yang sama",
       "Ticket selesai SLA: % tiket resolved/closed sesuai target SLA prioritas → skor skala",
       "Response User: % first response ≤ 30 menit → skor skala",
       "User Satisfaction: (rata-rata rating ÷ 5) × 100 → skor skala",
       "Non-repeat Issue: % tiket yang bukan repeat → skor skala",
+      "Kontribusi total = skor fungsi × bobot fungsi ÷ 100",
+    ],
+  },
+  tiket_tim: {
+    mode: "otomatis" as const,
+    label: "Otomatis · Tiket tim",
+    hint: "Manager — skor support dari kinerja tiket anak buah (bukan tiket pribadi)",
+    className: "bg-ok/15 text-ok ring-1 ring-ok/25",
+    formula: [
+      "Sama rumus tiket, sumber = agregat tiket assignee IT Staff di departemen manager",
       "Kontribusi total = skor fungsi × bobot fungsi ÷ 100",
     ],
   },
@@ -202,6 +214,7 @@ export function DepartmentKpiWorkspace({
   indicatorActuals: initialActuals = [],
   tickets: initialTickets = [],
   agents: initialAgents = [],
+  itTeam: initialItTeam = [],
   staff,
   defaultDepartmentId,
   assessorName,
@@ -222,6 +235,7 @@ export function DepartmentKpiWorkspace({
   indicatorActuals?: KpiIndicatorActual[];
   tickets?: Ticket[];
   agents?: Agent[];
+  itTeam?: ItMember[];
   staff: StaffMember[];
   defaultDepartmentId: string;
   assessorName: string;
@@ -589,6 +603,7 @@ export function DepartmentKpiWorkspace({
 
     type ScoreSource =
       | "tiket"
+      | "tiket_tim"
       | "indikator"
       | "manual"
       | "absensi"
@@ -604,7 +619,13 @@ export function DepartmentKpiWorkspace({
           }),
         );
       }
-      const assigneeIds = agentIdsForStaff(initialAgents, sid);
+      const { assigneeIds } = assigneeIdsForTicketScore({
+        staffId: sid,
+        agents: initialAgents,
+        staff,
+        itTeam: initialItTeam,
+        managerUserStaffIds: managerStaffIds,
+      });
       return computeTicketScoreMetrics(
         filterTicketsForScoreMetrics(initialTickets, {
           periodYm: periodForRules,
@@ -612,6 +633,15 @@ export function DepartmentKpiWorkspace({
         }),
       );
     };
+
+    const ticketScopeForStaff = (sid: string) =>
+      assigneeIdsForTicketScore({
+        staffId: sid,
+        agents: initialAgents,
+        staff,
+        itTeam: initialItTeam,
+        managerUserStaffIds: managerStaffIds,
+      }).scope;
 
     const resolveActualForIndicator = (
       ind: (typeof deptIndicators)[number],
@@ -782,7 +812,9 @@ export function DepartmentKpiWorkspace({
             focus: fn.focus,
             weight: fn.weightPercent,
             source: (usesTicket && ticketCountUsed > 0
-              ? "tiket"
+              ? staffFilter && ticketScopeForStaff(staffFilter) === "team"
+                ? "tiket_tim"
+                : "tiket"
               : "indikator") as ScoreSource,
             total: filledTotal,
             done: scores.length,
@@ -791,7 +823,11 @@ export function DepartmentKpiWorkspace({
             percent: score,
             score,
             detail: staffFilter
-              ? `${fnIndicators.length} indikator · ${periodForRules}${ticketHint}`
+              ? `${fnIndicators.length} indikator · ${periodForRules}${
+                  staffFilter && ticketScopeForStaff(staffFilter) === "team"
+                    ? " · tiket tim"
+                    : ticketHint
+                }`
               : scores.length === 1 && usesTicket && !staffFilter
                 ? `otomatis tiket · ${periodForRules}${ticketHint}`
                 : `rata-rata ${scores.length} staf · ${periodForRules}${ticketHint}`,
@@ -960,7 +996,13 @@ export function DepartmentKpiWorkspace({
       return;
     }
     const drafts: Record<string, string> = {};
-    const assigneeIds = agentIdsForStaff(initialAgents, scoreStaffId);
+    const { assigneeIds } = assigneeIdsForTicketScore({
+      staffId: scoreStaffId,
+      agents: initialAgents,
+      staff,
+      itTeam: initialItTeam,
+      managerUserStaffIds: managerStaffIds,
+    });
     const ticketMetrics = computeTicketScoreMetrics(
       filterTicketsForScoreMetrics(initialTickets, {
         periodYm: scorePeriod,
@@ -1018,6 +1060,9 @@ export function DepartmentKpiWorkspace({
     scorePeriod,
     initialTickets,
     initialAgents,
+    initialItTeam,
+    staff,
+    managerStaffIds,
   ]);
 
   async function saveIndicatorActuals() {
