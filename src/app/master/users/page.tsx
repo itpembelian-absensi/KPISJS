@@ -1,6 +1,11 @@
 import { UserMaster } from "@/components/master/UserMaster";
 import { requireMasterMenu } from "@/lib/session";
-import { listDepartments, listStaff, listUsers } from "@/lib/store";
+import {
+  listDepartments,
+  listPendingPasswordResets,
+  listStaff,
+  listUsers,
+} from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +14,7 @@ export default async function UsersPage() {
   const users = listUsers();
   const staff = listStaff(true);
   const departments = listDepartments(true);
+  const passwordResetRequests = listPendingPasswordResets();
 
   return (
     <div className="space-y-5">
@@ -25,12 +31,14 @@ export default async function UsersPage() {
         <p className="mt-2 text-sm text-ink-muted">
           Atur username, password, role, menu yang boleh diakses, dan batasan
           departemen per user. Hanya Admin & IT Staf yang boleh mengubah.
+          Permintaan lupa password dari halaman login muncul di sini.
         </p>
       </div>
       <UserMaster
         initial={users}
         staff={staff}
         departments={departments}
+        initialResets={passwordResetRequests}
       />
     </div>
   );

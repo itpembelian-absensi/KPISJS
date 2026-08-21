@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { ActivityPhotoSlider } from "@/components/ActivityPhotoSlider";
 import { CategoryBadge, PriorityBadge, StatusBadge } from "@/components/Badges";
 import {
   formatDuration,
@@ -13,6 +14,8 @@ import {
   STATUS_LABEL,
 } from "@/lib/sla";
 import type { Agent, Ticket } from "@/lib/types";
+
+const MAX_PHOTOS = 8;
 
 export function TicketDetailClient({
   ticket: initial,
@@ -31,6 +34,7 @@ export function TicketDetailClient({
   const [ticket, setTicket] = useState(initial);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [comment, setComment] = useState("");
   const [resolution, setResolution] = useState(initial.resolution ?? "");
   const [rootCause, setRootCause] = useState(initial.rootCause ?? "");
@@ -120,6 +124,80 @@ export function TicketDetailClient({
     }
   }
 
+  async function uploadPhotos(
+    files: FileList | null,
+    kind: "request" | "work",
+  ) {
+    if (!files?.length) return;
+    const current =
+      kind === "work"
+        ? (ticket.workPhotoUrls ?? [])
+        : (ticket.photoUrls ?? []);
+    const remaining = MAX_PHOTOS - current.length;
+    if (remaining <= 0) {
+      setSaveError(
+        `Maksimal ${MAX_PHOTOS} foto ${kind === "work" ? "pekerjaan" : "laporan"}`,
+      );
+      return;
+    }
+    setUploading(true);
+    setSaveError(null);
+    try {
+      const fd = new FormData();
+      fd.append("ticketId", ticket.id);
+      fd.append("kind", kind);
+      for (const f of Array.from(files).slice(0, remaining)) {
+        fd.append("photos", f);
+      }
+      const res = await fetch("/api/tickets/photos", {
+        method: "POST",
+        body: fd,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSaveError(
+          typeof data.error === "string" ? data.error : "Gagal unggah foto",
+        );
+        return;
+      }
+      if (data.ticket) setTicket(data.ticket);
+      router.refresh();
+    } catch {
+      setSaveError("Koneksi gagal — coba lagi");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function removePhoto(url: string, kind: "request" | "work") {
+    if (!confirm("Hapus foto ini?")) return;
+    setUploading(true);
+    setSaveError(null);
+    try {
+      const fd = new FormData();
+      fd.append("ticketId", ticket.id);
+      fd.append("kind", kind);
+      fd.append("removeUrl", url);
+      const res = await fetch("/api/tickets/photos", {
+        method: "POST",
+        body: fd,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSaveError(
+          typeof data.error === "string" ? data.error : "Gagal hapus foto",
+        );
+        return;
+      }
+      if (data.ticket) setTicket(data.ticket);
+      router.refresh();
+    } catch {
+      setSaveError("Koneksi gagal — coba lagi");
+    } finally {
+      setUploading(false);
+    }
+  }
+
   return (
     <div className="grid gap-5 lg:grid-cols-[1.4fr_0.9fr]">
       <section className="panel p-4 sm:p-5 md:p-6">
@@ -158,6 +236,67 @@ export function TicketDetailClient({
         <p className="mt-5 whitespace-pre-wrap text-sm leading-relaxed text-ink">
           {ticket.description || "Tidak ada deskripsi."}
         </p>
+
+        <div className="mt-5 space-y-2">
+          <p className="text-xs font-medium tracking-wide text-ink-muted uppercase">
+            Foto laporan
+            {ticket.photoUrls?.length
+              ? ` (${ticket.photoUrls.length}/${MAX_PHOTOS})`
+              : ""}
+          </p>
+          <p className="text-[11px] text-ink-muted">
+            Foto dari pemohon saat buat tiket (terpisah dari foto pekerjaan IT).
+          </p>
+          {ticket.photoUrls?.length ? (
+            <ActivityPhotoSlider
+              photos={ticket.photoUrls}
+              onRemove={
+                canAssign ? (url) => void removePhoto(url, "request") : undefined
+              }
+            />
+          ) : (
+            <p className="text-xs text-ink-muted">Belum ada foto laporan.</p>
+          )}
+          {(ticket.photoUrls?.length ?? 0) < MAX_PHOTOS ? (
+            <label className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-line bg-bg px-4 py-4 text-center transition hover:border-brand">
+              <span className="text-sm font-medium text-ink">
+                {uploading
+                  ? "Mengunggah..."
+                  : ticket.photoUrls?.length
+                    ? "Tambah foto laporan"
+                    : "Unggah foto laporan"}
+              </span>
+              <span className="text-[11px] text-ink-muted">
+                Bisa pilih beberapa sekaligus · JPG/PNG/WebP/GIF · max 5MB ·
+                sisa {MAX_PHOTOS - (ticket.photoUrls?.length ?? 0)} slot
+              </span>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                multiple
+                disabled={uploading}
+                className="sr-only"
+                onChange={(e) => {
+                  void uploadPhotos(e.target.files, "request");
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          ) : (
+            <p className="text-[11px] text-ink-muted">
+              Sudah mencapai batas {MAX_PHOTOS} foto laporan.
+            </p>
+          )}
+        </div>
+
+        {!canAssign && (ticket.workPhotoUrls?.length ?? 0) > 0 ? (
+          <div className="mt-5 space-y-2">
+            <p className="text-xs font-medium tracking-wide text-ink-muted uppercase">
+              Foto pekerjaan ({ticket.workPhotoUrls.length})
+            </p>
+            <ActivityPhotoSlider photos={ticket.workPhotoUrls} />
+          </div>
+        ) : null}
 
         {related ? (
           <div className="mt-4 rounded-xl border border-danger/20 bg-danger-soft/50 px-4 py-3 text-sm">
@@ -211,9 +350,62 @@ export function TicketDetailClient({
               Update tiket
             </h2>
             <p className="text-xs text-ink-muted">
-              Proses IT — assign, prioritas, status, dan resolusi. Penilaian
-              kepuasan user ada di menu Nilai Hasil Kerja.
+              Proses IT — assign, prioritas, status, resolusi, dan foto
+              pekerjaan. Penilaian kepuasan user ada di menu Nilai Hasil Kerja.
             </p>
+
+            <div className="space-y-2 rounded-xl border border-line bg-bg px-3 py-3">
+              <p className="text-xs font-medium tracking-wide text-ink-muted uppercase">
+                Foto pekerjaan
+                {ticket.workPhotoUrls?.length
+                  ? ` (${ticket.workPhotoUrls.length}/${MAX_PHOTOS})`
+                  : ""}
+              </p>
+              <p className="text-[11px] text-ink-muted">
+                Dokumentasi IT saat dikerjakan — default kosong, tidak
+                terhubung dengan foto laporan pemohon.
+              </p>
+              {ticket.workPhotoUrls?.length ? (
+                <ActivityPhotoSlider
+                  photos={ticket.workPhotoUrls}
+                  compact
+                  onRemove={(url) => void removePhoto(url, "work")}
+                />
+              ) : (
+                <p className="text-xs text-ink-muted">
+                  Belum ada foto pekerjaan.
+                </p>
+              )}
+              {(ticket.workPhotoUrls?.length ?? 0) < MAX_PHOTOS ? (
+                <label className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-line bg-bg-elevated px-3 py-4 text-center transition hover:border-brand">
+                  <span className="text-sm font-medium text-ink">
+                    {uploading
+                      ? "Mengunggah..."
+                      : "Pilih / unggah foto pekerjaan"}
+                  </span>
+                  <span className="text-[11px] text-ink-muted">
+                    Multi-select · JPG, PNG, WebP, GIF · max 5MB · maks{" "}
+                    {MAX_PHOTOS} foto
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    multiple
+                    disabled={uploading}
+                    className="sr-only"
+                    onChange={(e) => {
+                      void uploadPhotos(e.target.files, "work");
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              ) : (
+                <p className="text-[11px] text-ink-muted">
+                  Batas {MAX_PHOTOS} foto pekerjaan tercapai — hapus foto lama
+                  untuk menambah baru.
+                </p>
+              )}
+            </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block text-sm">
@@ -387,6 +579,19 @@ export function TicketDetailClient({
             </div>
           </div>
         )}
+
+        <div className="mt-6 flex flex-col gap-2 border-t border-line pt-5 sm:flex-row sm:items-center sm:justify-end">
+          <button
+            type="button"
+            onClick={() => {
+              router.push("/tickets");
+              router.refresh();
+            }}
+            className="w-full rounded-xl border border-line bg-bg-elevated px-4 py-2.5 text-sm font-medium text-ink transition hover:border-brand hover:text-brand sm:w-auto"
+          >
+            Tutup — kembali ke antrian
+          </button>
+        </div>
       </section>
 
       <section className="panel p-5 md:p-6">

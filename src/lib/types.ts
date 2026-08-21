@@ -376,6 +376,19 @@ export interface Session {
   expiresAt: string;
 }
 
+export type PasswordResetStatus = "pending" | "completed" | "rejected";
+
+/** Permintaan reset password — hanya Admin/IT yang boleh menyelesaikan */
+export interface PasswordResetRequest {
+  id: string;
+  userId: string;
+  username: string;
+  status: PasswordResetStatus;
+  requestedAt: string;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+}
+
 /** Handler tiket = anggota IT aktif (kompatibel dengan UI lama) */
 export interface Agent {
   id: string;
@@ -426,6 +439,10 @@ export interface Ticket {
   resolution: string | null;
   scheduledStart: string | null;
   scheduledEnd: string | null;
+  /** URL publik foto laporan saat buat tiket */
+  photoUrls: string[];
+  /** URL publik foto pekerjaan (IT) — terpisah dari foto laporan */
+  workPhotoUrls: string[];
   events: TicketEvent[];
 }
 

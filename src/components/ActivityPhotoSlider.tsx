@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 export function ActivityPhotoSlider({
   photos,
@@ -13,10 +14,15 @@ export function ActivityPhotoSlider({
 }) {
   const [index, setIndex] = useState(0);
   const [zoomed, setZoomed] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   const safeIndex =
     photos.length === 0 ? 0 : Math.min(index, photos.length - 1);
   const current = photos[safeIndex] ?? "";
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!zoomed || photos.length === 0) return;
@@ -40,6 +46,69 @@ export function ActivityPhotoSlider({
 
   if (!photos.length) return null;
 
+  const lightbox =
+    zoomed && mounted
+      ? createPortal(
+          <div
+            className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/85 p-3 sm:p-6"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Perbesar foto"
+            onClick={() => setZoomed(false)}
+          >
+            <button
+              type="button"
+              onClick={() => setZoomed(false)}
+              className="absolute top-3 right-3 z-[10000] rounded-xl bg-white px-3 py-2 text-sm font-medium text-ink shadow"
+            >
+              Tutup
+            </button>
+            {photos.length > 1 ? (
+              <>
+                <button
+                  type="button"
+                  aria-label="Foto sebelumnya"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIndex((i) => (i - 1 + photos.length) % photos.length);
+                  }}
+                  className="absolute top-1/2 left-3 z-[10000] flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-brand text-2xl font-bold text-white shadow-lg sm:left-6"
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  aria-label="Foto berikutnya"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIndex((i) => (i + 1) % photos.length);
+                  }}
+                  className="absolute top-1/2 right-3 z-[10000] flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-brand text-2xl font-bold text-white shadow-lg sm:right-6"
+                >
+                  ›
+                </button>
+              </>
+            ) : null}
+            <div
+              className="relative max-h-full max-w-full cursor-zoom-out"
+              onClick={() => setZoomed(false)}
+              title="Klik untuk kembali"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={current}
+                alt={`Foto diperbesar ${safeIndex + 1}`}
+                className="max-h-[90vh] max-w-[min(96vw,1100px)] rounded-lg object-contain shadow-2xl"
+              />
+              <p className="mt-2 text-center text-sm text-white/90">
+                Foto {safeIndex + 1} / {photos.length} · klik foto untuk kembali
+              </p>
+            </div>
+          </div>,
+          document.body,
+        )
+      : null;
+
   return (
     <div className={compact ? "mt-2" : "mt-1"}>
       <div
@@ -56,7 +125,7 @@ export function ActivityPhotoSlider({
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={current}
-            alt={`Foto kegiatan ${safeIndex + 1}`}
+            alt={`Foto ${safeIndex + 1}`}
             className="h-full w-full object-cover"
           />
         </button>
@@ -118,65 +187,7 @@ export function ActivityPhotoSlider({
       <p className="mt-1 text-center text-[11px] text-ink-muted">
         Foto {safeIndex + 1} / {photos.length} · klik foto untuk perbesar
       </p>
-
-      {zoomed ? (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-3 sm:p-6"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Perbesar foto"
-          onClick={() => setZoomed(false)}
-        >
-          <button
-            type="button"
-            onClick={() => setZoomed(false)}
-            className="absolute top-3 right-3 z-[110] rounded-xl bg-white px-3 py-2 text-sm font-medium text-ink shadow"
-          >
-            Tutup
-          </button>
-          {photos.length > 1 ? (
-            <>
-              <button
-                type="button"
-                aria-label="Foto sebelumnya"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIndex((i) => (i - 1 + photos.length) % photos.length);
-                }}
-                className="absolute top-1/2 left-3 z-[110] flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-brand text-2xl font-bold text-white shadow-lg sm:left-6"
-              >
-                ‹
-              </button>
-              <button
-                type="button"
-                aria-label="Foto berikutnya"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIndex((i) => (i + 1) % photos.length);
-                }}
-                className="absolute top-1/2 right-3 z-[110] flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-brand text-2xl font-bold text-white shadow-lg sm:right-6"
-              >
-                ›
-              </button>
-            </>
-          ) : null}
-          <div
-            className="relative max-h-full max-w-full cursor-zoom-out"
-            onClick={() => setZoomed(false)}
-            title="Klik untuk kembali"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={current}
-              alt={`Foto kegiatan diperbesar ${safeIndex + 1}`}
-              className="max-h-[90vh] max-w-[min(96vw,1100px)] rounded-lg object-contain shadow-2xl"
-            />
-            <p className="mt-2 text-center text-sm text-white/90">
-              Foto {safeIndex + 1} / {photos.length} · klik foto untuk kembali
-            </p>
-          </div>
-        </div>
-      ) : null}
+      {lightbox}
     </div>
   );
 }

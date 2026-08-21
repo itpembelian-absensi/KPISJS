@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ActivityPhotoSlider } from "@/components/ActivityPhotoSlider";
 import type {
   Agent,
   Department,
@@ -16,6 +17,8 @@ import {
   PRIORITY_OPTIONS,
   SLA_TARGET_HINT,
 } from "@/lib/sla";
+
+const MAX_PHOTOS = 8;
 
 export function CreateTicketForm({
   agents,
@@ -38,17 +41,58 @@ export function CreateTicketForm({
   const [staffId, setStaffId] = useState(
     defaultStaffId || staffList[0]?.id || "",
   );
+  const [pendingPhotos, setPendingPhotos] = useState<File[]>([]);
+  const [pendingPreview, setPendingPreview] = useState<string[]>([]);
 
-  const selectedStaff = useMemo(
-    () => staffList.find((s) => s.id === staffId) ?? null,
-    [staffList, staffId],
-  );
+  const selectedStaff =
+    staffList.find((s) => s.id === staffId) ?? null;
+  const selectedDept =
+    departments.find((d) => d.id === selectedStaff?.departmentId) ?? null;
 
-  const selectedDept = useMemo(
-    () =>
-      departments.find((d) => d.id === selectedStaff?.departmentId) ?? null,
-    [departments, selectedStaff],
-  );
+  useEffect(() => {
+    return () => {
+      for (const url of pendingPreview) URL.revokeObjectURL(url);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cleanup on unmount only
+  }, []);
+
+  function clearPendingPhotos() {
+    setPendingPreview((prev) => {
+      for (const url of prev) URL.revokeObjectURL(url);
+      return [];
+    });
+    setPendingPhotos([]);
+  }
+
+  function onPickPhotos(files: FileList | null) {
+    if (!files?.length) return;
+    const picked = Array.from(files);
+    setPendingPhotos((prev) => {
+      const next = [...prev, ...picked].slice(0, MAX_PHOTOS);
+      setPendingPreview((old) => {
+        for (const url of old) URL.revokeObjectURL(url);
+        return next.map((f) => URL.createObjectURL(f));
+      });
+      return next;
+    });
+  }
+
+  async function uploadTicketPhotos(ticketId: string, files: File[]) {
+    const fd = new FormData();
+    fd.append("ticketId", ticketId);
+    fd.append("kind", "request");
+    for (const f of files) fd.append("photos", f);
+    const res = await fetch("/api/tickets/photos", {
+      method: "POST",
+      body: fd,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(
+        typeof data.error === "string" ? data.error : "Gagal unggah foto",
+      );
+    }
+  }
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -76,19 +120,42 @@ export function CreateTicketForm({
         : null,
     };
 
-    const res = await fetch("/api/tickets", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json();
-    setLoading(false);
-    if (!res.ok) {
-      setError(data.error || "Gagal membuat tiket");
-      return;
+    try {
+      const res = await fetch("/api/tickets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Gagal membuat tiket");
+        setLoading(false);
+        return;
+      }
+
+      if (pendingPhotos.length > 0) {
+        try {
+          await uploadTicketPhotos(data.ticket.id, pendingPhotos);
+        } catch (err) {
+          setError(
+            err instanceof Error
+              ? `Tiket dibuat, tetapi foto gagal diunggah: ${err.message}`
+              : "Tiket dibuat, tetapi foto gagal diunggah",
+          );
+          setLoading(false);
+          router.push(`/tickets/${data.ticket.id}`);
+          router.refresh();
+          return;
+        }
+      }
+
+      clearPendingPhotos();
+      router.push(`/tickets/${data.ticket.id}`);
+      router.refresh();
+    } catch {
+      setError("Koneksi gagal — coba lagi");
+      setLoading(false);
     }
-    router.push(`/tickets/${data.ticket.id}`);
-    router.refresh();
   }
 
   return (
@@ -117,6 +184,46 @@ export function CreateTicketForm({
             className="mt-1.5 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2.5 outline-none focus:border-brand"
           />
         </label>
+
+        <div className="block space-y-2 md:col-span-2">
+          <span className="text-xs font-medium tracking-wide text-ink-muted uppercase">
+            Foto / lampiran gambar (opsional)
+          </span>
+          <label className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-line bg-bg-elevated px-4 py-6 text-center transition hover:border-brand">
+            <span className="text-sm font-medium text-ink">
+              Pilih / unggah foto laporan
+            </span>
+            <span className="text-[11px] text-ink-muted">
+              Foto masalah saat buat tiket · bisa beberapa · JPG, PNG, WebP, GIF
+              · max 5MB · maks {MAX_PHOTOS} foto
+            </span>
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              multiple
+              className="sr-only"
+              onChange={(e) => {
+                onPickPhotos(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </label>
+          {pendingPreview.length > 0 ? (
+            <div>
+              <p className="text-xs text-ink-muted">
+                Preview ({pendingPreview.length}/{MAX_PHOTOS})
+              </p>
+              <ActivityPhotoSlider photos={pendingPreview} />
+              <button
+                type="button"
+                onClick={clearPendingPhotos}
+                className="mt-1 text-xs text-danger hover:underline"
+              >
+                Buang semua foto
+              </button>
+            </div>
+          ) : null}
+        </div>
 
         <label className="block">
           <span className="text-xs font-medium tracking-wide text-ink-muted uppercase">

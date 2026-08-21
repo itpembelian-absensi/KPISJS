@@ -171,21 +171,49 @@ export const NAV_ENTRIES: NavEntry[] = [
     },
   },
   {
-    type: "link",
-    item: {
-      href: "/tickets",
-      label: "Antrian Tiket",
-      hint: "Queue & assignment",
+    type: "group",
+    group: {
+      id: "antrian",
+      label: "Antrian",
+      hint: "Tiket support & perintah kerja",
       roles: ["admin", "manager", "staff", "it_staff", "assessor"],
+      children: [
+        {
+          href: "/tickets",
+          label: "Antrian Tiket",
+          hint: "Queue & assignment",
+          roles: ["admin", "manager", "staff", "it_staff", "assessor"],
+        },
+        {
+          href: "/work-orders",
+          label: "Antrian Tugas",
+          hint: "Perintah & proses kerja",
+          roles: ["admin", "manager", "it_staff"],
+        },
+      ],
     },
   },
   {
-    type: "link",
-    item: {
-      href: "/tickets/new",
-      label: "Buat Tiket",
-      hint: "Request support baru",
+    type: "group",
+    group: {
+      id: "tiket-perintah",
+      label: "Tiket dan Perintah",
+      hint: "Buat tiket support & perintah kerja",
       roles: ["admin", "manager", "staff", "it_staff", "assessor"],
+      children: [
+        {
+          href: "/tickets/new",
+          label: "Buat Tiket",
+          hint: "Request support baru",
+          roles: ["admin", "manager", "staff", "it_staff", "assessor"],
+        },
+        {
+          href: "/work-orders/new",
+          label: "Buat Perintah",
+          hint: "Tugas project / inovasi / security",
+          roles: ["admin", "manager", "it_staff"],
+        },
+      ],
     },
   },
   {
@@ -216,18 +244,6 @@ export const NAV_ENTRIES: NavEntry[] = [
           label: "KPI Departemen",
           hint: "Fungsi, project, penilaian",
           roles: ["admin", "manager", "staff", "it_staff", "assessor"],
-        },
-        {
-          href: "/work-orders",
-          label: "Antrian Tugas",
-          hint: "Perintah & proses kerja",
-          roles: ["admin", "manager", "it_staff"],
-        },
-        {
-          href: "/work-orders/new",
-          label: "Beri Perintah",
-          hint: "Tugas project / inovasi / security",
-          roles: ["admin", "manager", "it_staff"],
         },
       ],
     },

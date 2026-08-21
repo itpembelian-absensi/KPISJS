@@ -238,6 +238,22 @@ function createSchema(db: Database.Database) {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS password_reset_requests (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      username TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('pending', 'completed', 'rejected')),
+      requested_at TEXT NOT NULL,
+      resolved_at TEXT,
+      resolved_by TEXT,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_password_reset_requests_status
+      ON password_reset_requests(status);
+    CREATE INDEX IF NOT EXISTS idx_password_reset_requests_user
+      ON password_reset_requests(user_id);
+
     CREATE TABLE IF NOT EXISTS tickets (
       id TEXT PRIMARY KEY,
       code TEXT NOT NULL UNIQUE,
@@ -339,6 +355,16 @@ function createSchema(db: Database.Database) {
   }
   if (!names.has("scheduled_end")) {
     db.exec("ALTER TABLE tickets ADD COLUMN scheduled_end TEXT");
+  }
+  if (!names.has("photo_urls_json")) {
+    db.exec(
+      "ALTER TABLE tickets ADD COLUMN photo_urls_json TEXT NOT NULL DEFAULT '[]'",
+    );
+  }
+  if (!names.has("work_photo_urls_json")) {
+    db.exec(
+      "ALTER TABLE tickets ADD COLUMN work_photo_urls_json TEXT NOT NULL DEFAULT '[]'",
+    );
   }
 
   // Migrasi foto kegiatan (JSON array URL) + frekuensi

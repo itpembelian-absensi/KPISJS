@@ -4,6 +4,7 @@ import {
   deleteUser,
   getUserBySessionToken,
   listDepartments,
+  listPendingPasswordResets,
   listStaff,
   listUsers,
   upsertUser,
@@ -36,6 +37,7 @@ export async function GET(req: NextRequest) {
     staff: listStaff(true),
     departments: listDepartments(true),
     menuCatalog: listMenuCatalog(),
+    passwordResetRequests: listPendingPasswordResets(),
   });
 }
 
@@ -59,6 +61,7 @@ export async function POST(req: NextRequest) {
     allowedMenus: parseStringArray(body.allowedMenus),
     departmentScope: parseStringArray(body.departmentScope),
     assessmentStaffIds: parseStringArray(body.assessmentStaffIds),
+    actorId: gate.user?.id,
   });
   if ("error" in result) {
     return NextResponse.json({ error: result.error }, { status: 400 });

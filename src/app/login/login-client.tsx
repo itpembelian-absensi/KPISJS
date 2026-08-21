@@ -2,7 +2,6 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useState } from "react";
-import { ROLE_LABEL } from "@/lib/types";
 
 function LoginForm() {
   const router = useRouter();
@@ -46,7 +45,7 @@ function LoginForm() {
           KPI & IT Helpdesk
         </h1>
         <p className="mt-2 text-sm text-ink-muted">
-          Masuk dengan akun sesuai role: Admin, Manager, Staf, atau IT Staf.
+          Masuk dengan akun yang diberikan Administrator.
         </p>
 
         <form onSubmit={onSubmit} className="mt-6 space-y-4">
@@ -59,7 +58,7 @@ function LoginForm() {
               required
               autoComplete="username"
               className="mt-1.5 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2.5 outline-none focus:border-brand"
-              placeholder="admin"
+              placeholder="username"
             />
           </label>
           <label className="block text-sm">
@@ -95,16 +94,6 @@ function LoginForm() {
             </a>
           </p>
         </form>
-
-        <div className="mt-6 rounded-xl bg-bg px-3 py-3 text-xs text-ink-muted">
-          <p className="font-medium text-ink">Akun demo</p>
-          <ul className="mono mt-2 space-y-1">
-            <li>admin / admin123 — {ROLE_LABEL.admin}</li>
-            <li>manager / manager123 — {ROLE_LABEL.manager}</li>
-            <li>staff / staff123 — {ROLE_LABEL.staff}</li>
-            <li>itstaff / itstaff123 — {ROLE_LABEL.it_staff}</li>
-          </ul>
-        </div>
       </div>
     </div>
   );

@@ -15,14 +15,11 @@ File database: `data/itsupport.db` (otomatis dibuat + di-seed saat pertama dijal
 
 Schema & migrasi dikelola secara otomatis di `src/lib/db.ts` — lihat [AGENTS.md](AGENTS.md) untuk detail pattern migrasi.
 
-## Akun Demo
+## Login
 
-| Username | Password | Role |
-|----------|----------|------|
-| admin | admin123 | Admin |
-| manager | manager123 | Manager |
-| staff | staff123 | Staf |
-| itstaff | itstaff123 | IT Staf |
+Akun dibuat oleh Admin di **Master Data → User & Role**. Jika lupa password, ajukan permintaan di halaman login; password baru hanya bisa diatur oleh Admin atau IT Staf.
+
+Saat database masih kosong, sistem men-seed akun awal. Ganti password segera setelah login pertama.
 
 ## Fitur
 

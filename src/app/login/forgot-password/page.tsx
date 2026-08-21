@@ -1,11 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
 export default function ForgotPasswordPage() {
-  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -16,31 +14,21 @@ export default function ForgotPasswordPage() {
     setError(null);
     setSuccess(null);
     const fd = new FormData(e.currentTarget);
-    const newPassword = String(fd.get("newPassword") || "");
-    const confirmPassword = String(fd.get("confirmPassword") || "");
-    if (newPassword !== confirmPassword) {
-      setLoading(false);
-      setError("Konfirmasi password tidak sama");
-      return;
-    }
 
     const res = await fetch("/api/auth/forgot-password", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         username: fd.get("username"),
-        employeeCode: fd.get("employeeCode"),
-        newPassword,
       }),
     });
     const data = await res.json().catch(() => ({}));
     setLoading(false);
     if (!res.ok) {
-      setError(data.error || "Gagal reset password");
+      setError(data.error || "Gagal mengirim permintaan");
       return;
     }
-    setSuccess(data.message || "Password berhasil diubah");
-    window.setTimeout(() => router.push("/login"), 1600);
+    setSuccess(data.message || "Permintaan sudah dikirim ke Administrator.");
   }
 
   return (
@@ -56,8 +44,8 @@ export default function ForgotPasswordPage() {
           Lupa password
         </h1>
         <p className="mt-2 text-sm text-ink-muted">
-          Verifikasi dengan username dan kode karyawan (master staf), lalu
-          buat password baru.
+          Ajukan permintaan reset. Password tidak bisa diubah sendiri — Admin
+          atau IT Staf yang akan mengatur password baru.
         </p>
 
         <form onSubmit={onSubmit} className="mt-6 space-y-4">
@@ -69,48 +57,9 @@ export default function ForgotPasswordPage() {
               name="username"
               required
               autoComplete="username"
-              className="mt-1.5 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2.5 outline-none focus:border-brand"
+              disabled={Boolean(success)}
+              className="mt-1.5 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2.5 outline-none focus:border-brand disabled:opacity-60"
               placeholder="username login"
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="text-xs tracking-wide text-ink-muted uppercase">
-              Kode karyawan
-            </span>
-            <input
-              name="employeeCode"
-              required
-              autoComplete="off"
-              className="mt-1.5 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2.5 outline-none focus:border-brand"
-              placeholder="contoh: EMP-001"
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="text-xs tracking-wide text-ink-muted uppercase">
-              Password baru
-            </span>
-            <input
-              name="newPassword"
-              type="password"
-              required
-              minLength={6}
-              autoComplete="new-password"
-              className="mt-1.5 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2.5 outline-none focus:border-brand"
-              placeholder="minimal 6 karakter"
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="text-xs tracking-wide text-ink-muted uppercase">
-              Ulangi password baru
-            </span>
-            <input
-              name="confirmPassword"
-              type="password"
-              required
-              minLength={6}
-              autoComplete="new-password"
-              className="mt-1.5 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2.5 outline-none focus:border-brand"
-              placeholder="ulangi password"
             />
           </label>
 
@@ -122,7 +71,7 @@ export default function ForgotPasswordPage() {
             disabled={loading || Boolean(success)}
             className="w-full rounded-xl bg-brand py-2.5 text-sm font-medium text-white hover:bg-brand-deep disabled:opacity-60"
           >
-            {loading ? "Menyimpan..." : "Simpan password baru"}
+            {loading ? "Mengirim..." : "Ajukan reset ke Admin"}
           </button>
         </form>
 
@@ -135,9 +84,8 @@ export default function ForgotPasswordPage() {
         <div className="mt-5 rounded-xl bg-bg px-3 py-3 text-xs text-ink-muted">
           <p className="font-medium text-ink">Catatan</p>
           <p className="mt-1 leading-relaxed">
-            Kode karyawan harus sama dengan master staf yang terhubung ke akun
-            Anda. Jika akun belum terhubung staf, minta Admin reset lewat{" "}
-            <strong>Master Data → User &amp; Role</strong>.
+            Setelah Admin mengatur password baru, Anda bisa masuk kembali.
+            Hubungi IT jika permintaan belum ditindaklanjuti.
           </p>
         </div>
       </div>

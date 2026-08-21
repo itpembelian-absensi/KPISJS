@@ -9,6 +9,7 @@ import {
 import {
   ROLE_LABEL,
   type Department,
+  type PasswordResetRequest,
   type StaffMember,
   type UserAccount,
   type UserRole,
@@ -22,14 +23,18 @@ export function UserMaster({
   initial,
   staff,
   departments,
+  initialResets,
 }: {
   initial: UserRow[];
   staff: StaffMember[];
   departments: Department[];
+  initialResets: PasswordResetRequest[];
 }) {
   const router = useRouter();
   const [items, setItems] = useState(initial);
+  const [pendingResets, setPendingResets] = useState(initialResets);
   const [editing, setEditing] = useState<UserRow | null>(null);
+  const [passwordRequired, setPasswordRequired] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -50,10 +55,11 @@ export function UserMaster({
     return staff.find((s) => s.id === id)?.name ?? "—";
   }
 
-  function startEdit(u: UserRow | null) {
+  function startEdit(u: UserRow | null, opts?: { requirePassword?: boolean }) {
     setEditing(u);
     setError(null);
     setMessage(null);
+    setPasswordRequired(Boolean(opts?.requirePassword));
     const nextRole = u?.role ?? "staff";
     setRole(nextRole);
     setLinkedStaffId(u?.staffId ?? "");
@@ -102,8 +108,50 @@ export function UserMaster({
     }
     setItems((prev) => prev.filter((x) => x.id !== u.id));
     if (editing?.id === u.id) startEdit(null);
+    setPendingResets((prev) => prev.filter((r) => r.userId !== u.id));
     setMessage(`User "${u.username}" berhasil dihapus`);
     router.refresh();
+  }
+
+  async function rejectReset(req: PasswordResetRequest) {
+    const ok = window.confirm(
+      `Tolak permintaan reset untuk "${req.username}"?`,
+    );
+    if (!ok) return;
+    setError(null);
+    setMessage(null);
+    const res = await fetch("/api/master/password-resets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: req.id, action: "reject" }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setError(data.error || "Gagal menolak permintaan");
+      return;
+    }
+    setPendingResets((prev) => prev.filter((r) => r.id !== req.id));
+    if (editing?.id === req.userId) setPasswordRequired(false);
+    setMessage(`Permintaan reset "${req.username}" ditolak`);
+    router.refresh();
+  }
+
+  function startResetFromRequest(req: PasswordResetRequest) {
+    const u = items.find((x) => x.id === req.userId);
+    if (!u) {
+      setError("User tidak ditemukan");
+      return;
+    }
+    startEdit(u, { requirePassword: true });
+  }
+
+  function formatResetAt(iso: string) {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleString("id-ID", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
   }
 
   async function save(e: FormEvent<HTMLFormElement>) {
@@ -129,6 +177,11 @@ export function UserMaster({
       }
       if (scopeMode === "custom" && selectedDepts.length === 0) {
         setError("Pilih minimal satu departemen, atau ganti mode batasan");
+        setSaving(false);
+        return;
+      }
+      if (passwordRequired && !password) {
+        setError("Isi password baru untuk menyelesaikan permintaan reset");
         setSaving(false);
         return;
       }
@@ -161,6 +214,11 @@ export function UserMaster({
         }
         return [...prev, data.user];
       });
+      if (password) {
+        setPendingResets((prev) =>
+          prev.filter((r) => r.userId !== data.user.id),
+        );
+      }
       startEdit(null);
       (e.target as HTMLFormElement).reset();
       router.refresh();
@@ -206,6 +264,49 @@ export function UserMaster({
         <p className="rounded-xl bg-ok-soft px-4 py-3 text-sm text-ok">{message}</p>
       ) : null}
 
+      {pendingResets.length > 0 ? (
+        <div className="rounded-xl border border-warn/30 bg-warn-soft px-4 py-3">
+          <p className="text-sm font-medium text-warn">
+            Permintaan reset password ({pendingResets.length})
+          </p>
+          <p className="mt-1 text-xs text-ink-muted">
+            User tidak bisa mengubah password sendiri. Atur password baru, lalu
+            sampaikan ke yang bersangkutan.
+          </p>
+          <div className="mt-3 space-y-2">
+            {pendingResets.map((r) => (
+              <div
+                key={r.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-bg px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="mono text-sm font-medium">{r.username}</p>
+                  <p className="text-[11px] text-ink-muted">
+                    Diajukan {formatResetAt(r.requestedAt)}
+                  </p>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => startResetFromRequest(r)}
+                    className="rounded-lg bg-brand px-2.5 py-1 text-xs font-medium text-white"
+                  >
+                    Atur password
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => rejectReset(r)}
+                    className="rounded-lg border border-line px-2.5 py-1 text-xs"
+                  >
+                    Tolak
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       <div className="grid gap-5 lg:grid-cols-[1.1fr_1fr]">
         <form
           key={formKey}
@@ -215,6 +316,11 @@ export function UserMaster({
           <h2 className="font-semibold">
             {editing ? "Edit user, menu & batasan" : "Tambah user login"}
           </h2>
+          {passwordRequired ? (
+            <p className="rounded-lg bg-warn-soft px-3 py-2 text-xs text-warn">
+              Permintaan reset aktif. Isi password baru lalu simpan.
+            </p>
+          ) : null}
           <label className="block text-sm">
             <span className="text-xs text-ink-muted">Username</span>
             <input
@@ -226,12 +332,16 @@ export function UserMaster({
           </label>
           <label className="block text-sm">
             <span className="text-xs text-ink-muted">
-              Password {editing ? "(kosongkan jika tidak diganti)" : ""}
+              Password{" "}
+              {editing && !passwordRequired
+                ? "(kosongkan jika tidak diganti)"
+                : ""}
             </span>
             <input
               name="password"
               type="password"
-              required={!editing}
+              required={!editing || passwordRequired}
+              minLength={6}
               className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
             />
           </label>
@@ -519,6 +629,11 @@ export function UserMaster({
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
+                {pendingResets.some((r) => r.userId === u.id) ? (
+                  <span className="rounded-md bg-warn-soft px-2 py-0.5 text-[11px] text-warn">
+                    Minta reset
+                  </span>
+                ) : null}
                 <span
                   className={`rounded-md px-2 py-0.5 text-[11px] ${
                     u.active ? "bg-ok-soft text-ok" : "bg-line text-ink-muted"

@@ -9,6 +9,11 @@ import { detectRepeat } from "./kpi";
 import { templateForDepartmentCode } from "./kpi-templates";
 import { PRIORITY_LABEL, slaDeadline } from "./sla";
 import {
+  deleteTicketUploadFolder,
+  MAX_TICKET_PHOTOS,
+  type TicketPhotoKind,
+} from "./ticket-photos";
+import {
   createSessionToken,
   hashPassword,
   hashToken,
@@ -30,6 +35,8 @@ import type {
   UserAccount,
   UserRole,
   KpiFunction,
+  PasswordResetRequest,
+  PasswordResetStatus,
 } from "./types";
 import { USER_ROLES } from "./types";
 
@@ -83,6 +90,28 @@ type UserRow = {
   updated_at: string;
 };
 
+type PasswordResetRow = {
+  id: string;
+  user_id: string;
+  username: string;
+  status: PasswordResetStatus;
+  requested_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+};
+
+function mapPasswordReset(row: PasswordResetRow): PasswordResetRequest {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    username: row.username,
+    status: row.status,
+    requestedAt: row.requested_at,
+    resolvedAt: row.resolved_at,
+    resolvedBy: row.resolved_by,
+  };
+}
+
 function parseJsonStringArray(raw: string | null | undefined): string[] | null {
   if (raw == null || raw === "") return null;
   try {
@@ -118,8 +147,21 @@ type TicketRow = {
   resolution: string | null;
   scheduled_start: string | null;
   scheduled_end: string | null;
+  photo_urls_json?: string | null;
+  work_photo_urls_json?: string | null;
   events_json: string;
 };
+
+function parseTicketPhotoUrls(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((x): x is string => typeof x === "string" && x.length > 0);
+  } catch {
+    return [];
+  }
+}
 
 function mapDepartment(row: DeptRow): Department {
   return {
@@ -254,6 +296,8 @@ function mapTicket(row: TicketRow): Ticket {
     resolution: row.resolution,
     scheduledStart: row.scheduled_start ?? null,
     scheduledEnd: row.scheduled_end ?? null,
+    photoUrls: parseTicketPhotoUrls(row.photo_urls_json),
+    workPhotoUrls: parseTicketPhotoUrls(row.work_photo_urls_json),
     events,
   };
 }
@@ -279,13 +323,13 @@ function insertTicket(ticket: Ticket) {
         requester_name, requester_dept, requester_staff_id, assignee_id,
         created_at, updated_at, first_response_at, resolved_at, closed_at,
         satisfaction, is_repeat, related_ticket_id, root_cause, resolution,
-        scheduled_start, scheduled_end, events_json
+        scheduled_start, scheduled_end, photo_urls_json, work_photo_urls_json, events_json
       ) VALUES (
         @id, @code, @title, @description, @category, @priority, @status,
         @requester_name, @requester_dept, @requester_staff_id, @assignee_id,
         @created_at, @updated_at, @first_response_at, @resolved_at, @closed_at,
         @satisfaction, @is_repeat, @related_ticket_id, @root_cause, @resolution,
-        @scheduled_start, @scheduled_end, @events_json
+        @scheduled_start, @scheduled_end, @photo_urls_json, @work_photo_urls_json, @events_json
       )`,
     )
     .run({
@@ -312,6 +356,8 @@ function insertTicket(ticket: Ticket) {
       resolution: ticket.resolution,
       scheduled_start: ticket.scheduledStart,
       scheduled_end: ticket.scheduledEnd,
+      photo_urls_json: JSON.stringify(ticket.photoUrls ?? []),
+      work_photo_urls_json: JSON.stringify(ticket.workPhotoUrls ?? []),
       events_json: JSON.stringify(ticket.events),
     });
 }
@@ -340,6 +386,8 @@ function updateTicketRow(ticket: Ticket) {
         resolution = @resolution,
         scheduled_start = @scheduled_start,
         scheduled_end = @scheduled_end,
+        photo_urls_json = @photo_urls_json,
+        work_photo_urls_json = @work_photo_urls_json,
         events_json = @events_json
       WHERE id = @id`,
     )
@@ -365,6 +413,8 @@ function updateTicketRow(ticket: Ticket) {
       resolution: ticket.resolution,
       scheduled_start: ticket.scheduledStart,
       scheduled_end: ticket.scheduledEnd,
+      photo_urls_json: JSON.stringify(ticket.photoUrls ?? []),
+      work_photo_urls_json: JSON.stringify(ticket.workPhotoUrls ?? []),
       events_json: JSON.stringify(ticket.events),
     });
 }
@@ -740,6 +790,8 @@ function buildSeedData(): AppData {
       resolution: null,
       scheduledStart: null,
       scheduledEnd: null,
+      photoUrls: [],
+      workPhotoUrls: [],
       events: [
         mkEvent("created", "Tiket dibuat", hoursAgo(3)),
         mkEvent("assigned", "Ditugaskan ke Budi Santoso", hoursAgo(2.5), agents[1]),
@@ -770,6 +822,8 @@ function buildSeedData(): AppData {
       resolution: null,
       scheduledStart: null,
       scheduledEnd: null,
+      photoUrls: [],
+      workPhotoUrls: [],
       events: [mkEvent("created", "Tiket dibuat — menunggu antrian", hoursAgo(1))],
     },
     {
@@ -796,6 +850,8 @@ function buildSeedData(): AppData {
       resolution: "Kabel diganti, switch di-reboot, koneksi normal.",
       scheduledStart: null,
       scheduledEnd: null,
+      photoUrls: [],
+      workPhotoUrls: [],
       events: [
         mkEvent("created", "Tiket dibuat", hoursAgo(6)),
         mkEvent("assigned", "Ditugaskan ke Siti Rahayu", hoursAgo(5.8), agents[2]),
@@ -828,6 +884,8 @@ function buildSeedData(): AppData {
       resolution: "Bersihkan roller; rekomendasi ganti sparepart.",
       scheduledStart: null,
       scheduledEnd: null,
+      photoUrls: [],
+      workPhotoUrls: [],
       events: [
         mkEvent("created", "Tiket dibuat (indikasi repeat issue)", hoursAgo(48)),
         mkEvent("assigned", "Ditugaskan ke Budi Santoso", hoursAgo(47), agents[1]),
@@ -859,6 +917,8 @@ function buildSeedData(): AppData {
       resolution: "Email, ERP, WiFi, fingerprint dibuat H+0.",
       scheduledStart: null,
       scheduledEnd: null,
+      photoUrls: [],
+      workPhotoUrls: [],
       events: [
         mkEvent("created", "Tiket dibuat", hoursAgo(30)),
         mkEvent("assigned", "Ditugaskan ke Siti Rahayu", hoursAgo(29.5), agents[2]),
@@ -889,6 +949,8 @@ function buildSeedData(): AppData {
       resolution: null,
       scheduledStart: null,
       scheduledEnd: null,
+      photoUrls: [],
+      workPhotoUrls: [],
       events: [
         mkEvent("created", "Tiket dibuat", hoursAgo(20)),
         mkEvent("assigned", "Ditugaskan ke Budi Santoso", hoursAgo(19), agents[1]),
@@ -919,6 +981,8 @@ function buildSeedData(): AppData {
       resolution: "Renew cert + update config client.",
       scheduledStart: null,
       scheduledEnd: null,
+      photoUrls: [],
+      workPhotoUrls: [],
       events: [
         mkEvent("created", "Tiket dibuat", hoursAgo(72)),
         mkEvent("assigned", "Ditugaskan ke Andi Wijaya", hoursAgo(71), agents[0]),
@@ -949,6 +1013,8 @@ function buildSeedData(): AppData {
       resolution: null,
       scheduledStart: null,
       scheduledEnd: null,
+      photoUrls: [],
+      workPhotoUrls: [],
       events: [mkEvent("created", "Tiket dibuat — antrian baru", hoursAgo(0.5))],
     },
   ];
@@ -1334,66 +1400,97 @@ export function login(
   return { token, user: sessionUser };
 }
 
-/**
- * Reset password mandiri: username + kode karyawan (staf yang terhubung akun).
- * Akun tanpa master staf harus minta Admin.
- */
-export function resetPasswordWithStaffCode(input: {
-  username: string;
-  employeeCode: string;
-  newPassword: string;
-}): { ok: true } | { error: string } {
-  ensureDb();
-  const username = input.username.trim().toLowerCase();
-  const employeeCode = input.employeeCode.trim();
-  const newPassword = input.newPassword;
+const RESET_SUCCESS_MESSAGE =
+  "Jika akun terdaftar, permintaan sudah dikirim ke Administrator. Password baru akan diatur oleh Admin atau IT Staf.";
 
+/**
+ * Ajukan reset password. Tidak mengubah password.
+ * Pesan sukses sengaja sama meski username tidak ada (anti enumerasi).
+ */
+export function requestPasswordReset(
+  usernameRaw: string,
+): { ok: true; message: string } | { error: string } {
+  ensureDb();
+  const username = usernameRaw.trim().toLowerCase();
   if (!username) return { error: "Username wajib diisi" };
-  if (!employeeCode) return { error: "Kode karyawan wajib diisi" };
-  if (newPassword.length < 6) {
-    return { error: "Password baru minimal 6 karakter" };
-  }
 
   const row = getDb()
     .prepare("SELECT * FROM users WHERE lower(username) = lower(?)")
     .get(username) as UserRow | undefined;
   if (!row || !intToBool(row.active)) {
-    return {
-      error:
-        "Data tidak cocok. Periksa username & kode karyawan, atau hubungi Admin.",
-    };
-  }
-
-  const user = mapUser(row);
-  if (!user.staffId) {
-    return {
-      error:
-        "Akun ini belum terhubung master staf. Hubungi Admin untuk reset password.",
-    };
-  }
-
-  const staff = listStaff().find((s) => s.id === user.staffId);
-  if (
-    !staff ||
-    !staff.active ||
-    staff.employeeCode.trim().toLowerCase() !== employeeCode.toLowerCase()
-  ) {
-    return {
-      error:
-        "Data tidak cocok. Periksa username & kode karyawan, atau hubungi Admin.",
-    };
+    return { ok: true, message: RESET_SUCCESS_MESSAGE };
   }
 
   const now = new Date().toISOString();
+  const existing = getDb()
+    .prepare(
+      `SELECT * FROM password_reset_requests
+       WHERE user_id = ? AND status = 'pending'`,
+    )
+    .get(row.id) as PasswordResetRow | undefined;
+
+  if (existing) {
+    getDb()
+      .prepare(
+        `UPDATE password_reset_requests SET requested_at = ?, username = ? WHERE id = ?`,
+      )
+      .run(now, row.username, existing.id);
+    return { ok: true, message: RESET_SUCCESS_MESSAGE };
+  }
+
   getDb()
     .prepare(
-      `UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`,
+      `INSERT INTO password_reset_requests (
+        id, user_id, username, status, requested_at, resolved_at, resolved_by
+      ) VALUES (?, ?, ?, 'pending', ?, NULL, NULL)`,
     )
-    .run(hashPassword(newPassword), now, user.id);
+    .run(randomUUID(), row.id, row.username, now);
 
-  // Invalidate semua sesi aktif agar wajib login ulang
-  getDb().prepare("DELETE FROM sessions WHERE user_id = ?").run(user.id);
+  return { ok: true, message: RESET_SUCCESS_MESSAGE };
+}
 
+export function listPendingPasswordResets(): PasswordResetRequest[] {
+  ensureDb();
+  return (
+    getDb()
+      .prepare(
+        `SELECT * FROM password_reset_requests
+         WHERE status = 'pending'
+         ORDER BY requested_at DESC`,
+      )
+      .all() as PasswordResetRow[]
+  ).map(mapPasswordReset);
+}
+
+function completePendingPasswordResets(userId: string, actorId?: string) {
+  getDb()
+    .prepare(
+      `UPDATE password_reset_requests
+       SET status = 'completed', resolved_at = ?, resolved_by = ?
+       WHERE user_id = ? AND status = 'pending'`,
+    )
+    .run(new Date().toISOString(), actorId ?? null, userId);
+}
+
+export function rejectPasswordResetRequest(
+  id: string,
+  actorId: string,
+): { ok: true } | { error: string } {
+  ensureDb();
+  const row = getDb()
+    .prepare("SELECT * FROM password_reset_requests WHERE id = ?")
+    .get(id) as PasswordResetRow | undefined;
+  if (!row) return { error: "Permintaan tidak ditemukan" };
+  if (row.status !== "pending") {
+    return { error: "Permintaan ini sudah diselesaikan" };
+  }
+  getDb()
+    .prepare(
+      `UPDATE password_reset_requests
+       SET status = 'rejected', resolved_at = ?, resolved_by = ?
+       WHERE id = ?`,
+    )
+    .run(new Date().toISOString(), actorId, id);
   return { ok: true };
 }
 
@@ -1771,12 +1868,17 @@ export function upsertUser(input: {
   departmentScope?: string[] | null;
   /** Staf dept lain yang boleh dinilai (manager/penilai); [] = hanya dept sendiri */
   assessmentStaffIds?: string[] | null;
+  /** User yang sedang login (untuk audit reset password) */
+  actorId?: string;
 }): Omit<UserAccount, "passwordHash"> | { error: string } {
   ensureDb();
   const username = input.username.trim().toLowerCase();
   if (!username) return { error: "Username wajib diisi" };
   if (!USER_ROLES.includes(input.role)) {
     return { error: "Role tidak valid" };
+  }
+  if (input.password != null && input.password !== "" && input.password.length < 6) {
+    return { error: "Password minimal 6 karakter" };
   }
 
   const duplicate = getDb()
@@ -1835,6 +1937,13 @@ export function upsertUser(input: {
         input.password ? hashPassword(input.password) : existing.password_hash,
         input.id,
       );
+
+    if (input.password) {
+      completePendingPasswordResets(input.id, input.actorId);
+      if (input.actorId !== input.id) {
+        getDb().prepare("DELETE FROM sessions WHERE user_id = ?").run(input.id);
+      }
+    }
 
     const updated = mapUser(
       getDb().prepare("SELECT * FROM users WHERE id = ?").get(input.id) as UserRow,
@@ -2050,11 +2159,57 @@ export function createTicket(input: {
     resolution: null,
     scheduledStart: null,
     scheduledEnd: null,
+    photoUrls: [],
+    workPhotoUrls: [],
     events,
   };
 
   insertTicket(ticket);
   bumpTicketNumber(num);
+  return ticket;
+}
+
+export function appendTicketPhotos(
+  ticketId: string,
+  urls: string[],
+  kind: TicketPhotoKind = "request",
+  maxTotal = MAX_TICKET_PHOTOS,
+): Ticket | { error: string } {
+  ensureDb();
+  const ticket = getTicket(ticketId);
+  if (!ticket) return { error: "Tiket tidak ditemukan" };
+  const current =
+    kind === "work" ? ticket.workPhotoUrls : ticket.photoUrls;
+  if (current.length + urls.length > maxTotal) {
+    return {
+      error: `Maksimal ${maxTotal} foto ${kind === "work" ? "pekerjaan" : "laporan"} (sudah ${current.length})`,
+    };
+  }
+  if (kind === "work") {
+    ticket.workPhotoUrls = [...current, ...urls];
+  } else {
+    ticket.photoUrls = [...current, ...urls];
+  }
+  ticket.updatedAt = new Date().toISOString();
+  updateTicketRow(ticket);
+  return ticket;
+}
+
+export function removeTicketPhoto(
+  ticketId: string,
+  url: string,
+  kind: TicketPhotoKind = "request",
+): Ticket | { error: string } {
+  ensureDb();
+  const ticket = getTicket(ticketId);
+  if (!ticket) return { error: "Tiket tidak ditemukan" };
+  if (kind === "work") {
+    ticket.workPhotoUrls = ticket.workPhotoUrls.filter((u) => u !== url);
+  } else {
+    ticket.photoUrls = ticket.photoUrls.filter((u) => u !== url);
+  }
+  ticket.updatedAt = new Date().toISOString();
+  updateTicketRow(ticket);
   return ticket;
 }
 
@@ -2218,6 +2373,7 @@ export function deleteTicket(id: string): { ok: true } | { error: string } {
     )
     .run(existing.id);
   getDb().prepare("DELETE FROM tickets WHERE id = ?").run(existing.id);
+  deleteTicketUploadFolder(existing.id);
   return { ok: true };
 }
 

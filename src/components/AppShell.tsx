@@ -282,6 +282,8 @@ export function AppShell({
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
+    antrian: true,
+    "tiket-perintah": true,
     kpi: true,
     report: true,
     master: true,
