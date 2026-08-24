@@ -106,7 +106,7 @@ function NavLink({
       } ${
         active
           ? "bg-brand-soft text-brand-deep ring-1 ring-brand/25"
-          : "text-ink hover:bg-brand-soft"
+          : "text-ink hover:bg-bg-elevated"
       }`}
     >
       <div
@@ -169,8 +169,8 @@ function SidebarNav({
               aria-expanded={open}
               className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition ${
                 childActive
-                  ? "bg-brand-soft text-brand-deep"
-                  : "text-ink hover:bg-brand-soft"
+                  ? "text-brand-deep"
+                  : "text-ink hover:bg-bg-elevated"
               }`}
             >
               <FolderIcon
@@ -211,8 +211,8 @@ function SidebarNav({
                           aria-expanded={subOpen}
                           className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition ${
                             subActive
-                              ? "bg-brand-soft/70 text-brand-deep"
-                              : "text-ink hover:bg-brand-soft"
+                              ? "text-brand-deep"
+                              : "text-ink hover:bg-bg-elevated"
                           }`}
                         >
                           <FolderIcon
@@ -299,36 +299,25 @@ export function AppShell({
   const navHrefs = flat.map((item) => item.href);
 
   const [menuOpen, setMenuOpen] = useState(false);
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
-    antrian: true,
-    "tiket-perintah": true,
-    kpi: true,
-    report: true,
-    master: true,
-    setting: true,
-  });
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!user) return;
     const entries = navForUser(user);
     const hrefs = flattenNav(entries).map((item) => item.href);
-    setOpenGroups((prev) => {
-      const next = { ...prev };
+    setOpenGroups(() => {
+      const next: Record<string, boolean> = {};
       for (const entry of entries) {
         if (entry.type !== "group") continue;
-        if (groupHasActive(entry.group.children, pathname, hrefs)) {
-          next[entry.group.id] = true;
-        }
+        const active = groupHasActive(entry.group.children, pathname, hrefs);
+        next[entry.group.id] = active;
         for (const child of entry.group.children) {
           if (!isNavSubGroup(child)) continue;
-          if (
-            child.children.some((item) =>
-              isNavActive(pathname, item.href, hrefs),
-            )
-          ) {
-            next[entry.group.id] = true;
-            next[child.id] = true;
-          }
+          const subActive = child.children.some((item) =>
+            isNavActive(pathname, item.href, hrefs),
+          );
+          next[child.id] = subActive;
+          if (subActive) next[entry.group.id] = true;
         }
       }
       return next;
@@ -366,7 +355,22 @@ export function AppShell({
   }
 
   function toggleGroup(id: string) {
-    setOpenGroups((prev) => ({ ...prev, [id]: !prev[id] }));
+    setOpenGroups((prev) => {
+      const willOpen = !prev[id];
+      if (!willOpen) return { ...prev, [id]: false };
+      const topLevelIds = nav
+        .filter((e) => e.type === "group")
+        .map((e) => e.group.id);
+      if (!topLevelIds.includes(id)) {
+        return { ...prev, [id]: true };
+      }
+      const next = { ...prev };
+      for (const tid of topLevelIds) {
+        if (tid !== id) next[tid] = false;
+      }
+      next[id] = true;
+      return next;
+    });
   }
 
   const brandTitle = companyName.trim() || "SJS · IT Systems";

@@ -4,6 +4,7 @@ import { boolToInt, getDb, getMeta, intToBool, setMeta } from "./db";
 import {
   defaultEmployeeExcelPath,
   parseEmployeeExcel,
+  resolveDepartmentFromAttendance,
 } from "./excel-import";
 import { detectRepeat } from "./kpi";
 import { templateForDepartmentCode } from "./kpi-templates";
@@ -1770,6 +1771,67 @@ export function upsertStaff(
   return member;
 }
 
+function findOrCreateDepartment(code: string, name: string): Department {
+  ensureDb();
+  const byCode = getDb()
+    .prepare("SELECT * FROM departments WHERE lower(code) = lower(?)")
+    .get(code) as DeptRow | undefined;
+  if (byCode) return mapDepartment(byCode);
+
+  const byName = getDb()
+    .prepare("SELECT * FROM departments WHERE lower(name) = lower(?)")
+    .get(name) as DeptRow | undefined;
+  if (byName) return mapDepartment(byName);
+
+  const created = upsertDepartment({
+    code,
+    name,
+    description: `Otomatis dari impor absensi — ${name}`,
+    active: true,
+  });
+  if ("error" in created) {
+    throw new Error(created.error);
+  }
+  return created;
+}
+
+/** Tambah staf baru dari baris impor absensi jika NIK belum ada. */
+export function ensureStaffFromAttendanceImport(input: {
+  employeeCode: string;
+  name: string;
+  position?: string;
+  jobLevel?: string;
+  organization?: string;
+}): { staff: StaffMember; created: boolean } {
+  ensureDb();
+  const existing = getDb()
+    .prepare("SELECT * FROM staff WHERE lower(employee_code) = lower(?)")
+    .get(input.employeeCode) as StaffRow | undefined;
+  if (existing) {
+    return { staff: mapStaff(existing), created: false };
+  }
+
+  const depts = listDepartments();
+  const mapped = resolveDepartmentFromAttendance({
+    organization: input.organization ?? "",
+    position: input.position ?? "",
+    existing: depts.map((d) => ({ code: d.code, name: d.name })),
+  });
+  const dept = findOrCreateDepartment(mapped.code, mapped.name);
+  const position = input.jobLevel
+    ? `${input.position || "Staff"} (${input.jobLevel})`
+    : input.position || "Staff";
+
+  const staff = upsertStaff({
+    employeeCode: input.employeeCode,
+    name: input.name,
+    departmentId: dept.id,
+    position,
+    active: true,
+  });
+  return { staff, created: true };
+}
+
 export function deleteStaff(id: string): { ok: true } | { error: string } {
   ensureDb();
   const existing = getDb()
@@ -1845,6 +1907,7 @@ export function importStaffFromExcel(filePath?: string): {
   created: number;
   updated: number;
   departments: number;
+  resigned: number;
   total: number;
   file: string;
 } {
@@ -1854,6 +1917,7 @@ export function importStaffFromExcel(filePath?: string): {
 
   let created = 0;
   let updated = 0;
+  let resigned = 0;
   const deptCodes = new Set<string>();
 
   const tx = getDb().transaction(() => {
@@ -1872,9 +1936,10 @@ export function importStaffFromExcel(filePath?: string): {
         phone: row.phone,
         departmentId: dept.id,
         position: row.position,
-        active: true,
+        active: row.active,
       });
 
+      if (!row.active) resigned += 1;
       if (before) updated += 1;
       else created += 1;
     }
@@ -1886,6 +1951,7 @@ export function importStaffFromExcel(filePath?: string): {
     created,
     updated,
     departments: deptCodes.size,
+    resigned,
     total: rows.length,
     file,
   };

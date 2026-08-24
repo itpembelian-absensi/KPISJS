@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 export default async function StaffPage() {
   await requireMasterAccess();
-  const staff = listStaff(true);
+  const staff = listStaff();
   const departments = listDepartments(true);
 
   return (

@@ -24,6 +24,9 @@ export function StaffMaster({
   const [importing, setImporting] = useState(false);
   const [query, setQuery] = useState("");
   const [deptFilter, setDeptFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "resigned">(
+    "all",
+  );
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
@@ -41,6 +44,11 @@ export function StaffMaster({
 
     if (deptFilter !== "all") {
       list = list.filter((s) => s.departmentId === deptFilter);
+    }
+    if (statusFilter === "active") {
+      list = list.filter((s) => s.active);
+    } else if (statusFilter === "resigned") {
+      list = list.filter((s) => !s.active);
     }
 
     if (q) {
@@ -61,6 +69,9 @@ export function StaffMaster({
     }
 
     list.sort((a, b) => {
+      if (statusFilter === "all" && a.active !== b.active) {
+        return Number(b.active) - Number(a.active);
+      }
       const av =
         sortKey === "department"
           ? deptName(a.departmentId)
@@ -74,10 +85,10 @@ export function StaffMaster({
     });
 
     return list;
-  }, [items, query, deptFilter, sortKey, sortDir, departments]);
+  }, [items, query, deptFilter, statusFilter, sortKey, sortDir, departments]);
 
   async function reloadLists() {
-    const res = await fetch("/api/master/staff?active=1");
+    const res = await fetch("/api/master/staff");
     const data = await res.json();
     if (res.ok) {
       setItems(data.staff);
@@ -102,8 +113,10 @@ export function StaffMaster({
       return;
     }
     const r = data.result;
+    const resignNote =
+      r.resigned > 0 ? ` · ${r.resigned} ditandai resign` : "";
     setMessage(
-      `Impor berhasil: ${r.total} baris · ${r.created} baru · ${r.updated} diupdate · ${r.departments} departemen`,
+      `Impor berhasil: ${r.total} baris · ${r.created} baru · ${r.updated} diupdate · ${r.departments} departemen${resignNote}`,
     );
     await reloadLists();
   }
@@ -148,7 +161,7 @@ export function StaffMaster({
           phone: fd.get("phone"),
           departmentId: fd.get("departmentId"),
           position: fd.get("position"),
-          active: fd.get("active") === "on",
+          active: fd.get("status") !== "resign",
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -180,7 +193,8 @@ export function StaffMaster({
           <p className="font-medium">Impor dari Excel</p>
           <p className="text-xs text-ink-muted">
             Membaca file <span className="mono">employe.xlsx</span> di folder
-            project. Departemen diisi otomatis dari Job Position.
+            project. Karyawan yang di Excel bertanda resign (kolom Status /
+            Resign Date) tidak dihapus — hanya ditandai Resign.
           </p>
         </div>
         <button
@@ -270,14 +284,17 @@ export function StaffMaster({
               />
             </label>
           </div>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              name="active"
-              type="checkbox"
-              defaultChecked={editing?.active ?? true}
-              key={`active-${editing?.id ?? "new"}`}
-            />
-            Aktif
+          <label className="block text-sm">
+            <span className="text-xs text-ink-muted">Status kepegawaian</span>
+            <select
+              name="status"
+              defaultValue={editing && !editing.active ? "resign" : "active"}
+              key={`status-${editing?.id ?? "new"}`}
+              className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
+            >
+              <option value="active">Aktif (masih bekerja)</option>
+              <option value="resign">Resign (tidak bekerja)</option>
+            </select>
           </label>
           {error ? <p className="text-sm text-danger">{error}</p> : null}
           <div className="flex gap-2">
@@ -315,13 +332,24 @@ export function StaffMaster({
               </div>
             </div>
 
-            <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto]">
+            <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto_auto]">
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Cari nama, kode, jabatan, email..."
                 className="w-full rounded-xl border border-line bg-bg-elevated px-3 py-2 text-sm outline-none focus:border-brand"
               />
+              <select
+                value={statusFilter}
+                onChange={(e) =>
+                  setStatusFilter(e.target.value as "all" | "active" | "resigned")
+                }
+                className="rounded-xl border border-line bg-bg-elevated px-3 py-2 text-sm"
+              >
+                <option value="all">Semua status</option>
+                <option value="active">Aktif</option>
+                <option value="resigned">Resign</option>
+              </select>
               <select
                 value={deptFilter}
                 onChange={(e) => setDeptFilter(e.target.value)}
@@ -368,10 +396,19 @@ export function StaffMaster({
               filtered.map((s) => (
                 <div
                   key={s.id}
-                  className="flex flex-col gap-2 border-b border-line px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4"
+                  className={`flex flex-col gap-2 border-b border-line px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4 ${
+                    s.active ? "" : "bg-danger-soft/60"
+                  }`}
                 >
                   <div className="min-w-0">
-                    <p className="mono text-xs text-brand">{s.employeeCode}</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="mono text-xs text-brand">{s.employeeCode}</p>
+                      {s.active ? null : (
+                        <span className="rounded-full bg-danger-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger">
+                          Resign
+                        </span>
+                      )}
+                    </div>
                     <p className="font-medium">{s.name}</p>
                     <p className="text-xs text-ink-muted sm:truncate">
                       {s.position} · {deptName(s.departmentId)}

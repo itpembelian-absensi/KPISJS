@@ -87,13 +87,21 @@ export function AttendanceMaster({
     unknownCodes?: string[];
     periods?: string[];
     staffCount: number;
+    staffCreated?: number;
+    createdStaff?: Array<{ employeeCode: string; name: string }>;
   }) {
+    const created =
+      result.staffCreated && result.staffCreated > 0
+        ? ` · ${result.staffCreated} staf baru: ${(result.createdStaff || [])
+            .map((s) => s.employeeCode)
+            .join(", ")}`
+        : "";
     const unknown =
       result.unknownCodes && result.unknownCodes.length
-        ? ` · NIK tidak ketemu: ${result.unknownCodes.join(", ")}`
+        ? ` · NIK tanpa nama (tidak dibuat): ${result.unknownCodes.join(", ")}`
         : "";
     setMessage(
-      `Impor OK: ${result.totalRows} baris · ${result.imported} baru · ${result.updated} update · ${result.skipped} dilewati · ${result.staffCount} staf${unknown}`,
+      `Impor OK: ${result.totalRows} baris · ${result.imported} baru · ${result.updated} update · ${result.skipped} dilewati · ${result.staffCount} staf${created}${unknown}`,
     );
     if (result.periods?.length) {
       setPeriodList((prev) =>
@@ -126,7 +134,8 @@ export function AttendanceMaster({
           <strong>template.xlsx</strong> — sheet Export Attendance) dan template
           sederhana. Kolom utama: <strong>Employee ID / NIK</strong>,{" "}
           <strong>Date / Tanggal</strong>, Check In/Out, Schedule In/Out,
-          Shift, Attendance Code, Time Off Code, Overtime.
+          Shift, Attendance Code, Time Off Code, Overtime. Karyawan baru di
+          file (Employee ID + nama) otomatis ditambahkan ke Master Staf.
         </p>
         <div className="flex flex-wrap gap-2">
           <a

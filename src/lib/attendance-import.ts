@@ -12,6 +12,10 @@ export type ExcelAttendanceRow = {
   earlyLeaveMinutes: number;
   overtimeMinutes: number;
   status: AttendanceStatus;
+  fullName?: string;
+  position?: string;
+  jobLevel?: string;
+  organization?: string;
 };
 
 const TEMPLATE_FILE = path.join(process.cwd(), "template.xlsx");
@@ -106,6 +110,30 @@ function pick(row: Record<string, unknown>, keys: string[]): unknown {
     if (real && clean(row[real]) !== "") return row[real];
   }
   return "";
+}
+
+function pickStaffProfile(row: Record<string, unknown>): {
+  fullName: string;
+  position: string;
+  jobLevel: string;
+  organization: string;
+} {
+  return {
+    fullName: clean(
+      pick(row, ["Full Name", "Nama", "Name", "Nama Lengkap"]),
+    ),
+    position: clean(pick(row, ["Job Position", "Jabatan", "Position"])),
+    jobLevel: clean(pick(row, ["Job Level", "Level"])),
+    organization: clean(
+      pick(row, [
+        "Organization",
+        "Department",
+        "Departemen",
+        "Dept",
+        "Org",
+      ]),
+    ),
+  };
 }
 
 function isExportAttendanceFormat(rows: Record<string, unknown>[]): boolean {
@@ -210,6 +238,7 @@ function parseExportAttendanceRow(
     earlyLeaveMinutes,
     overtimeMinutes: Math.max(0, overtimeMinutes),
     status,
+    ...pickStaffProfile(row),
   };
 }
 
@@ -284,6 +313,7 @@ function parseSimpleRow(row: Record<string, unknown>): ExcelAttendanceRow | null
     earlyLeaveMinutes,
     overtimeMinutes,
     status,
+    ...pickStaffProfile(row),
   };
 }
 

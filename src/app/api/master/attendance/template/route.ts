@@ -25,9 +25,16 @@ export async function GET(req: NextRequest) {
   const sampleCode2 = staff[1]?.employeeCode || "EMP-002";
   const sampleCode3 = staff[2]?.employeeCode || "EMP-003";
 
+  const sampleName1 = staff[0]?.name || "Contoh Karyawan 1";
+  const sampleName2 = staff[1]?.name || "Contoh Karyawan 2";
+  const sampleName3 = staff[2]?.name || "Contoh Karyawan 3";
+
   const rows: Array<Array<string | number>> = [
     [
       "NIK",
+      "Nama",
+      "Jabatan",
+      "Departemen",
       "Tanggal",
       "Jam Masuk",
       "Jam Keluar",
@@ -35,11 +42,11 @@ export async function GET(req: NextRequest) {
       "Lembur (menit)",
       "Status",
     ],
-    [sampleCode1, d1, "08:00", "17:00", 0, 0, "Hadir"],
-    [sampleCode1, d2, "08:20", "17:00", 20, 0, "Hadir"],
-    [sampleCode2, d1, "08:00", "18:30", 0, 90, "Hadir"],
-    [sampleCode3, d1, "", "", 0, 0, "Absen"],
-    [sampleCode2, d2, "", "", 0, 0, "Sakit"],
+    [sampleCode1, sampleName1, "", "", d1, "08:00", "17:00", 0, 0, "Hadir"],
+    [sampleCode1, sampleName1, "", "", d2, "08:20", "17:00", 20, 0, "Hadir"],
+    [sampleCode2, sampleName2, "", "", d1, "08:00", "18:30", 0, 90, "Hadir"],
+    [sampleCode3, sampleName3, "", "", d1, "", "", 0, 0, "Absen"],
+    [sampleCode2, sampleName2, "", "", d2, "", "", 0, 0, "Sakit"],
   ];
 
   // Sheet petunjuk
@@ -47,7 +54,12 @@ export async function GET(req: NextRequest) {
     ["Petunjuk isi template absensi"],
     [""],
     ["Kolom wajib", "NIK dan Tanggal"],
-    ["NIK", "Harus sama dengan Kode Karyawan di Master Staf"],
+    [
+      "NIK",
+      "Kode karyawan. Jika belum ada di Master Staf, isi juga Nama agar otomatis ditambahkan.",
+    ],
+    ["Nama", "Wajib jika NIK baru — dipakai untuk membuat Master Staf"],
+    ["Jabatan / Departemen", "Opsional, untuk mapping staf baru"],
     ["Tanggal", "Format YYYY-MM-DD atau DD/MM/YYYY"],
     ["Jam Masuk / Keluar", "Format HH:MM (opsional)"],
     ["Terlambat (menit)", "Angka menit keterlambatan"],
@@ -64,6 +76,9 @@ export async function GET(req: NextRequest) {
   const wsData = XLSX.utils.aoa_to_sheet(rows);
   wsData["!cols"] = [
     { wch: 14 },
+    { wch: 28 },
+    { wch: 22 },
+    { wch: 22 },
     { wch: 12 },
     { wch: 12 },
     { wch: 12 },

@@ -16,6 +16,7 @@ import {
 import { upsertKpiAssessment } from "./kpi-ops";
 import {
   ensureDepartmentKpiTemplates,
+  ensureStaffFromAttendanceImport,
   listStaff,
 } from "./store";
 import type {
@@ -338,13 +339,32 @@ function importRows(
   let updated = 0;
   let skipped = 0;
   const unknownCodes = new Set<string>();
+  const createdStaff: Array<{ employeeCode: string; name: string }> = [];
   const staffIds = new Set<string>();
   const periods = new Set<string>();
   const now = new Date().toISOString();
 
   const tx = db.transaction(() => {
     for (const row of rows) {
-      const staff = staffByCode.get(row.employeeCode.toLowerCase());
+      const codeKey = row.employeeCode.toLowerCase();
+      let staff = staffByCode.get(codeKey);
+      if (!staff && row.fullName) {
+        const ensured = ensureStaffFromAttendanceImport({
+          employeeCode: row.employeeCode,
+          name: row.fullName,
+          position: row.position,
+          jobLevel: row.jobLevel,
+          organization: row.organization,
+        });
+        staff = ensured.staff;
+        staffByCode.set(codeKey, staff);
+        if (ensured.created) {
+          createdStaff.push({
+            employeeCode: staff.employeeCode,
+            name: staff.name,
+          });
+        }
+      }
       if (!staff) {
         skipped += 1;
         unknownCodes.add(row.employeeCode);
@@ -403,6 +423,7 @@ function importRows(
       periods.add(periodFromDate(row.workDate));
     }
 
+    if (createdStaff.length) ensureDisciplineKpiFunctions();
     rebuildPeriodSummaries([...staffIds], [...periods], assessedByName);
   });
   tx();
@@ -415,6 +436,8 @@ function importRows(
     unknownCodes: [...unknownCodes].slice(0, 20),
     periods: [...periods].sort(),
     staffCount: staffIds.size,
+    staffCreated: createdStaff.length,
+    createdStaff: createdStaff.slice(0, 20),
   };
 }
 
