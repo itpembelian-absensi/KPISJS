@@ -4,13 +4,18 @@ import Link from "next/link";
 import { FormEvent, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type {
+  Department,
   SopAttachment,
   SopDisposition,
   SopDocument,
   SopStep,
 } from "@/lib/types";
-import { DEFAULT_SOP_DISPOSITIONS } from "@/lib/types";
+import {
+  defaultSopDispositions,
+  sopDivisionLabelFromDepartment,
+} from "@/lib/types";
 import { formatSopDate, toDateInputValue } from "@/lib/sop-format";
+import { primarySopDocx, primarySopPdf } from "@/lib/sop-attachments";
 
 function emptyStep(order: number): SopStep {
   return { order, title: "", body: "" };
@@ -32,6 +37,36 @@ const LIST_PAGE_SIZE = 5;
 
 type SopSortKey = "code" | "title";
 
+function sopSearchText(sop: SopDocument): string {
+  const steps = sop.steps.map((s) => `${s.title} ${s.body}`).join(" ");
+  const files = sop.attachments
+    .map((a) => `${a.originalName || ""} ${a.label || ""}`)
+    .join(" ");
+  return [
+    sop.code,
+    sop.title,
+    sop.purpose,
+    sop.materials,
+    sop.qualifications,
+    sop.notes,
+    steps,
+    sop.documentType,
+    sop.divisionLabel,
+    sop.departmentName,
+    sop.departmentCode,
+    files,
+  ]
+    .join("\n")
+    .toLowerCase();
+}
+
+function sopMatchesQuery(sop: SopDocument, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const hay = sopSearchText(sop);
+  return q.split(/\s+/).every((token) => hay.includes(token));
+}
+
 function sortSops(list: SopDocument[], key: SopSortKey): SopDocument[] {
   const copy = [...list];
   if (key === "code") {
@@ -44,7 +79,17 @@ function sortSops(list: SopDocument[], key: SopSortKey): SopDocument[] {
   return copy;
 }
 
-export function SopMaster({ initial }: { initial: SopDocument[] }) {
+export function SopMaster({
+  initial,
+  departments,
+  canManage,
+  defaultDepartmentId,
+}: {
+  initial: SopDocument[];
+  departments: Department[];
+  canManage: boolean;
+  defaultDepartmentId: string;
+}) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
@@ -56,11 +101,19 @@ export function SopMaster({ initial }: { initial: SopDocument[] }) {
   const [items, setItems] = useState(() => sortSops(initial, "code"));
   const [listPage, setListPage] = useState(1);
   const [sortKey, setSortKey] = useState<SopSortKey>("code");
+  const [deptFilter, setDeptFilter] = useState(
+    defaultDepartmentId || (departments[0]?.id ?? "all"),
+  );
+  const [listQuery, setListQuery] = useState("");
   const [listNotice, setListNotice] = useState<string | null>(null);
   const [editing, setEditing] = useState<SopDocument | null>(null);
   const [title, setTitle] = useState("");
   const [code, setCode] = useState("");
-  const [divisionLabel, setDivisionLabel] = useState("DIVISI IT");
+  const [departmentId, setDepartmentId] = useState(defaultDepartmentId);
+  const [divisionLabel, setDivisionLabel] = useState(() => {
+    const d = departments.find((x) => x.id === defaultDepartmentId);
+    return d ? sopDivisionLabelFromDepartment(d.name) : "DIVISI";
+  });
   const [documentType, setDocumentType] = useState(
     "STANDARD OPERATING PROCEDURE",
   );
@@ -73,9 +126,10 @@ export function SopMaster({ initial }: { initial: SopDocument[] }) {
   const [notes, setNotes] = useState("");
   const [active, setActive] = useState(true);
   const [steps, setSteps] = useState<SopStep[]>([emptyStep(1)]);
-  const [dispositions, setDispositions] = useState<SopDisposition[]>([
-    ...DEFAULT_SOP_DISPOSITIONS,
-  ]);
+  const [dispositions, setDispositions] = useState<SopDisposition[]>(() => {
+    const d = departments.find((x) => x.id === defaultDepartmentId);
+    return defaultSopDispositions(d?.name ?? "");
+  });
   const [attachments, setAttachments] = useState<SopAttachment[]>([]);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -83,12 +137,48 @@ export function SopMaster({ initial }: { initial: SopDocument[] }) {
   const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const wordInputRef = useRef<HTMLInputElement>(null);
+  const wordFileRef = useRef<File | null>(null);
+  const [wordBusy, setWordBusy] = useState(false);
+  const [wordPreview, setWordPreview] = useState<
+    Array<{ code: string; title: string; purpose: string; steps: number }> | null
+  >(null);
+  const [wordWarnings, setWordWarnings] = useState<string[]>([]);
+  const [wordFileName, setWordFileName] = useState<string | null>(null);
+
+  function deptOf(id: string) {
+    return departments.find((d) => d.id === id);
+  }
+
+  function applyDepartmentDefaults(id: string, forNew: boolean) {
+    const d = deptOf(id);
+    setDepartmentId(id);
+    setDeptFilter(id);
+    setListPage(1);
+    setSelected([]);
+    if (d) {
+      setDivisionLabel(sopDivisionLabelFromDepartment(d.name));
+      if (forNew) setDispositions(defaultSopDispositions(d.name));
+    }
+  }
 
   function loadForm(sop: SopDocument | null) {
     setEditing(sop);
     setTitle(sop?.title ?? "");
     setCode(sop?.code ?? "");
-    setDivisionLabel(sop?.divisionLabel ?? "DIVISI IT");
+    const nextDept =
+      sop?.departmentId && departments.some((d) => d.id === sop.departmentId)
+        ? sop.departmentId
+        : departmentId || defaultDepartmentId;
+    setDepartmentId(nextDept);
+    setDeptFilter(nextDept);
+    setListPage(1);
+    const d = deptOf(nextDept);
+    setDivisionLabel(
+      sop?.divisionLabel ??
+        (d ? sopDivisionLabelFromDepartment(d.name) : "DIVISI"),
+    );
     setDocumentType(sop?.documentType ?? "STANDARD OPERATING PROCEDURE");
     setEffectiveDate(toDateInputValue(sop?.effectiveDate ?? ""));
     setRevision(sop?.revision ?? "-");
@@ -106,7 +196,7 @@ export function SopMaster({ initial }: { initial: SopDocument[] }) {
     setDispositions(
       sop?.dispositions?.length
         ? sop.dispositions.map((d) => ({ ...d }))
-        : [...DEFAULT_SOP_DISPOSITIONS],
+        : defaultSopDispositions(d?.name ?? ""),
     );
     setAttachments(sop?.attachments?.length ? [...sop.attachments] : []);
     setPendingFiles([]);
@@ -122,15 +212,29 @@ export function SopMaster({ initial }: { initial: SopDocument[] }) {
   }
 
   function toggleSelectAll() {
-    if (selected.length === items.length) setSelected([]);
-    else setSelected(items.map((s) => s.id));
+    if (selected.length === filteredItems.length && filteredItems.length > 0) {
+      setSelected([]);
+    } else setSelected(filteredItems.map((s) => s.id));
   }
 
   const selectedIdsQuery = useMemo(() => selected.join(","), [selected]);
 
+  const filteredItems = useMemo(() => {
+    const byDept =
+      deptFilter === "all"
+        ? items
+        : items.filter((s) => s.departmentId === deptFilter);
+    return byDept.filter((s) => sopMatchesQuery(s, listQuery));
+  }, [items, deptFilter, listQuery]);
+
+  const selectedDept = deptOf(departmentId);
+  const codePlaceholder = selectedDept
+    ? `${selectedDept.code}-SOP/${new Date().getFullYear()}/001`
+    : "IT-SOP/2026/001";
+
   const sortedItems = useMemo(
-    () => sortSops(items, sortKey),
-    [items, sortKey],
+    () => sortSops(filteredItems, sortKey),
+    [filteredItems, sortKey],
   );
   const totalListPages = Math.max(
     1,
@@ -306,6 +410,7 @@ export function SopMaster({ initial }: { initial: SopDocument[] }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id: editing?.id,
+          departmentId,
           code: code.trim() || undefined,
           title,
           divisionLabel,
@@ -378,6 +483,138 @@ export function SopMaster({ initial }: { initial: SopDocument[] }) {
     router.refresh();
   }
 
+  async function toggleActive(sop: SopDocument) {
+    if (!canManage || togglingId) return;
+    setTogglingId(sop.id);
+    setError(null);
+    setListNotice(null);
+    try {
+      const res = await fetch("/api/master/sops", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: sop.id, active: !sop.active }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "Gagal mengubah status");
+        setListNotice(data.error || "Gagal mengubah status");
+        return;
+      }
+      const next = data.sop as SopDocument;
+      applySopToState(next);
+      if (editing?.id === next.id) {
+        setEditing(next);
+        setActive(next.active);
+      }
+      setListNotice(next.active ? `${next.code} diaktifkan` : `${next.code} dinonaktifkan`);
+      router.refresh();
+    } catch {
+      setError("Gagal mengubah status");
+      setListNotice("Gagal mengubah status");
+    } finally {
+      setTogglingId(null);
+    }
+  }
+
+  async function previewWord(files: FileList | null) {
+    const file = files?.[0];
+    if (wordInputRef.current) wordInputRef.current.value = "";
+    if (!file) return;
+    if (!departmentId) {
+      setError("Pilih departemen dulu, lalu unggah Word.");
+      return;
+    }
+    setWordBusy(true);
+    setError(null);
+    setMessage(null);
+    setWordPreview(null);
+    setWordWarnings([]);
+    setWordFileName(file.name);
+    try {
+      const fd = new FormData();
+      fd.append("departmentId", departmentId);
+      fd.append("preview", "1");
+      fd.append("file", file);
+      const res = await fetch("/api/master/sops/import-word", {
+        method: "POST",
+        body: fd,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "Gagal membaca file Word");
+        setWordFileName(null);
+        wordFileRef.current = null;
+        return;
+      }
+      setWordPreview(data.drafts || []);
+      setWordWarnings(Array.isArray(data.warnings) ? data.warnings : []);
+      setWordFileName(file.name);
+      wordFileRef.current = file;
+    } catch {
+      setError("Gagal mengunggah file Word");
+      setWordFileName(null);
+    } finally {
+      setWordBusy(false);
+    }
+  }
+
+  async function confirmWordImport() {
+    const file = wordFileRef.current;
+    if (!file || !departmentId) return;
+    const n = wordPreview?.length ?? 0;
+    if (
+      !window.confirm(
+        `Impor ${n} SOP ke ${deptOf(departmentId)?.name ?? "departemen ini"}?\n\nSOP dengan nomor yang sama akan diperbarui. SOP baru berstatus Draft (Off).`,
+      )
+    ) {
+      return;
+    }
+    setWordBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const fd = new FormData();
+      fd.append("departmentId", departmentId);
+      fd.append("preview", "0");
+      fd.append("file", file);
+      const res = await fetch("/api/master/sops/import-word", {
+        method: "POST",
+        body: fd,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "Gagal impor Word");
+        return;
+      }
+      const imported = Array.isArray(data.sops) ? (data.sops as SopDocument[]) : [];
+      setItems((prev) => {
+        const next = [...prev];
+        for (const sop of imported) {
+          const i = next.findIndex((s) => s.id === sop.id);
+          if (i >= 0) next[i] = sop;
+          else next.push(sop);
+        }
+        return next;
+      });
+      setDeptFilter(departmentId);
+      setListPage(1);
+      setWordPreview(null);
+      setWordFileName(null);
+      wordFileRef.current = null;
+      const warn = Array.isArray(data.warnings) ? data.warnings : [];
+      setWordWarnings(warn);
+      setMessage(
+        `Impor selesai: ${data.created ?? 0} baru, ${data.updated ?? 0} diperbarui.` +
+          (warn.length ? ` (${warn.length} peringatan)` : ""),
+      );
+      router.refresh();
+    } catch {
+      setError("Gagal impor Word");
+    } finally {
+      setWordBusy(false);
+    }
+  }
+
   return (
     <div className="space-y-5">
       {selected.length > 0 ? (
@@ -406,8 +643,109 @@ export function SopMaster({ initial }: { initial: SopDocument[] }) {
         </div>
       ) : null}
 
-      <div className="grid gap-5 xl:grid-cols-[1.15fr_0.95fr]">
-        <form onSubmit={save} className="panel space-y-3 p-5">
+      {canManage ? (
+        <div className="panel space-y-3 p-4 sm:p-5">
+          <div>
+            <h2 className="font-semibold">Impor dari Word</h2>
+            <p className="mt-1 text-xs text-ink-muted">
+              Unggah file Master SOP (.docx). Sistem memecah per judul/nomor
+              sesuai isi Word, menempelkan pecahan Word asli, lalu membuat PDF
+              dengan layout yang sama. Pilih departemen di form dulu.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={wordInputRef}
+              type="file"
+              accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              className="hidden"
+              onChange={(e) => previewWord(e.target.files)}
+            />
+            <button
+              type="button"
+              disabled={wordBusy || !departmentId}
+              onClick={() => wordInputRef.current?.click()}
+              className="rounded-xl bg-brand px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+            >
+              {wordBusy ? "Membaca Word..." : "Pilih file Word (.docx)"}
+            </button>
+            {wordFileName ? (
+              <span className="text-xs text-ink-muted">{wordFileName}</span>
+            ) : null}
+            {wordPreview && wordPreview.length > 0 ? (
+              <>
+                <button
+                  type="button"
+                  disabled={wordBusy}
+                  onClick={confirmWordImport}
+                  className="rounded-xl border border-brand px-3 py-2 text-sm font-medium text-brand disabled:opacity-60"
+                >
+                  Impor {wordPreview.length} SOP
+                </button>
+                <button
+                  type="button"
+                  disabled={wordBusy}
+                  onClick={() => {
+                    setWordPreview(null);
+                    setWordFileName(null);
+                    setWordWarnings([]);
+                    wordFileRef.current = null;
+                  }}
+                  className="rounded-xl border border-line px-3 py-2 text-sm text-ink-muted"
+                >
+                  Batal
+                </button>
+              </>
+            ) : null}
+          </div>
+          {wordPreview && wordPreview.length > 0 ? (
+            <div className="overflow-x-auto rounded-xl border border-line">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-bg text-xs text-ink-muted">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">Nomor</th>
+                    <th className="px-3 py-2 font-medium">Judul</th>
+                    <th className="px-3 py-2 font-medium">Langkah</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {wordPreview.map((d) => (
+                    <tr key={d.code} className="border-t border-line">
+                      <td className="mono whitespace-nowrap px-3 py-2 text-xs text-brand">
+                        {d.code}
+                      </td>
+                      <td className="px-3 py-2">
+                        <p className="font-medium">{d.title}</p>
+                        <p className="mt-0.5 line-clamp-2 text-xs text-ink-muted">
+                          {d.purpose}
+                        </p>
+                      </td>
+                      <td className="px-3 py-2 text-xs text-ink-muted">
+                        {d.steps}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+          {wordWarnings.length > 0 ? (
+            <ul className="list-disc space-y-0.5 pl-5 text-xs text-ink-muted">
+              {wordWarnings.map((w) => (
+                <li key={w}>{w}</li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className={`grid gap-5 ${canManage ? "xl:grid-cols-[1.15fr_0.95fr]" : ""}`}>
+        {canManage ? (
+        <form
+          id="sop-editor-form"
+          onSubmit={save}
+          className="panel space-y-3 p-5"
+        >
           <h2 className="font-semibold">
             {editing ? "Edit SOP" : "Tambah SOP"}
           </h2>
@@ -416,6 +754,26 @@ export function SopMaster({ initial }: { initial: SopDocument[] }) {
           </p>
 
           <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block text-sm sm:col-span-2">
+              <span className="text-xs text-ink-muted">Departemen</span>
+              <select
+                required
+                value={departmentId}
+                onChange={(e) =>
+                  applyDepartmentDefaults(e.target.value, !editing)
+                }
+                className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
+              >
+                {departments.length === 0 ? (
+                  <option value="">Tidak ada departemen</option>
+                ) : null}
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.code} — {d.name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="block text-sm sm:col-span-2">
               <span className="text-xs text-ink-muted">Judul SOP</span>
               <input
@@ -434,7 +792,7 @@ export function SopMaster({ initial }: { initial: SopDocument[] }) {
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
-                placeholder="IT-SOP/2026/001"
+                placeholder={codePlaceholder}
               />
             </label>
             <label className="block text-sm">
@@ -465,7 +823,7 @@ export function SopMaster({ initial }: { initial: SopDocument[] }) {
               />
             </label>
             <label className="block text-sm">
-              <span className="text-xs text-ink-muted">Divisi</span>
+              <span className="text-xs text-ink-muted">Label header (divisi)</span>
               <input
                 value={divisionLabel}
                 onChange={(e) => setDivisionLabel(e.target.value)}
@@ -814,7 +1172,7 @@ export function SopMaster({ initial }: { initial: SopDocument[] }) {
               checked={active}
               onChange={(e) => setActive(e.target.checked)}
             />
-            Aktif
+            Aktif (bisa dipakai; Off = masih draft)
           </label>
 
           {error ? <p className="text-sm text-danger">{error}</p> : null}
@@ -839,6 +1197,7 @@ export function SopMaster({ initial }: { initial: SopDocument[] }) {
             ) : null}
           </div>
         </form>
+        ) : null}
 
         <div className="panel overflow-hidden">
           <input
@@ -850,8 +1209,17 @@ export function SopMaster({ initial }: { initial: SopDocument[] }) {
           />
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3">
             <div>
-              <h2 className="font-semibold">Daftar SOP IT</h2>
-              <p className="text-xs text-ink-muted">{items.length} dokumen</p>
+              <h2 className="font-semibold">Daftar SOP</h2>
+              <p className="text-xs text-ink-muted">
+                {filteredItems.length} dokumen
+                {listQuery.trim()
+                  ? ` · hasil pencarian`
+                  : deptFilter !== "all"
+                    ? ` · ${deptOf(deptFilter)?.name ?? ""}`
+                    : departments.length > 1
+                      ? " · semua departemen"
+                      : ""}
+              </p>
               {listNotice ? (
                 <p className="mt-1 text-xs text-ok">{listNotice}</p>
               ) : null}
@@ -860,6 +1228,31 @@ export function SopMaster({ initial }: { initial: SopDocument[] }) {
               ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              {departments.length > 1 ? (
+                <label className="flex items-center gap-1.5 text-xs text-ink-muted">
+                  <span>Dept</span>
+                  <select
+                    value={deptFilter}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setDeptFilter(v);
+                      setListPage(1);
+                      setSelected([]);
+                      if (v !== "all" && !editing) {
+                        applyDepartmentDefaults(v, true);
+                      }
+                    }}
+                    className="rounded-lg border border-line bg-bg-elevated px-2 py-1 text-xs text-ink"
+                  >
+                    <option value="all">Semua</option>
+                    {departments.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.code}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               <label className="flex items-center gap-1.5 text-xs text-ink-muted">
                 <span>Urut</span>
                 <select
@@ -879,15 +1272,36 @@ export function SopMaster({ initial }: { initial: SopDocument[] }) {
                 onClick={toggleSelectAll}
                 className="rounded-lg border border-line px-2 py-1 text-xs"
               >
-                {selected.length === items.length && items.length > 0
+                {selected.length === filteredItems.length &&
+                filteredItems.length > 0
                   ? "Batal pilih"
                   : "Pilih semua"}
               </button>
             </div>
           </div>
-          {items.length === 0 ? (
+          <div className="border-b border-line px-4 py-2.5">
+            <label className="sr-only" htmlFor="sop-list-search">
+              Cari SOP
+            </label>
+            <input
+              id="sop-list-search"
+              type="search"
+              value={listQuery}
+              onChange={(e) => {
+                setListQuery(e.target.value);
+                setListPage(1);
+              }}
+              placeholder="Cari nomor, judul, atau isi SOP..."
+              className="w-full rounded-lg border border-line bg-bg-elevated px-3 py-2 text-sm text-ink placeholder:text-ink-muted"
+            />
+          </div>
+          {filteredItems.length === 0 ? (
             <p className="px-4 py-8 text-sm text-ink-muted">
-              Belum ada SOP. Buat dokumen pertama di formulir kiri.
+              {listQuery.trim()
+                ? "Tidak ada SOP yang cocok. Coba kata lain, atau kosongkan pencarian."
+                : canManage
+                  ? "Belum ada SOP. Buat dokumen pertama di formulir kiri."
+                  : "Belum ada SOP untuk departemen Anda."}
             </p>
           ) : (
             <>
@@ -896,6 +1310,8 @@ export function SopMaster({ initial }: { initial: SopDocument[] }) {
                   (a) =>
                     a.kind === "file" || a.url.startsWith("/uploads/sops/"),
                 );
+                const pdfAtt = primarySopPdf(sop);
+                const docxAtt = primarySopDocx(sop);
                 return (
                   <div
                     key={sop.id}
@@ -911,7 +1327,8 @@ export function SopMaster({ initial }: { initial: SopDocument[] }) {
                       <p className="mono text-xs text-brand">{sop.code}</p>
                       <p className="font-medium">{sop.title}</p>
                       <p className="mt-0.5 text-xs text-ink-muted">
-                        Berlaku {formatSopDate(sop.effectiveDate)} · Rev{" "}
+                        {sop.departmentCode || sop.departmentName} · Berlaku{" "}
+                        {formatSopDate(sop.effectiveDate)} · Rev{" "}
                         {sop.revision || "-"} · {sop.steps.length} langkah
                         {files.length > 0 ? ` · ${files.length} file` : ""}
                       </p>
@@ -931,6 +1348,7 @@ export function SopMaster({ initial }: { initial: SopDocument[] }) {
                               >
                                 {f.originalName || f.label}
                               </a>
+                              {canManage ? (
                               <button
                                 type="button"
                                 disabled={uploading}
@@ -945,10 +1363,11 @@ export function SopMaster({ initial }: { initial: SopDocument[] }) {
                               >
                                 Ganti file
                               </button>
+                              ) : null}
                             </div>
                           ))}
                         </div>
-                      ) : (
+                      ) : canManage ? (
                         <div className="mt-1.5">
                           <button
                             type="button"
@@ -964,7 +1383,7 @@ export function SopMaster({ initial }: { initial: SopDocument[] }) {
                             + Tambah file
                           </button>
                         </div>
-                      )}
+                      ) : null}
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         <Link
                           href={`/sop/${sop.id}`}
@@ -973,42 +1392,90 @@ export function SopMaster({ initial }: { initial: SopDocument[] }) {
                           Baca
                         </Link>
                         <a
-                          href={`/api/sop/export?format=pdf&ids=${sop.id}`}
+                          href={
+                            pdfAtt
+                              ? pdfAtt.url
+                              : `/api/sop/export?format=pdf&ids=${sop.id}`
+                          }
+                          {...(pdfAtt
+                            ? {
+                                target: "_blank" as const,
+                                rel: "noopener noreferrer",
+                                download: pdfAtt.originalName || pdfAtt.label,
+                              }
+                            : {})}
                           className="rounded-lg border border-line px-2 py-1 text-xs hover:bg-bg"
                         >
                           PDF
                         </a>
                         <a
-                          href={`/api/sop/export?format=docx&ids=${sop.id}`}
+                          href={
+                            docxAtt
+                              ? docxAtt.url
+                              : `/api/sop/export?format=docx&ids=${sop.id}`
+                          }
+                          {...(docxAtt
+                            ? {
+                                download: docxAtt.originalName || docxAtt.label,
+                              }
+                            : {})}
                           className="rounded-lg border border-line px-2 py-1 text-xs hover:bg-bg"
                         >
                           Word
                         </a>
-                        <button
-                          type="button"
-                          onClick={() => loadForm(sop)}
-                          className="rounded-lg border border-line px-2 py-1 text-xs"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => remove(sop.id)}
-                          className="rounded-lg border border-danger/30 px-2 py-1 text-xs text-danger"
-                        >
-                          Hapus
-                        </button>
+                        {canManage ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => loadForm(sop)}
+                              className="rounded-lg border border-line px-2 py-1 text-xs"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => remove(sop.id)}
+                              className="rounded-lg border border-danger/30 px-2 py-1 text-xs text-danger"
+                            >
+                              Hapus
+                            </button>
+                          </>
+                        ) : null}
                       </div>
                     </div>
-                    <span
-                      className={`shrink-0 rounded-md px-2 py-0.5 text-[11px] ${
-                        sop.active
-                          ? "bg-ok-soft text-ok"
-                          : "bg-line text-ink-muted"
-                      }`}
-                    >
-                      {sop.active ? "Aktif" : "Off"}
-                    </span>
+                    {canManage ? (
+                      <button
+                        type="button"
+                        disabled={togglingId === sop.id}
+                        onClick={() => toggleActive(sop)}
+                        title={
+                          sop.active
+                            ? "Klik untuk menonaktifkan"
+                            : "Klik untuk mengaktifkan"
+                        }
+                        className={`shrink-0 rounded-md px-2 py-0.5 text-[11px] disabled:opacity-60 ${
+                          sop.active
+                            ? "bg-ok-soft text-ok hover:bg-ok/20"
+                            : "bg-line text-ink-muted hover:bg-brand-soft hover:text-brand"
+                        }`}
+                      >
+                        {togglingId === sop.id
+                          ? "..."
+                          : sop.active
+                            ? "Aktif"
+                            : "Off"}
+                      </button>
+                    ) : (
+                      <span
+                        className={`shrink-0 rounded-md px-2 py-0.5 text-[11px] ${
+                          sop.active
+                            ? "bg-ok-soft text-ok"
+                            : "bg-line text-ink-muted"
+                        }`}
+                      >
+                        {sop.active ? "Aktif" : "Off"}
+                      </span>
+                    )}
                   </div>
                 );
               })}
@@ -1021,9 +1488,9 @@ export function SopMaster({ initial }: { initial: SopDocument[] }) {
                     {(currentListPage - 1) * LIST_PAGE_SIZE + 1}–
                     {Math.min(
                       currentListPage * LIST_PAGE_SIZE,
-                      items.length,
+                      filteredItems.length,
                     )}{" "}
-                    dari {items.length}
+                    dari {filteredItems.length}
                   </p>
                   <div className="flex items-center gap-1.5">
                     <button

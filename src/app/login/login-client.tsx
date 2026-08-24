@@ -3,7 +3,15 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useState } from "react";
 
-function LoginForm() {
+function LoginForm({
+  logoUrl,
+  companyName,
+  appTitle,
+}: {
+  logoUrl: string | null;
+  companyName: string;
+  appTitle: string;
+}) {
   const router = useRouter();
   const params = useSearchParams();
   const [error, setError] = useState<string | null>(null);
@@ -35,14 +43,22 @@ function LoginForm() {
   return (
     <div className="relative flex min-h-screen items-center justify-center px-4 py-10">
       <div className="panel w-full max-w-md p-6 md:p-8">
-        <p className="mono text-[11px] tracking-[0.18em] text-brand uppercase">
-          SJS · IT Systems
+        {logoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={logoUrl}
+            alt="Logo perusahaan"
+            className="mb-4 h-16 max-w-[16rem] object-contain"
+          />
+        ) : null}
+        <p className="mono break-words text-[11px] font-semibold leading-snug tracking-wide text-brand uppercase">
+          {companyName.trim() || "SJS · IT Systems"}
         </p>
         <h1
           className="mt-2 text-3xl font-semibold tracking-tight"
           style={{ fontFamily: "var(--font-accent), serif" }}
         >
-          KPI & IT Helpdesk
+          {appTitle}
         </h1>
         <p className="mt-2 text-sm text-ink-muted">
           Masuk dengan akun yang diberikan Administrator.
@@ -99,7 +115,15 @@ function LoginForm() {
   );
 }
 
-export default function LoginPage() {
+export default function LoginPage({
+  logoUrl,
+  companyName,
+  appTitle,
+}: {
+  logoUrl: string | null;
+  companyName: string;
+  appTitle: string;
+}) {
   return (
     <Suspense
       fallback={
@@ -108,7 +132,11 @@ export default function LoginPage() {
         </div>
       }
     >
-      <LoginForm />
+      <LoginForm
+        logoUrl={logoUrl}
+        companyName={companyName}
+        appTitle={appTitle}
+      />
     </Suspense>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   flattenNav,
@@ -11,6 +11,7 @@ import {
   type NavEntry,
   type NavItem,
 } from "@/lib/auth";
+import { CompanyLogo } from "@/components/CompanyLogo";
 import { ROLE_LABEL, type SessionUser } from "@/lib/types";
 
 /** Exact match, or nested path — but prefer a more specific sibling nav item (e.g. /tickets/new over /tickets). */
@@ -108,11 +109,17 @@ function NavLink({
           : "text-ink hover:bg-brand-soft"
       }`}
     >
-      <div className={`font-medium ${nested ? "text-[13px]" : "text-sm"}`}>
+      <div
+        className={`font-medium ${
+          nested ? "text-[13px] md:text-sm" : "text-sm md:text-[15px]"
+        }`}
+      >
         {item.label}
       </div>
       <div
-        className={`text-xs ${active ? "text-brand-deep/80" : "text-ink-muted"}`}
+        className={`text-xs md:text-[13px] ${
+          active ? "text-brand-deep/80" : "text-ink-muted"
+        }`}
       >
         {item.hint}
       </div>
@@ -136,7 +143,7 @@ function SidebarNav({
   onNavigate?: () => void;
 }) {
   return (
-    <nav className="flex flex-1 flex-col gap-1 overflow-y-auto">
+    <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
       {nav.map((entry) => {
         if (entry.type === "link") {
           const active = isNavActive(pathname, entry.item.href, navHrefs);
@@ -168,11 +175,15 @@ function SidebarNav({
             >
               <FolderIcon
                 open={open}
-                className="h-6 w-6 shrink-0 text-amber-500"
+                className="h-6 w-6 shrink-0 text-amber-500 md:h-7 md:w-7"
               />
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold">{group.label}</div>
-                <div className="text-xs text-ink-muted">{group.hint}</div>
+                <div className="text-sm font-semibold md:text-base">
+                  {group.label}
+                </div>
+                <div className="text-xs text-ink-muted md:text-[13px]">
+                  {group.hint}
+                </div>
               </div>
               <span
                 className={`mono text-xs text-ink-muted transition-transform ${
@@ -209,10 +220,10 @@ function SidebarNav({
                             className="h-5 w-5 shrink-0 text-amber-500"
                           />
                           <div className="min-w-0 flex-1">
-                            <div className="text-[13px] font-semibold">
+                            <div className="text-[13px] font-semibold md:text-sm">
                               {child.label}
                             </div>
-                            <div className="text-[11px] text-ink-muted">
+                            <div className="text-[11px] text-ink-muted md:text-xs">
                               {child.hint}
                             </div>
                           </div>
@@ -268,12 +279,19 @@ function SidebarNav({
 export function AppShell({
   children,
   user,
+  logoUrl = null,
+  companyName = "",
+  appTitle = "KPI & IT Helpdesk",
+  appTagline = "Antrian support, master data, dan KPI.",
 }: {
   children: React.ReactNode;
   user: SessionUser | null;
+  logoUrl?: string | null;
+  companyName?: string;
+  appTitle?: string;
+  appTagline?: string;
 }) {
   const pathname = usePathname();
-  const router = useRouter();
   const isLogin = pathname === "/login";
 
   const nav = user ? navForUser(user) : [];
@@ -287,6 +305,7 @@ export function AppShell({
     kpi: true,
     report: true,
     master: true,
+    setting: true,
   });
 
   useEffect(() => {
@@ -334,38 +353,46 @@ export function AppShell({
   }
 
   async function logout() {
-    await fetch("/api/auth/logout", { method: "POST" });
-    router.push("/login");
-    router.refresh();
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+    } finally {
+      // Full reload — hindari cache layout yang masih menganggap user login
+      // lalu /login me-redirect kembali ke dashboard.
+      window.location.assign("/login");
+    }
   }
 
   function toggleGroup(id: string) {
     setOpenGroups((prev) => ({ ...prev, [id]: !prev[id] }));
   }
 
+  const brandTitle = companyName.trim() || "SJS · IT Systems";
   const currentLabel =
     flat.find((item) => isNavActive(pathname, item.href, navHrefs))?.label ??
-    "KPI & IT Helpdesk";
+    appTitle;
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-[1400px] gap-6 px-3 py-3 sm:px-4 sm:py-5 md:px-6 lg:px-8">
+    <div className="flex min-h-screen w-full gap-6 px-3 py-3 sm:px-4 sm:py-5 md:px-5 lg:px-6">
       {/* Desktop sidebar */}
-      <aside className="panel sticky top-5 hidden h-[calc(100vh-2.5rem)] w-64 shrink-0 flex-col p-5 md:flex">
-        <div className="mb-6">
-          <p className="mono text-[11px] tracking-[0.18em] text-brand uppercase">
-            SJS · IT Systems
+      <aside className="panel sticky top-5 hidden h-[calc(100vh-2.5rem)] w-72 shrink-0 flex-col overflow-hidden p-5 md:flex lg:w-80">
+        <div className="mb-6 min-w-0">
+          <p className="mono min-w-0 break-words text-[11px] font-semibold leading-snug tracking-wide text-brand uppercase lg:text-xs">
+            {brandTitle}
           </p>
-          <h1 className="mt-1 text-xl leading-tight font-semibold tracking-tight text-ink">
-            KPI & IT Helpdesk
+          <h1 className="mt-1 text-xl leading-tight font-semibold tracking-tight text-ink lg:text-2xl">
+            {appTitle}
           </h1>
-          <p className="mt-2 text-sm leading-snug text-ink-muted">
-            Antrian support, master data, dan KPI.
+          <p className="mt-2 text-sm leading-snug text-ink-muted lg:text-[15px]">
+            {appTagline}
           </p>
         </div>
 
         <div className="mb-4 rounded-xl bg-brand-soft px-3 py-2.5">
-          <p className="text-sm font-medium text-ink">{user.name}</p>
-          <p className="text-xs text-ink-muted">
+          <p className="text-sm font-medium text-ink md:text-[15px]">{user.name}</p>
+          <p className="text-xs text-ink-muted md:text-[13px]">
             {ROLE_LABEL[user.role]}
             {user.departmentName ? ` · ${user.departmentName}` : ""}
           </p>
@@ -382,7 +409,7 @@ export function AppShell({
         <button
           type="button"
           onClick={logout}
-          className="mt-4 rounded-xl border border-line px-3 py-2 text-sm text-ink-muted hover:bg-bg"
+          className="mt-4 shrink-0 rounded-xl border border-line px-3 py-2 text-sm text-ink-muted hover:bg-bg"
         >
           Keluar
         </button>
@@ -397,14 +424,14 @@ export function AppShell({
             className="absolute inset-0 bg-ink/40"
             onClick={() => setMenuOpen(false)}
           />
-          <aside className="absolute inset-y-0 left-0 flex w-[min(100%,20rem)] flex-col bg-surface p-4 shadow-xl">
+          <aside className="absolute inset-y-0 left-0 flex w-[min(100%,20rem)] flex-col overflow-hidden bg-surface p-4 shadow-xl">
             <div className="mb-4 flex items-start justify-between gap-3">
-              <div>
-                <p className="mono text-[11px] tracking-[0.18em] text-brand uppercase">
-                  SJS · IT Systems
+              <div className="min-w-0">
+                <p className="mono min-w-0 break-words text-[11px] font-semibold leading-snug tracking-wide text-brand uppercase">
+                  {brandTitle}
                 </p>
                 <h1 className="mt-1 text-lg font-semibold leading-tight tracking-tight">
-                  KPI & IT Helpdesk
+                  {appTitle}
                 </h1>
               </div>
               <button
@@ -436,7 +463,7 @@ export function AppShell({
             <button
               type="button"
               onClick={logout}
-              className="mt-4 rounded-xl border border-line px-3 py-2.5 text-sm text-ink-muted"
+              className="mt-4 shrink-0 rounded-xl border border-line px-3 py-2.5 text-sm text-ink-muted"
             >
               Keluar
             </button>
@@ -445,6 +472,12 @@ export function AppShell({
       ) : null}
 
       <div className="flex min-w-0 flex-1 flex-col gap-3 sm:gap-5">
+        {logoUrl ? (
+          <div className="hidden justify-end md:flex">
+            <CompanyLogo url={logoUrl} />
+          </div>
+        ) : null}
+
         <header className="panel sticky top-3 z-40 flex items-center justify-between gap-3 px-3 py-2.5 sm:px-4 sm:py-3 md:hidden">
           <div className="flex min-w-0 items-center gap-2.5">
             <button
@@ -458,19 +491,24 @@ export function AppShell({
               <span className="block h-0.5 w-4 rounded bg-ink" />
             </button>
             <div className="min-w-0">
-              <p className="mono text-[10px] tracking-[0.16em] text-brand uppercase">
-                SJS · KPI & IT Helpdesk
+              <p className="mono min-w-0 break-words text-[10px] font-semibold leading-snug tracking-wide text-brand uppercase">
+                {brandTitle}
               </p>
               <p className="truncate text-sm font-semibold">{currentLabel}</p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={logout}
-            className="shrink-0 rounded-lg border border-line px-3 py-2 text-xs text-ink-muted"
-          >
-            Keluar
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            {logoUrl ? (
+              <CompanyLogo url={logoUrl} size="sm" showActions={false} />
+            ) : null}
+            <button
+              type="button"
+              onClick={logout}
+              className="shrink-0 rounded-lg border border-line px-3 py-2 text-xs text-ink-muted"
+            >
+              Keluar
+            </button>
+          </div>
         </header>
 
         <main className="min-w-0 flex-1 pb-8">{children}</main>

@@ -1,7 +1,13 @@
 import fs from "fs";
 import path from "path";
 import { randomUUID } from "crypto";
-import type { SopAttachment } from "./types";
+import type { SopAttachment, SopDocument } from "./types";
+import {
+  isSopDocxAttachment,
+  isSopPdfAttachment,
+  primarySopDocx,
+  primarySopPdf,
+} from "./sop-attachments";
 
 const UPLOAD_ROOT = path.join(process.cwd(), "public", "uploads", "sops");
 
@@ -69,6 +75,25 @@ export function ensureSopUploadDir(sopId: string) {
 
 export function publicUrlForSopFile(sopId: string, filename: string) {
   return `/uploads/sops/${sopId}/${filename}`;
+}
+
+export function writeSopDiskFile(
+  sopId: string,
+  buffer: Buffer,
+  originalName: string,
+  mimeType: string,
+  ext: string,
+): SopAttachment {
+  const dir = ensureSopUploadDir(sopId);
+  const filename = `${randomUUID()}${ext}`;
+  fs.writeFileSync(path.join(dir, filename), buffer);
+  return {
+    label: originalName,
+    url: publicUrlForSopFile(sopId, filename),
+    originalName,
+    mimeType,
+    kind: "file",
+  };
 }
 
 export function absolutePathFromSopPublicUrl(url: string): string | null {
@@ -155,4 +180,29 @@ export function deleteSopUploadFolder(sopId: string) {
 
 export function isUploadedSopFileUrl(url: string) {
   return url.startsWith("/uploads/sops/");
+}
+
+function resolveUploadedPath(sop: SopDocument, kind: "pdf" | "docx"): string | null {
+  const att = kind === "pdf" ? primarySopPdf(sop) : primarySopDocx(sop);
+  const candidates = att ? [att, ...sop.attachments] : sop.attachments;
+  const seen = new Set<string>();
+  for (const a of candidates) {
+    if (seen.has(a.url)) continue;
+    seen.add(a.url);
+    if (kind === "pdf" ? !isSopPdfAttachment(a) : !isSopDocxAttachment(a)) {
+      continue;
+    }
+    if (!(a.kind === "file" || a.url.startsWith("/uploads/sops/"))) continue;
+    const abs = absolutePathFromSopPublicUrl(a.url);
+    if (abs && fs.existsSync(abs)) return abs;
+  }
+  return null;
+}
+
+export function resolveSopPdfPath(sop: SopDocument): string | null {
+  return resolveUploadedPath(sop, "pdf");
+}
+
+export function resolveSopDocxPath(sop: SopDocument): string | null {
+  return resolveUploadedPath(sop, "docx");
 }

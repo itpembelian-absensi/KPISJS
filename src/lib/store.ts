@@ -189,6 +189,88 @@ function seedKpiFunctionsIfEmpty() {
   ensureDepartmentKpiTemplates();
 }
 
+/** Tampilkan menu SOP untuk user yang punya allowlist kustom (fitur baru per-departemen). */
+function seedSopMenuIfMissing() {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT id, role, allowed_menus_json FROM users
+       WHERE allowed_menus_json IS NOT NULL AND trim(allowed_menus_json) != ''`,
+    )
+    .all() as Array<{ id: string; role: string; allowed_menus_json: string }>;
+  const sopRoles = new Set([
+    "admin",
+    "it_staff",
+    "manager",
+    "staff",
+    "assessor",
+  ]);
+  const update = db.prepare(
+    "UPDATE users SET allowed_menus_json = ? WHERE id = ?",
+  );
+  for (const row of rows) {
+    if (!sopRoles.has(row.role)) continue;
+    let menus: unknown;
+    try {
+      menus = JSON.parse(row.allowed_menus_json);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(menus) || menus.includes("/master/sops")) continue;
+    update.run(JSON.stringify([...menus, "/master/sops"]), row.id);
+  }
+}
+
+/** Menu Logo Perusahaan untuk Admin/IT yang punya allowlist kustom. */
+function seedBrandingMenuIfMissing() {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT id, role, allowed_menus_json FROM users
+       WHERE allowed_menus_json IS NOT NULL AND trim(allowed_menus_json) != ''`,
+    )
+    .all() as Array<{ id: string; role: string; allowed_menus_json: string }>;
+  const update = db.prepare(
+    "UPDATE users SET allowed_menus_json = ? WHERE id = ?",
+  );
+  for (const row of rows) {
+    if (row.role !== "admin" && row.role !== "it_staff") continue;
+    let menus: unknown;
+    try {
+      menus = JSON.parse(row.allowed_menus_json);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(menus) || menus.includes("/master/branding")) continue;
+    update.run(JSON.stringify([...menus, "/master/branding"]), row.id);
+  }
+}
+
+/** Menu Backup & Restore untuk Admin/IT yang punya allowlist kustom. */
+function seedBackupMenuIfMissing() {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT id, role, allowed_menus_json FROM users
+       WHERE allowed_menus_json IS NOT NULL AND trim(allowed_menus_json) != ''`,
+    )
+    .all() as Array<{ id: string; role: string; allowed_menus_json: string }>;
+  const update = db.prepare(
+    "UPDATE users SET allowed_menus_json = ? WHERE id = ?",
+  );
+  for (const row of rows) {
+    if (row.role !== "admin" && row.role !== "it_staff") continue;
+    let menus: unknown;
+    try {
+      menus = JSON.parse(row.allowed_menus_json);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(menus) || menus.includes("/master/backup")) continue;
+    update.run(JSON.stringify([...menus, "/master/backup"]), row.id);
+  }
+}
+
 /** Pastikan setiap departemen aktif punya template fungsi KPI */
 export function ensureDepartmentKpiTemplates() {
   const db = getDb();
@@ -1048,6 +1130,9 @@ function ensureDb() {
   seedIfEmpty();
   migrateOrphanKpiFunctions();
   seedKpiFunctionsIfEmpty();
+  seedSopMenuIfMissing();
+  seedBrandingMenuIfMissing();
+  seedBackupMenuIfMissing();
 }
 
 export function readData(): AppData {

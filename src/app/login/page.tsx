@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { getAppBranding } from "@/lib/branding";
 import { getSessionUser } from "@/lib/session";
 import LoginClient from "./login-client";
 
@@ -8,5 +9,12 @@ export default async function LoginPage() {
     redirect("/");
   }
 
-  return <LoginClient />;
+  const branding = getAppBranding();
+  return (
+    <LoginClient
+      logoUrl={branding.logoUrl}
+      companyName={branding.companyName}
+      appTitle={branding.appTitle}
+    />
+  );
 }

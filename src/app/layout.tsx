@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Fraunces, IBM_Plex_Mono, Manrope } from "next/font/google";
 import { AppShell } from "@/components/AppShell";
+import { getAppBranding } from "@/lib/branding";
 import { getSessionUser } from "@/lib/session";
 import "./globals.css";
 
@@ -38,14 +39,24 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const user = await getSessionUser();
+  const branding = getAppBranding();
 
   return (
     <html
       lang="id"
+      data-theme={branding.themeId}
       className={`${display.variable} ${accent.variable} ${mono.variable} h-full antialiased`}
     >
       <body className="min-h-full">
-        <AppShell user={user}>{children}</AppShell>
+        <AppShell
+          user={user}
+          logoUrl={branding.logoUrl}
+          companyName={branding.companyName}
+          appTitle={branding.appTitle}
+          appTagline={branding.appTagline}
+        >
+          {children}
+        </AppShell>
       </body>
     </html>
   );

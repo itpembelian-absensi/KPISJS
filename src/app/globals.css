@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
-:root {
+:root,
+html[data-theme="default"] {
   --bg: #eef2f0;
   --bg-elevated: #f7f9f8;
   --surface: #ffffff;
@@ -20,6 +21,88 @@
   --danger-soft: #fee4e2;
   --info: #175cd3;
   --info-soft: #dbeafe;
+  --wash-1: #cfe8e1;
+  --wash-2: #f3dccb;
+}
+
+html[data-theme="ocean"] {
+  --bg: #eef2f6;
+  --bg-elevated: #f6f8fb;
+  --surface: #ffffff;
+  --ink: #12202c;
+  --ink-muted: #5a6a78;
+  --line: #d3dce4;
+  --brand: #2a7ab8;
+  --brand-deep: #1c5d8f;
+  --brand-soft: #e3f0f8;
+  --accent: #c45c26;
+  --accent-soft: #f8e6db;
+  --wash-1: #cfe0ee;
+  --wash-2: #dce6f0;
+}
+
+html[data-theme="forest"] {
+  --bg: #eef2ee;
+  --bg-elevated: #f6f9f6;
+  --surface: #ffffff;
+  --ink: #142016;
+  --ink-muted: #5a6b5c;
+  --line: #d4ddd4;
+  --brand: #3d7a45;
+  --brand-deep: #2c5c33;
+  --brand-soft: #e5f2e6;
+  --accent: #c45c26;
+  --accent-soft: #f8e6db;
+  --wash-1: #d2e6d4;
+  --wash-2: #e4edd4;
+}
+
+html[data-theme="sunset"] {
+  --bg: #f4eee8;
+  --bg-elevated: #faf6f2;
+  --surface: #ffffff;
+  --ink: #241812;
+  --ink-muted: #6b5a52;
+  --line: #e0d5cc;
+  --brand: #c45c26;
+  --brand-deep: #9a4418;
+  --brand-soft: #f8e6db;
+  --accent: #2a9b86;
+  --accent-soft: #e4f5f0;
+  --wash-1: #f3dccb;
+  --wash-2: #ead4c4;
+}
+
+html[data-theme="slate"] {
+  --bg: #eef1f3;
+  --bg-elevated: #f6f8f9;
+  --surface: #ffffff;
+  --ink: #1a2329;
+  --ink-muted: #5a676f;
+  --line: #d5dde3;
+  --brand: #4b6272;
+  --brand-deep: #334653;
+  --brand-soft: #e8eef1;
+  --accent: #c45c26;
+  --accent-soft: #f8e6db;
+  --wash-1: #d5dde3;
+  --wash-2: #e2e6ea;
+}
+
+html[data-theme="orchid"] {
+  --bg: #f3eef4;
+  --bg-elevated: #f8f4f9;
+  --surface: #ffffff;
+  --ink: #1e1526;
+  --ink-muted: #6b5a72;
+  --line: #ddd4e2;
+  --brand: #7a4ea3;
+  --brand-deep: #5c3a7d;
+  --brand-soft: #f0e8f6;
+  --accent: #c45c26;
+  --accent-soft: #f8e6db;
+  --wash-1: #e4d4ee;
+  --wash-2: #f0dce6;
 }
 
 @theme inline {
@@ -57,8 +140,8 @@
 
   body {
     background:
-      radial-gradient(1200px 600px at 0% -10%, #cfe8e1 0%, transparent 55%),
-      radial-gradient(900px 500px at 100% 0%, #f3dccb 0%, transparent 45%),
+      radial-gradient(1200px 600px at 0% -10%, var(--wash-1) 0%, transparent 55%),
+      radial-gradient(900px 500px at 100% 0%, var(--wash-2) 0%, transparent 45%),
       var(--bg);
     color: var(--ink);
     font-family: var(--font-display), system-ui, sans-serif;

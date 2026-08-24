@@ -13,9 +13,18 @@ import {
   TextRun,
   WidthType,
 } from "docx";
-import type { SopAttachment, SopDocument } from "./types";
+import type { SopDocument } from "./types";
 import { formatSopDate } from "./sop-format";
-import { absolutePathFromSopPublicUrl } from "./sop-files";
+import { resolveSopDocxPath, resolveSopPdfPath } from "./sop-files";
+import { zipCreate } from "./zip-write";
+import { ensureSopOriginalPdf } from "./sop-ensure-pdf";
+
+export class SopOriginalFileError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SopOriginalFileError";
+  }
+}
 
 function collectBuffers(doc: PDFKit.PDFDocument): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -52,7 +61,7 @@ function drawHeaderTable(doc: PDFKit.PDFDocument, sop: SopDocument) {
 
   // Left title block
   doc.fontSize(11).fillColor("#0f172a").font("Helvetica-Bold");
-  doc.text(sop.divisionLabel || "DIVISI IT", left + 8, top + 10, {
+          doc.text(sop.divisionLabel || "DIVISI", left + 8, top + 10, {
     width: leftW - 16,
   });
   doc.fontSize(9).font("Helvetica-Bold");
@@ -199,7 +208,7 @@ function writeFormalSopPdf(
     sop.dispositions.length > 0
       ? sop.dispositions
       : [
-          { role: "Dibuat Oleh", name: "", position: "Divisi IT" },
+          { role: "Dibuat Oleh", name: "", position: sop.departmentName || "Departemen" },
           { role: "Diperiksa Oleh", name: "", position: "Manager" },
           {
             role: "Diperiksa Oleh",
@@ -228,27 +237,7 @@ function writeFormalSopPdf(
   doc.y = y + tableH + 12;
 }
 
-function isPdfAttachment(att: SopAttachment) {
-  const name = `${att.originalName || ""} ${att.label || ""} ${att.url}`.toLowerCase();
-  return (
-    att.mimeType === "application/pdf" ||
-    name.includes(".pdf") ||
-    att.url.toLowerCase().endsWith(".pdf")
-  );
-}
-
-/** Path absolut file PDF lampiran SOP (jika ada di disk) */
-export function resolveSopPdfPath(sop: SopDocument): string | null {
-  for (const att of sop.attachments) {
-    if (!isPdfAttachment(att)) continue;
-    if (!(att.kind === "file" || att.url.startsWith("/uploads/sops/"))) {
-      continue;
-    }
-    const abs = absolutePathFromSopPublicUrl(att.url);
-    if (abs && fs.existsSync(abs)) return abs;
-  }
-  return null;
-}
+export { resolveSopDocxPath, resolveSopPdfPath } from "./sop-files";
 
 /** PDF formal A–E (fallback jika SOP belum punya file PDF) */
 export async function buildSopPdfFormal(sops: SopDocument[]): Promise<Buffer> {
@@ -259,7 +248,7 @@ export async function buildSopPdfFormal(sops: SopDocument[]): Promise<Buffer> {
       Title:
         sops.length === 1
           ? `SOP — ${sops[0].title}`
-          : "Kumpulan SOP IT",
+          : "Kumpulan SOP",
       Author: "SJS IT Systems",
     },
   });
@@ -278,58 +267,46 @@ export async function buildSopPdfFormal(sops: SopDocument[]): Promise<Buffer> {
 }
 
 /**
- * Export PDF: utamakan file PDF lampiran asli (sama persis),
- * digabung berurutan. SOP tanpa PDF memakai layout formal A–E.
+ * Export PDF: file PDF dari Word asli (layout sama), digabung berurutan.
+ * SOP tanpa file Word/PDF memakai layout formal A–E.
  */
 export async function buildSopPdf(sops: SopDocument[]): Promise<Buffer> {
   if (sops.length === 0) {
     return buildSopPdfFormal([]);
   }
 
-  // Satu SOP + ada file PDF → kirim byte file apa adanya
-  if (sops.length === 1) {
-    const only = resolveSopPdfPath(sops[0]);
-    if (only) return fs.readFileSync(only);
-  }
-
-  const allHavePdf = sops.every((s) => Boolean(resolveSopPdfPath(s)));
-  if (allHavePdf) {
-    const merged = await PdfLibDocument.create();
-    for (const sop of sops) {
-      const pdfPath = resolveSopPdfPath(sop)!;
-      const bytes = fs.readFileSync(pdfPath);
-      const src = await PdfLibDocument.load(bytes, {
-        ignoreEncryption: true,
-      });
-      const pages = await merged.copyPages(src, src.getPageIndices());
-      for (const page of pages) merged.addPage(page);
-    }
-    merged.setTitle(
-      sops.length === 1 ? `SOP — ${sops[0].title}` : "Kumpulan SOP IT",
-    );
-    merged.setAuthor("SJS IT Systems");
-    return Buffer.from(await merged.save());
-  }
-
-  // Campuran: gabungkan PDF asli + formal untuk yang tanpa file
-  const merged = await PdfLibDocument.create();
+  const buffers: Buffer[] = [];
   for (const sop of sops) {
-    const pdfPath = resolveSopPdfPath(sop);
-    if (pdfPath) {
-      const bytes = fs.readFileSync(pdfPath);
-      const src = await PdfLibDocument.load(bytes, {
-        ignoreEncryption: true,
-      });
-      const pages = await merged.copyPages(src, src.getPageIndices());
-      for (const page of pages) merged.addPage(page);
-    } else {
-      const formalBuf = await buildSopPdfFormal([sop]);
-      const src = await PdfLibDocument.load(formalBuf);
-      const pages = await merged.copyPages(src, src.getPageIndices());
-      for (const page of pages) merged.addPage(page);
+    let current = sop;
+    if (!resolveSopPdfPath(current) && resolveSopDocxPath(current)) {
+      current = await ensureSopOriginalPdf(current);
     }
+    const pdfPath = resolveSopPdfPath(current);
+    if (pdfPath) {
+      buffers.push(fs.readFileSync(pdfPath));
+      continue;
+    }
+    if (resolveSopDocxPath(current)) {
+      throw new SopOriginalFileError(
+        `${current.code}: gagal membuat PDF dari Word asli. Pastikan Microsoft Word atau LibreOffice tersedia.`,
+      );
+    }
+    buffers.push(await buildSopPdfFormal([current]));
   }
-  merged.setTitle("Kumpulan SOP IT");
+
+  if (buffers.length === 1) return buffers[0];
+
+  const merged = await PdfLibDocument.create();
+  for (const bytes of buffers) {
+    const src = await PdfLibDocument.load(bytes, {
+      ignoreEncryption: true,
+    });
+    const pages = await merged.copyPages(src, src.getPageIndices());
+    for (const page of pages) merged.addPage(page);
+  }
+  merged.setTitle(
+    sops.length === 1 ? `SOP — ${sops[0].title}` : "Kumpulan SOP",
+  );
   merged.setAuthor("SJS IT Systems");
   return Buffer.from(await merged.save());
 }
@@ -385,7 +362,7 @@ function sopToDocxChildren(sop: SopDocument, withBreak: boolean) {
                 new Paragraph({
                   children: [
                     new TextRun({
-                      text: sop.divisionLabel || "DIVISI IT",
+                      text: sop.divisionLabel || "DIVISI",
                       bold: true,
                       size: 20,
                     }),
@@ -558,6 +535,21 @@ function sopToDocxChildren(sop: SopDocument, withBreak: boolean) {
 }
 
 export async function buildSopDocx(sops: SopDocument[]): Promise<Buffer> {
+  if (sops.length === 1) {
+    const original = resolveSopDocxPath(sops[0]);
+    if (original) return fs.readFileSync(original);
+  } else if (sops.length > 1) {
+    const paths = sops.map((s) => resolveSopDocxPath(s));
+    if (paths.every(Boolean)) {
+      return zipCreate(
+        sops.map((s, i) => ({
+          name: `${s.code.replace(/[\\/:*?"<>|]+/g, "-")}.docx`,
+          data: fs.readFileSync(paths[i]!),
+        })),
+      );
+    }
+  }
+
   const children: Array<Paragraph | Table> = [];
 
   if (sops.length === 0) {
@@ -571,7 +563,7 @@ export async function buildSopDocx(sops: SopDocument[]): Promise<Buffer> {
   const doc = new Document({
     creator: "SJS IT Systems",
     title:
-      sops.length === 1 ? `SOP — ${sops[0].title}` : "Kumpulan SOP IT",
+      sops.length === 1 ? `SOP — ${sops[0].title}` : "Kumpulan SOP",
     sections: [
       {
         properties: {},
@@ -585,12 +577,46 @@ export async function buildSopDocx(sops: SopDocument[]): Promise<Buffer> {
 
 export function sopExportFilename(
   sops: SopDocument[],
-  format: "pdf" | "docx",
+  format: "pdf" | "docx" | "zip",
 ): string {
-  const ext = format === "pdf" ? "pdf" : "docx";
+  const ext = format === "pdf" ? "pdf" : format === "zip" ? "zip" : "docx";
   if (sops.length === 1) {
     const safe = sops[0].code.replace(/[^\w.-]+/g, "_");
     return `${safe}.${ext}`;
   }
-  return `SOP-IT-gabungan-${sops.length}.${ext}`;
+  const codes = [
+    ...new Set(sops.map((s) => s.departmentCode).filter(Boolean)),
+  ];
+  const prefix = codes.length === 1 ? `SOP-${codes[0]}` : "SOP";
+  return `${prefix}-gabungan-${sops.length}.${ext}`;
+}
+
+const DOCX_MIME =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+export async function exportSops(
+  sops: SopDocument[],
+  format: "pdf" | "docx",
+): Promise<{
+  buffer: Buffer;
+  filename: string;
+  contentType: string;
+}> {
+  if (format === "docx") {
+    const buffer = await buildSopDocx(sops);
+    const isZip =
+      sops.length > 1 && sops.every((s) => Boolean(resolveSopDocxPath(s)));
+    return {
+      buffer,
+      filename: sopExportFilename(sops, isZip ? "zip" : "docx"),
+      contentType: isZip ? "application/zip" : DOCX_MIME,
+    };
+  }
+
+  const buffer = await buildSopPdf(sops);
+  return {
+    buffer,
+    filename: sopExportFilename(sops, "pdf"),
+    contentType: "application/pdf",
+  };
 }

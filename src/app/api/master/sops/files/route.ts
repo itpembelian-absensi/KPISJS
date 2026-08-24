@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { canAccessSop, SESSION_COOKIE } from "@/lib/auth";
+import { canAccessSop, canManageSop, SESSION_COOKIE } from "@/lib/auth";
 import {
   deleteSopFileUrls,
   MAX_SOP_FILES,
@@ -42,6 +42,9 @@ export async function POST(req: NextRequest) {
     const existing = getSop(sopId);
     if (!existing) {
       return NextResponse.json({ error: "SOP tidak ditemukan" }, { status: 404 });
+    }
+    if (!canManageSop(gate.user, existing.departmentId)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     if (typeof removeUrl === "string" && removeUrl) {

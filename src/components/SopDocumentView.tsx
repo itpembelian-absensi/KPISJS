@@ -1,22 +1,7 @@
 import Link from "next/link";
-import type { SopAttachment, SopDocument } from "@/lib/types";
+import type { SopDocument } from "@/lib/types";
+import { primarySopDocx, primarySopPdf } from "@/lib/sop-attachments";
 import { formatSopDate } from "@/lib/sop-format";
-
-function isPdfAttachment(att: SopAttachment) {
-  const name = `${att.originalName || ""} ${att.label || ""} ${att.url}`.toLowerCase();
-  return (
-    att.mimeType === "application/pdf" ||
-    name.includes(".pdf") ||
-    (att.kind === "file" && att.url.toLowerCase().includes(".pdf"))
-  );
-}
-
-function primaryPdf(sop: SopDocument): SopAttachment | null {
-  const files = sop.attachments.filter(
-    (a) => a.kind === "file" || a.url.startsWith("/uploads/sops/"),
-  );
-  return files.find(isPdfAttachment) || null;
-}
 
 /** Header + isi formal A–E (sama struktur dengan export PDF aplikasi) */
 function SopFormalBody({
@@ -32,7 +17,7 @@ function SopFormalBody({
       <div className="grid border-b border-ink md:grid-cols-[1.38fr_1fr]">
         <div className="space-y-1.5 border-b border-ink px-3 py-3 md:border-r md:border-b-0 md:px-4 md:py-3.5">
           <p className="text-[11px] font-bold tracking-wide sm:text-sm">
-            {sop.divisionLabel || "DIVISI IT"}
+            {sop.divisionLabel || "DIVISI"}
           </p>
           <p className="text-[10px] font-bold uppercase sm:text-xs">
             {sop.documentType || "STANDARD OPERATING PROCEDURE"}
@@ -167,7 +152,7 @@ function SopFormalBody({
                 {(sop.dispositions.length > 0
                   ? sop.dispositions
                   : [
-                      { role: "Dibuat Oleh", name: "", position: "Divisi IT" },
+                      { role: "Dibuat Oleh", name: "", position: sop.departmentName || "Departemen" },
                       { role: "Diperiksa Oleh", name: "", position: "Manager" },
                       {
                         role: "Diperiksa Oleh",
@@ -218,18 +203,19 @@ export function SopDocumentView({
   preferPdfFile?: boolean;
   pageLabel?: string;
 }) {
-  const pdf = preferPdfFile ? primaryPdf(sop) : null;
+  const pdf = preferPdfFile ? primarySopPdf(sop) : null;
+  const docx = primarySopDocx(sop);
+
+  const pdfHref = pdf
+    ? pdf.url
+    : `/api/sop/export?format=pdf&ids=${sop.id}&inline=1`;
 
   return (
     <article className="overflow-hidden rounded-none border-0 bg-transparent shadow-none">
       {showActions ? (
         <div className="mb-3 flex flex-wrap gap-2">
           <a
-            href={
-              pdf
-                ? pdf.url
-                : `/api/sop/export?format=pdf&ids=${sop.id}`
-            }
+            href={pdf ? pdf.url : `/api/sop/export?format=pdf&ids=${sop.id}`}
             {...(pdf
               ? {
                   target: "_blank" as const,
@@ -239,13 +225,22 @@ export function SopDocumentView({
               : {})}
             className="rounded-xl bg-brand px-3 py-2 text-sm font-medium text-white"
           >
-            {pdf ? "Unduh PDF asli" : "Unduh PDF"}
+            Unduh PDF
           </a>
           <a
-            href={`/api/sop/export?format=docx&ids=${sop.id}`}
+            href={
+              docx
+                ? docx.url
+                : `/api/sop/export?format=docx&ids=${sop.id}`
+            }
+            {...(docx
+              ? {
+                  download: docx.originalName || docx.label,
+                }
+              : {})}
             className="rounded-xl border border-brand px-3 py-2 text-sm font-medium text-brand"
           >
-            Unduh Word
+            {docx ? "Unduh Word asli" : "Unduh Word"}
           </a>
           <Link
             href="/master/sops"
@@ -256,7 +251,7 @@ export function SopDocumentView({
         </div>
       ) : null}
 
-      {pdf ? (
+      {pdf || docx ? (
         <div className="space-y-3">
           <div className="flex flex-wrap items-baseline justify-between gap-2 border border-ink bg-white px-3 py-2">
             <div>
@@ -266,13 +261,13 @@ export function SopDocumentView({
               <p className="text-sm font-bold text-[#0f172a]">{sop.title}</p>
             </div>
             <p className="text-[11px] text-[#64748b]">
-              Tampilan file PDF lampiran (layout sama persis dengan file)
+              Tampilan PDF dari file Word asli (layout sama)
             </p>
           </div>
           <div className="border border-ink bg-[#e2e8f0]">
             <iframe
               title={`PDF ${sop.code}`}
-              src={`${pdf.url}#toolbar=1&navpanes=0`}
+              src={`${pdfHref}#toolbar=1&navpanes=0`}
               className="h-[min(88vh,1100px)] w-full bg-white"
             />
           </div>

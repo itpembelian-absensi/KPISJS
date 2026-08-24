@@ -34,6 +34,7 @@ function main() {
   }
 
   const result = upsertSop({
+    departmentId: "dep-it",
     code: CODE,
     title:
       "Master SOP Information Technology – PT Sahabat Jaya Sukses (DRAFT)",

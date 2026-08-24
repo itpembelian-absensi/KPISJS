@@ -106,6 +106,7 @@ async function importOne(item: ManifestItem) {
 
   const result = upsertSop({
     id: existing?.id,
+    departmentId: existing?.departmentId || "dep-it",
     code: item.code,
     title: item.title,
     divisionLabel: "DIVISI IT",
@@ -149,6 +150,7 @@ async function updateMaster() {
 
   const result = upsertSop({
     id: existing?.id,
+    departmentId: existing?.departmentId || "dep-it",
     code,
     title:
       "Master SOP Information Technology – PT Sahabat Jaya Sukses (DRAFT)",

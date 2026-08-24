@@ -4,6 +4,7 @@ import { SESSION_COOKIE } from "@/lib/auth";
 const PUBLIC = [
   "/login",
   "/api/auth/login",
+  "/api/auth/logout",
   "/api/auth/forgot-password",
 ];
 

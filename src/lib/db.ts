@@ -331,6 +331,7 @@ function createSchema(db: Database.Database) {
       ["qualifications", "TEXT NOT NULL DEFAULT ''"],
       ["notes", "TEXT NOT NULL DEFAULT ''"],
       ["dispositions_json", "TEXT NOT NULL DEFAULT '[]'"],
+      ["department_id", "TEXT NOT NULL DEFAULT ''"],
     ];
     for (const [col, def] of sopAlters) {
       if (!sopNames.has(col)) {
@@ -342,6 +343,27 @@ function createSchema(db: Database.Database) {
       `UPDATE sops SET purpose = description
        WHERE (purpose IS NULL OR purpose = '')
          AND description IS NOT NULL AND description != ''`,
+    );
+
+    // SOP lama tanpa departemen → IT (atau departemen pertama)
+    const itDept = db
+      .prepare(
+        `SELECT id FROM departments WHERE lower(code) = 'it' LIMIT 1`,
+      )
+      .get() as { id: string } | undefined;
+    const anyDept =
+      itDept ??
+      (db
+        .prepare(`SELECT id FROM departments ORDER BY code LIMIT 1`)
+        .get() as { id: string } | undefined);
+    if (anyDept) {
+      db.prepare(
+        `UPDATE sops SET department_id = ?
+         WHERE department_id IS NULL OR trim(department_id) = ''`,
+      ).run(anyDept.id);
+    }
+    db.exec(
+      `CREATE INDEX IF NOT EXISTS idx_sops_department ON sops(department_id)`,
     );
   }
 
@@ -529,4 +551,20 @@ export function intToBool(v: number | boolean): boolean {
   return Boolean(v);
 }
 
-export { DB_PATH };
+export function closeDb() {
+  const current = global.__sjsSqlite;
+  if (!current) return;
+  try {
+    current.pragma("wal_checkpoint(TRUNCATE)");
+  } catch {
+    /* ignore */
+  }
+  try {
+    current.close();
+  } catch {
+    /* ignore */
+  }
+  global.__sjsSqlite = undefined;
+}
+
+export { DB_PATH, DATA_DIR };

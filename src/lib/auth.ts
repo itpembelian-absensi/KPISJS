@@ -1,15 +1,61 @@
-import type { SessionUser, UserRole } from "./types";
+import type { Department, SessionUser, UserRole } from "./types";
 
 export const SESSION_COOKIE = "sjs_session";
 export const SESSION_DAYS = 7;
+
+/** Opsi cookie session — login & logout HARUS sama agar cookie benar-benar terhapus. */
+export function sessionCookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+  };
+}
 
 export function canManageMaster(role: UserRole): boolean {
   return role === "admin" || role === "it_staff";
 }
 
-/** SOP IT: hanya Admin & IT Staf (dept IT) */
+/** Baca SOP: semua role yang login (isi dibatasi scope departemen). */
 export function canAccessSop(role: UserRole): boolean {
-  return role === "admin" || role === "it_staff";
+  return (
+    role === "admin" ||
+    role === "it_staff" ||
+    role === "manager" ||
+    role === "staff" ||
+    role === "assessor"
+  );
+}
+
+/** Buat/ubah/hapus SOP: Admin & IT semua dept; Manager hanya dept-nya. */
+export function canManageSop(
+  user: SessionUser,
+  departmentId?: string,
+): boolean {
+  if (user.role === "admin" || user.role === "it_staff") {
+    if (!departmentId) return true;
+    return canAccessDepartment(user, departmentId);
+  }
+  if (user.role === "manager") {
+    if (!departmentId) {
+      const scope = getEffectiveDepartmentScope(user);
+      return scope === "all" || scope.length > 0;
+    }
+    return canAccessDepartment(user, departmentId);
+  }
+  return false;
+}
+
+/** Departemen aktif yang boleh dilihat user (SOP / filter). */
+export function departmentsVisibleToUser(
+  user: SessionUser,
+  departments: Department[],
+): Department[] {
+  const scope = getEffectiveDepartmentScope(user);
+  const list = departments.filter((d) => d.active);
+  if (scope === "all") return list;
+  return list.filter((d) => scope.includes(d.id));
 }
 
 export function canHandleTickets(role: UserRole): boolean {
@@ -162,38 +208,6 @@ export const NAV_ENTRIES: NavEntry[] = [
     },
   },
   {
-    type: "link",
-    item: {
-      href: "/master/sops",
-      label: "SOP IT",
-      hint: "Prosedur kerja & export PDF/Word",
-      roles: ["admin", "it_staff"],
-    },
-  },
-  {
-    type: "group",
-    group: {
-      id: "antrian",
-      label: "Antrian",
-      hint: "Tiket support & perintah kerja",
-      roles: ["admin", "manager", "staff", "it_staff", "assessor"],
-      children: [
-        {
-          href: "/tickets",
-          label: "Antrian Tiket",
-          hint: "Queue & assignment",
-          roles: ["admin", "manager", "staff", "it_staff", "assessor"],
-        },
-        {
-          href: "/work-orders",
-          label: "Antrian Tugas",
-          hint: "Perintah & proses kerja",
-          roles: ["admin", "manager", "it_staff"],
-        },
-      ],
-    },
-  },
-  {
     type: "group",
     group: {
       id: "tiket-perintah",
@@ -217,12 +231,32 @@ export const NAV_ENTRIES: NavEntry[] = [
     },
   },
   {
-    type: "link",
-    item: {
-      href: "/tickets/rate",
-      label: "Nilai Hasil Kerja",
-      hint: "Rating kepuasan tiket selesai",
+    type: "group",
+    group: {
+      id: "antrian",
+      label: "Antrian & Hasil Kerja",
+      hint: "Tiket, perintah kerja & penilaian",
       roles: ["admin", "manager", "staff", "it_staff", "assessor"],
+      children: [
+        {
+          href: "/tickets",
+          label: "Antrian Tiket",
+          hint: "Queue & assignment",
+          roles: ["admin", "manager", "staff", "it_staff", "assessor"],
+        },
+        {
+          href: "/work-orders",
+          label: "Antrian Tugas",
+          hint: "Perintah & proses kerja",
+          roles: ["admin", "manager", "it_staff"],
+        },
+        {
+          href: "/tickets/rate",
+          label: "Nilai Hasil Kerja",
+          hint: "Rating kepuasan tiket selesai",
+          roles: ["admin", "manager", "staff", "it_staff", "assessor"],
+        },
+      ],
     },
   },
   {
@@ -243,6 +277,12 @@ export const NAV_ENTRIES: NavEntry[] = [
           href: "/kpi/departments",
           label: "KPI Departemen",
           hint: "Fungsi, project, penilaian",
+          roles: ["admin", "manager", "staff", "it_staff", "assessor"],
+        },
+        {
+          href: "/master/sops",
+          label: "SOP",
+          hint: "Prosedur kerja per departemen",
           roles: ["admin", "manager", "staff", "it_staff", "assessor"],
         },
       ],
@@ -288,7 +328,7 @@ export const NAV_ENTRIES: NavEntry[] = [
     group: {
       id: "master",
       label: "Master Data",
-      hint: "Referensi & akses",
+      hint: "Referensi data",
       roles: ["admin", "it_staff"],
       children: [
         {
@@ -333,10 +373,33 @@ export const NAV_ENTRIES: NavEntry[] = [
           hint: "IT Staff & IT Manager",
           roles: ["admin", "it_staff"],
         },
+      ],
+    },
+  },
+  {
+    type: "group",
+    group: {
+      id: "setting",
+      label: "Setting",
+      hint: "Pengaturan aplikasi",
+      roles: ["admin", "it_staff"],
+      children: [
         {
           href: "/master/users",
           label: "User & Role",
           hint: "Login, password, role",
+          roles: ["admin", "it_staff"],
+        },
+        {
+          href: "/master/branding",
+          label: "Identitas & Tema",
+          hint: "Nama, logo, dan warna aplikasi",
+          roles: ["admin", "it_staff"],
+        },
+        {
+          href: "/master/backup",
+          label: "Backup & Restore",
+          hint: "Salin / timpa database SQLite",
           roles: ["admin", "it_staff"],
         },
       ],

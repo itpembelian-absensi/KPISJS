@@ -1,23 +1,30 @@
 import Link from "next/link";
 import { SopDocumentView } from "@/components/SopDocumentView";
 import { requireSopAccess } from "@/lib/session";
-import { getSopsByIds } from "@/lib/sop-ops";
+import { primarySopPdf } from "@/lib/sop-attachments";
+import { ensureSopOriginalPdf } from "@/lib/sop-ensure-pdf";
+import { getSopsByIds, userCanViewSop } from "@/lib/sop-ops";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 180;
 
 export default async function SopCombinedPage({
   searchParams,
 }: {
   searchParams: Promise<{ ids?: string }>;
 }) {
-  await requireSopAccess();
+  const user = await requireSopAccess();
   const sp = await searchParams;
   const ids = (sp.ids || "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  const sops = getSopsByIds(ids);
-  const idsQuery = ids.join(",");
+  const sops = [];
+  for (const sop of getSopsByIds(ids).filter((s) => userCanViewSop(user, s))) {
+    sops.push(await ensureSopOriginalPdf(sop));
+  }
+  const idsQuery = sops.map((s) => s.id).join(",");
+  const hasOriginalPdf = sops.some((s) => primarySopPdf(s));
 
   return (
     <div className="mx-auto max-w-4xl space-y-5">
@@ -26,22 +33,15 @@ export default async function SopCombinedPage({
           className="text-sm text-brand"
           style={{ fontFamily: "var(--font-accent), serif" }}
         >
-          SOP IT
+          SOP
         </p>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
           Tampilan gabungan
         </h1>
         <p className="mt-2 text-sm text-ink-muted">
           {sops.length} dokumen ditampilkan berurutan
-          {sops.some((s) =>
-            s.attachments.some(
-              (a) =>
-                (a.originalName || a.label || a.url)
-                  .toLowerCase()
-                  .includes(".pdf") || a.mimeType === "application/pdf",
-            ),
-          )
-            ? " — PDF lampiran ditampilkan apa adanya."
+          {hasOriginalPdf
+            ? " — PDF dari file Word asli (layout sama)."
             : "."}
         </p>
         {sops.length > 0 ? (
@@ -72,7 +72,7 @@ export default async function SopCombinedPage({
         <div className="panel p-6 text-sm text-ink-muted">
           Tidak ada SOP dipilih. Centang dokumen di{" "}
           <Link href="/master/sops" className="text-brand underline">
-            Master SOP IT
+            daftar SOP
           </Link>{" "}
           lalu klik Lihat gabungan.
         </div>

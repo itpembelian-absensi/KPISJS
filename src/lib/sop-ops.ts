@@ -2,12 +2,21 @@ import { randomUUID } from "crypto";
 import { boolToInt, getDb, intToBool } from "./db";
 import { deleteSopUploadFolder } from "./sop-files";
 import type {
+  SessionUser,
   SopAttachment,
   SopDisposition,
   SopDocument,
   SopStep,
 } from "./types";
-import { DEFAULT_SOP_DISPOSITIONS } from "./types";
+import {
+  DEFAULT_SOP_DISPOSITIONS,
+  defaultSopDispositions,
+  sopDivisionLabelFromDepartment,
+} from "./types";
+import {
+  canAccessDepartment,
+  getEffectiveDepartmentScope,
+} from "./auth";
 
 type SopRow = {
   id: string;
@@ -31,6 +40,9 @@ type SopRow = {
   qualifications?: string;
   notes?: string;
   dispositions_json?: string;
+  department_id?: string;
+  department_name?: string;
+  department_code?: string;
 };
 
 function parseSteps(raw: string | null | undefined): SopStep[] {
@@ -105,14 +117,30 @@ function parseDispositions(raw: string | null | undefined): SopDisposition[] {
   }
 }
 
+const SOP_SELECT = `
+  SELECT sops.*,
+    COALESCE(departments.name, '') AS department_name,
+    COALESCE(departments.code, '') AS department_code
+  FROM sops
+  LEFT JOIN departments ON departments.id = sops.department_id
+`;
+
 function mapSop(row: SopRow): SopDocument {
   const purpose =
     (row.purpose || "").trim() || (row.description || "").trim() || "";
+  const departmentId = (row.department_id || "").trim();
+  const departmentName = (row.department_name || "").trim();
+  const departmentCode = (row.department_code || "").trim();
   return {
     id: row.id,
+    departmentId,
+    departmentName: departmentName || "—",
+    departmentCode,
     code: row.code,
     title: row.title,
-    divisionLabel: row.division_label || "DIVISI IT",
+    divisionLabel:
+      row.division_label ||
+      (departmentName ? sopDivisionLabelFromDepartment(departmentName) : "DIVISI"),
     documentType: row.document_type || "STANDARD OPERATING PROCEDURE",
     effectiveDate: row.effective_date || "",
     revision: row.revision || row.version || "-",
@@ -131,16 +159,68 @@ function mapSop(row: SopRow): SopDocument {
   };
 }
 
-export function listSops(activeOnly = false): SopDocument[] {
-  let sql = "SELECT * FROM sops";
-  if (activeOnly) sql += " WHERE active = 1";
-  sql += " ORDER BY title COLLATE NOCASE";
-  return (getDb().prepare(sql).all() as SopRow[]).map(mapSop);
+function getDepartmentRow(id: string) {
+  return getDb()
+    .prepare("SELECT id, code, name FROM departments WHERE id = ?")
+    .get(id) as { id: string; code: string; name: string } | undefined;
+}
+
+export function listSops(options: {
+  activeOnly?: boolean;
+  departmentId?: string;
+  departmentIds?: string[];
+} = {}): SopDocument[] {
+  const where: string[] = [];
+  const params: string[] = [];
+  if (options.activeOnly) where.push("sops.active = 1");
+  if (options.departmentId) {
+    where.push("sops.department_id = ?");
+    params.push(options.departmentId);
+  } else if (options.departmentIds) {
+    if (options.departmentIds.length === 0) return [];
+    where.push(
+      `sops.department_id IN (${options.departmentIds.map(() => "?").join(", ")})`,
+    );
+    params.push(...options.departmentIds);
+  }
+  let sql = SOP_SELECT;
+  if (where.length) sql += ` WHERE ${where.join(" AND ")}`;
+  sql += " ORDER BY departments.code COLLATE NOCASE, sops.title COLLATE NOCASE";
+  return (getDb().prepare(sql).all(...params) as SopRow[]).map(mapSop);
+}
+
+export function listSopsForUser(
+  user: SessionUser,
+  options: { activeOnly?: boolean; departmentId?: string } = {},
+): SopDocument[] {
+  const scope = getEffectiveDepartmentScope(user);
+  if (options.departmentId) {
+    if (scope !== "all" && !scope.includes(options.departmentId)) return [];
+    return listSops({
+      activeOnly: options.activeOnly,
+      departmentId: options.departmentId,
+    });
+  }
+  if (scope === "all") return listSops({ activeOnly: options.activeOnly });
+  return listSops({
+    activeOnly: options.activeOnly,
+    departmentIds: scope,
+  });
+}
+
+export function userCanViewSop(
+  user: SessionUser,
+  sop: SopDocument,
+): boolean {
+  if (!sop.departmentId) {
+    return user.role === "admin" || user.role === "it_staff";
+  }
+  return canAccessDepartment(user, sop.departmentId);
 }
 
 export function getSop(id: string): SopDocument | null {
   const row = getDb()
-    .prepare("SELECT * FROM sops WHERE id = ?")
+    .prepare(`${SOP_SELECT} WHERE sops.id = ?`)
     .get(id) as SopRow | undefined;
   return row ? mapSop(row) : null;
 }
@@ -153,9 +233,10 @@ export function getSopsByIds(ids: string[]): SopDocument[] {
     .filter((s): s is SopDocument => Boolean(s));
 }
 
-function nextSopCode(): string {
+function nextSopCode(deptCode: string): string {
   const year = new Date().getFullYear();
-  const prefix = `IT-SOP/${year}/`;
+  const safe = deptCode.replace(/[^A-Za-z0-9]/g, "").toUpperCase() || "GEN";
+  const prefix = `${safe}-SOP/${year}/`;
   const rows = getDb()
     .prepare("SELECT code FROM sops WHERE code LIKE ?")
     .all(`${prefix}%`) as Array<{ code: string }>;
@@ -169,6 +250,7 @@ function nextSopCode(): string {
 
 export function upsertSop(input: {
   id?: string;
+  departmentId: string;
   code?: string;
   title: string;
   divisionLabel?: string;
@@ -189,6 +271,11 @@ export function upsertSop(input: {
   const title = String(input.title || "").trim();
   if (!title) return { error: "Judul SOP wajib diisi" };
 
+  const departmentId = String(input.departmentId || "").trim();
+  if (!departmentId) return { error: "Departemen wajib dipilih" };
+  const dept = getDepartmentRow(departmentId);
+  if (!dept) return { error: "Departemen tidak ditemukan" };
+
   const steps = (input.steps ?? [])
     .map((s, i) => ({
       order: Number(s.order ?? i + 1),
@@ -203,19 +290,22 @@ export function upsertSop(input: {
     .filter((a): a is SopAttachment => Boolean(a))
     .filter((a) => a.kind === "file" || (Boolean(a.label) && Boolean(a.url)));
 
-  const dispositions = (input.dispositions ?? DEFAULT_SOP_DISPOSITIONS).map(
-    (d) => ({
-      role: String(d.role || "").trim(),
-      name: String(d.name || "").trim(),
-      position: String(d.position || "").trim(),
-    }),
-  );
+  const dispositions = (
+    input.dispositions ?? defaultSopDispositions(dept.name)
+  ).map((d) => ({
+    role: String(d.role || "").trim(),
+    name: String(d.name || "").trim(),
+    position: String(d.position || "").trim(),
+  }));
 
   const now = new Date().toISOString();
   const db = getDb();
   const purpose = String(input.purpose ?? "");
   const notes = String(input.notes ?? "");
   const revision = String(input.revision ?? "-") || "-";
+  const divisionLabel =
+    String(input.divisionLabel || "").trim() ||
+    sopDivisionLabelFromDepartment(dept.name);
 
   if (input.id) {
     const existing = getSop(input.id);
@@ -235,7 +325,7 @@ export function upsertSop(input: {
         steps_json = ?, attachments_json = ?, active = ?, updated_at = ?,
         division_label = ?, document_type = ?, effective_date = ?,
         revision = ?, revision_date = ?, purpose = ?, materials = ?,
-        qualifications = ?, notes = ?, dispositions_json = ?
+        qualifications = ?, notes = ?, dispositions_json = ?, department_id = ?
       WHERE id = ?`,
     ).run(
       code,
@@ -256,12 +346,13 @@ export function upsertSop(input: {
       String(input.qualifications ?? existing.qualifications),
       String(input.notes ?? existing.notes),
       JSON.stringify(dispositions),
+      departmentId,
       input.id,
     );
     return getSop(input.id)!;
   }
 
-  const code = String(input.code || "").trim() || nextSopCode();
+  const code = String(input.code || "").trim() || nextSopCode(dept.code);
   const clash = db
     .prepare("SELECT id FROM sops WHERE lower(code) = lower(?)")
     .get(code) as { id: string } | undefined;
@@ -273,8 +364,8 @@ export function upsertSop(input: {
       id, code, title, description, version,
       steps_json, attachments_json, active, created_by, created_at, updated_at,
       division_label, document_type, effective_date, revision, revision_date,
-      purpose, materials, qualifications, notes, dispositions_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      purpose, materials, qualifications, notes, dispositions_json, department_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     code,
@@ -287,7 +378,7 @@ export function upsertSop(input: {
     input.createdBy ?? null,
     now,
     now,
-    String(input.divisionLabel || "DIVISI IT"),
+    divisionLabel,
     String(input.documentType || "STANDARD OPERATING PROCEDURE"),
     String(input.effectiveDate || ""),
     revision,
@@ -297,7 +388,20 @@ export function upsertSop(input: {
     String(input.qualifications || ""),
     notes,
     JSON.stringify(dispositions),
+    departmentId,
   );
+  return getSop(id)!;
+}
+
+export function setSopActive(
+  id: string,
+  active: boolean,
+): SopDocument | { error: string } {
+  const existing = getSop(id);
+  if (!existing) return { error: "SOP tidak ditemukan" };
+  getDb()
+    .prepare(`UPDATE sops SET active = ?, updated_at = ? WHERE id = ?`)
+    .run(boolToInt(active), new Date().toISOString(), id);
   return getSop(id)!;
 }
 

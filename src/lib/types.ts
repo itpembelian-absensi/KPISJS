@@ -545,9 +545,13 @@ export interface SopDisposition {
   position: string;
 }
 
-/** SOP formal Divisi IT (header + A–D + disposisi) */
+/** SOP formal per departemen (header + A–D + disposisi) */
 export interface SopDocument {
   id: string;
+  /** Departemen pemilik SOP */
+  departmentId: string;
+  departmentCode: string;
+  departmentName: string;
   /** NOMOR DOCUMENT, contoh IT-SOP/2026/001 */
   code: string;
   title: string;
@@ -577,9 +581,22 @@ export interface SopDocument {
   updatedAt: string;
 }
 
-export const DEFAULT_SOP_DISPOSITIONS: SopDisposition[] = [
-  { role: "Dibuat Oleh", name: "", position: "Divisi IT" },
-  { role: "Diperiksa Oleh", name: "", position: "Manager" },
-  { role: "Diperiksa Oleh", name: "", position: "Management Representative" },
-  { role: "Disetujui Oleh", name: "", position: "Direktur" },
-];
+export function sopDivisionLabelFromDepartment(name: string): string {
+  const n = name.trim();
+  if (!n) return "DIVISI";
+  if (/^divisi\b/i.test(n)) return n.toUpperCase();
+  return `DIVISI ${n.toUpperCase()}`;
+}
+
+export function defaultSopDispositions(deptName = ""): SopDisposition[] {
+  const position = deptName.trim() || "Departemen";
+  return [
+    { role: "Dibuat Oleh", name: "", position },
+    { role: "Diperiksa Oleh", name: "", position: "Manager" },
+    { role: "Diperiksa Oleh", name: "", position: "Management Representative" },
+    { role: "Disetujui Oleh", name: "", position: "Direktur" },
+  ];
+}
+
+export const DEFAULT_SOP_DISPOSITIONS: SopDisposition[] =
+  defaultSopDispositions("Departemen");

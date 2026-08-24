@@ -36,10 +36,12 @@ export async function requireMasterAccess(): Promise<SessionUser> {
   return user;
 }
 
-/** SOP IT — hanya Admin / IT Staf */
+/** SOP — semua role (menu allowlist + canAccessSop) */
 export async function requireSopAccess(): Promise<SessionUser> {
   const user = await requireUser();
-  if (!canAccessSop(user.role)) redirect("/");
+  if (!canAccessSop(user.role) || !canAccessMenu(user, "/master/sops")) {
+    redirect("/");
+  }
   return user;
 }
 

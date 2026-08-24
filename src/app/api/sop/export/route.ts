@@ -1,14 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { canAccessSop, SESSION_COOKIE } from "@/lib/auth";
-import {
-  buildSopDocx,
-  buildSopPdf,
-  sopExportFilename,
-} from "@/lib/sop-export";
-import { getSopsByIds, listSops } from "@/lib/sop-ops";
+import { exportSops, SopOriginalFileError } from "@/lib/sop-export";
+import { getSopsByIds, listSopsForUser, userCanViewSop } from "@/lib/sop-ops";
 import { getUserBySessionToken } from "@/lib/store";
 
 export const runtime = "nodejs";
+export const maxDuration = 180;
 
 export async function GET(req: NextRequest) {
   const user = getUserBySessionToken(req.cookies.get(SESSION_COOKIE)?.value);
@@ -28,15 +25,19 @@ export async function GET(req: NextRequest) {
   }
 
   const all = req.nextUrl.searchParams.get("all") === "1";
+  const departmentId =
+    req.nextUrl.searchParams.get("departmentId") || undefined;
   const idsParam = req.nextUrl.searchParams.get("ids") || "";
   const ids = idsParam
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
 
-  const sops = all
-    ? listSops(true)
-    : getSopsByIds(ids.length > 0 ? ids : []);
+  const sops = (
+    all
+      ? listSopsForUser(user, { activeOnly: true, departmentId })
+      : getSopsByIds(ids.length > 0 ? ids : [])
+  ).filter((s) => userCanViewSop(user, s));
 
   if (sops.length === 0) {
     return NextResponse.json(
@@ -45,20 +46,24 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const buffer =
-    format === "pdf" ? await buildSopPdf(sops) : await buildSopDocx(sops);
-  const filename = sopExportFilename(sops, format);
-  const contentType =
-    format === "pdf"
-      ? "application/pdf"
-      : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-
-  return new NextResponse(new Uint8Array(buffer), {
-    status: 200,
-    headers: {
-      "Content-Type": contentType,
-      "Content-Disposition": `attachment; filename="${filename}"`,
-      "Cache-Control": "no-store",
-    },
-  });
+  try {
+    const { buffer, filename, contentType } = await exportSops(
+      sops,
+      format as "pdf" | "docx",
+    );
+    const inline = req.nextUrl.searchParams.get("inline") === "1";
+    return new NextResponse(new Uint8Array(buffer), {
+      status: 200,
+      headers: {
+        "Content-Type": contentType,
+        "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${filename}"`,
+        "Cache-Control": "no-store",
+      },
+    });
+  } catch (err) {
+    if (err instanceof SopOriginalFileError) {
+      return NextResponse.json({ error: err.message }, { status: 409 });
+    }
+    throw err;
+  }
 }
