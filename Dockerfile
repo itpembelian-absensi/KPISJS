@@ -11,6 +11,14 @@ ENV NODE_ENV=production
 ENV PORT=7101
 ENV HOSTNAME="0.0.0.0"
 
+# Install LibreOffice Writer (headless) for DOCX → PDF conversion
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      libreoffice-writer-nogui \
+      fonts-liberation \
+      fonts-dejavu-core && \
+    rm -rf /var/lib/apt/lists/*
+
 # Copy standalone server + static assets
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
