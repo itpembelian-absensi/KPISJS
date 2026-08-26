@@ -110,12 +110,38 @@ export function KpiFunctionMaster({
             ))}
           </select>
         </label>
-        <Link
-          href={addHref}
-          className="rounded-xl bg-brand px-4 py-2.5 text-sm font-medium text-white"
-        >
-          Add
-        </Link>
+        <div className="flex flex-wrap items-end gap-2">
+          <Link
+            href="/kpi/function-report?departmentId=all"
+            className="rounded-xl border border-line px-4 py-2.5 text-sm font-medium hover:bg-bg-elevated"
+          >
+            Laporan
+          </Link>
+          <a
+            href={`/api/kpi/function-report/export?format=xlsx&departmentId=${encodeURIComponent(deptFilter)}`}
+            className="rounded-xl border border-line px-4 py-2.5 text-sm font-medium hover:bg-bg-elevated"
+          >
+            Excel
+          </a>
+          <a
+            href={`/api/kpi/function-report/export?format=pdf&departmentId=${encodeURIComponent(deptFilter)}`}
+            className="rounded-xl border border-line px-4 py-2.5 text-sm font-medium hover:bg-bg-elevated"
+          >
+            PDF
+          </a>
+          <Link
+            href={`/kpi/function-report?departmentId=${encodeURIComponent(deptFilter)}&print=1`}
+            className="rounded-xl border border-line px-4 py-2.5 text-sm font-medium hover:bg-bg-elevated"
+          >
+            Cetak
+          </Link>
+          <Link
+            href={addHref}
+            className="rounded-xl bg-brand px-4 py-2.5 text-sm font-medium text-white"
+          >
+            Add
+          </Link>
+        </div>
       </div>
 
       {error ? (

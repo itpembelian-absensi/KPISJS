@@ -193,3 +193,20 @@ html[data-theme="orchid"] {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
+
+@media print {
+  html,
+  body {
+    background: #fff !important;
+  }
+  .panel {
+    background: #fff !important;
+    box-shadow: none !important;
+    backdrop-filter: none;
+    break-inside: avoid;
+  }
+  .kpi-fn-print-group {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}

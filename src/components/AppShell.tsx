@@ -12,6 +12,7 @@ import {
   type NavItem,
 } from "@/lib/auth";
 import { CompanyLogo } from "@/components/CompanyLogo";
+import { DEFAULT_APP_TITLE, DEFAULT_APP_TAGLINE } from "@/lib/branding-types";
 import { ROLE_LABEL, type SessionUser } from "@/lib/types";
 
 /** Exact match, or nested path — but prefer a more specific sibling nav item (e.g. /tickets/new over /tickets). */
@@ -281,8 +282,8 @@ export function AppShell({
   user,
   logoUrl = null,
   companyName = "",
-  appTitle = "KPI & IT Helpdesk",
-  appTagline = "Antrian support, master data, dan KPI.",
+  appTitle = DEFAULT_APP_TITLE,
+  appTagline = DEFAULT_APP_TAGLINE,
 }: {
   children: React.ReactNode;
   user: SessionUser | null;
@@ -379,9 +380,9 @@ export function AppShell({
     appTitle;
 
   return (
-    <div className="flex min-h-screen w-full gap-6 px-3 py-3 sm:px-4 sm:py-5 md:px-5 lg:px-6">
+    <div className="flex min-h-screen w-full gap-6 px-3 py-3 sm:px-4 sm:py-5 md:px-5 lg:px-6 print:block print:p-0">
       {/* Desktop sidebar */}
-      <aside className="panel sticky top-5 hidden h-[calc(100vh-2.5rem)] w-72 shrink-0 flex-col overflow-hidden p-5 md:flex lg:w-80">
+      <aside className="panel sticky top-5 hidden h-[calc(100vh-2.5rem)] w-72 shrink-0 flex-col overflow-hidden p-5 print:hidden md:flex lg:w-80">
         <div className="mb-6 min-w-0">
           <p className="mono min-w-0 break-words text-[11px] font-semibold leading-snug tracking-wide text-brand uppercase lg:text-xs">
             {brandTitle}
@@ -475,14 +476,14 @@ export function AppShell({
         </div>
       ) : null}
 
-      <div className="flex min-w-0 flex-1 flex-col gap-3 sm:gap-5">
+      <div className="flex min-w-0 flex-1 flex-col gap-3 sm:gap-5 print:block print:w-full">
         {logoUrl ? (
-          <div className="hidden justify-end md:flex">
+          <div className="hidden justify-end print:hidden md:flex">
             <CompanyLogo url={logoUrl} />
           </div>
         ) : null}
 
-        <header className="panel sticky top-3 z-40 flex items-center justify-between gap-3 px-3 py-2.5 sm:px-4 sm:py-3 md:hidden">
+        <header className="panel sticky top-3 z-40 flex items-center justify-between gap-3 px-3 py-2.5 print:hidden sm:px-4 sm:py-3 md:hidden">
           <div className="flex min-w-0 items-center gap-2.5">
             <button
               type="button"

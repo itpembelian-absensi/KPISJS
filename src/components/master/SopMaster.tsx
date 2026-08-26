@@ -138,6 +138,7 @@ export function SopMaster({
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [deletingSelected, setDeletingSelected] = useState(false);
   const wordInputRef = useRef<HTMLInputElement>(null);
   const wordFileRef = useRef<File | null>(null);
   const [wordBusy, setWordBusy] = useState(false);
@@ -483,6 +484,60 @@ export function SopMaster({
     router.refresh();
   }
 
+  async function removeSelected() {
+    if (!canManage || deletingSelected || selected.length === 0) return;
+    const chosen = items.filter((s) => selected.includes(s.id));
+    const codes = chosen.map((s) => s.code);
+    const preview = codes.slice(0, 8).join(", ");
+    const extra =
+      codes.length > 8 ? ` dan ${codes.length - 8} lainnya` : "";
+    if (
+      !window.confirm(
+        `Hapus ${selected.length} SOP yang dipilih?\n\n${preview}${extra}\n\nTindakan ini tidak bisa dibatalkan.`,
+      )
+    ) {
+      return;
+    }
+    setDeletingSelected(true);
+    setError(null);
+    setListNotice(null);
+    try {
+      const res = await fetch("/api/master/sops", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: selected }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        deleted?: number;
+        ids?: string[];
+        errors?: string[];
+      };
+      if (!res.ok) {
+        setError(data.error || "Gagal menghapus SOP terpilih");
+        setListNotice(data.error || "Gagal menghapus SOP terpilih");
+        return;
+      }
+      const removed = new Set(data.ids ?? selected);
+      setItems((prev) => prev.filter((s) => !removed.has(s.id)));
+      setSelected((prev) => prev.filter((id) => !removed.has(id)));
+      if (editing && removed.has(editing.id)) loadForm(null);
+      const n = data.deleted ?? removed.size;
+      const failN = data.errors?.length ?? 0;
+      setListNotice(
+        failN > 0
+          ? `${n} SOP dihapus. ${failN} gagal.`
+          : `${n} SOP dihapus.`,
+      );
+      router.refresh();
+    } catch {
+      setError("Gagal menghapus SOP terpilih");
+      setListNotice("Gagal menghapus SOP terpilih");
+    } finally {
+      setDeletingSelected(false);
+    }
+  }
+
   async function toggleActive(sop: SopDocument) {
     if (!canManage || togglingId) return;
     setTogglingId(sop.id);
@@ -640,6 +695,18 @@ export function SopMaster({
           >
             Unduh Word gabungan
           </a>
+          {canManage ? (
+            <button
+              type="button"
+              onClick={removeSelected}
+              disabled={deletingSelected}
+              className="rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-sm font-medium text-danger disabled:opacity-50"
+            >
+              {deletingSelected
+                ? "Menghapus..."
+                : `Hapus ${selected.length} dipilih`}
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -1277,6 +1344,18 @@ export function SopMaster({
                   ? "Batal pilih"
                   : "Pilih semua"}
               </button>
+              {canManage && selected.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={removeSelected}
+                  disabled={deletingSelected}
+                  className="rounded-lg border border-danger/30 px-2 py-1 text-xs text-danger disabled:opacity-50"
+                >
+                  {deletingSelected
+                    ? "Menghapus..."
+                    : `Hapus dipilih (${selected.length})`}
+                </button>
+              ) : null}
             </div>
           </div>
           <div className="border-b border-line px-4 py-2.5">

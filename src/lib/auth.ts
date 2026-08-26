@@ -263,7 +263,7 @@ export const NAV_ENTRIES: NavEntry[] = [
     type: "group",
     group: {
       id: "kpi",
-      label: "KPI",
+      label: "SOP & KPI",
       hint: "Metrik & performa departemen",
       roles: ["admin", "manager", "staff", "it_staff", "assessor"],
       children: [
@@ -312,6 +312,12 @@ export const NAV_ENTRIES: NavEntry[] = [
           href: "/kpi/individual-scores",
           label: "Laporan Skor Individu",
           hint: "Nilai / skor KPI per karyawan",
+          roles: ["admin", "manager", "staff", "it_staff", "assessor"],
+        },
+        {
+          href: "/kpi/function-report",
+          label: "Laporan Fungsi KPI",
+          hint: "Fungsi & bobot per departemen",
           roles: ["admin", "manager", "staff", "it_staff", "assessor"],
         },
         {

@@ -123,20 +123,70 @@ export async function DELETE(req: NextRequest) {
   const gate = requireSop(req);
   if ("error" in gate && gate.error) return gate.error;
 
-  const id = req.nextUrl.searchParams.get("id");
-  if (!id) {
+  const ids = new Set<string>();
+  const single = req.nextUrl.searchParams.get("id")?.trim();
+  if (single) ids.add(single);
+  const many = req.nextUrl.searchParams.get("ids");
+  if (many) {
+    for (const part of many.split(",")) {
+      const t = part.trim();
+      if (t) ids.add(t);
+    }
+  }
+  const contentType = req.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    const body = (await req.json().catch(() => null)) as
+      | { id?: unknown; ids?: unknown }
+      | null;
+    if (body?.id != null && String(body.id).trim()) {
+      ids.add(String(body.id).trim());
+    }
+    if (Array.isArray(body?.ids)) {
+      for (const raw of body.ids) {
+        const t = String(raw || "").trim();
+        if (t) ids.add(t);
+      }
+    }
+  }
+
+  if (ids.size === 0) {
     return NextResponse.json({ error: "id wajib" }, { status: 400 });
   }
-  const existing = getSop(id);
-  if (!existing) {
-    return NextResponse.json({ error: "SOP tidak ditemukan" }, { status: 404 });
+
+  const deleted: string[] = [];
+  const errors: string[] = [];
+  for (const id of ids) {
+    const existing = getSop(id);
+    if (!existing) {
+      errors.push(`${id}: SOP tidak ditemukan`);
+      continue;
+    }
+    if (!canManageSop(gate.user, existing.departmentId)) {
+      errors.push(`${existing.code}: tidak diizinkan`);
+      continue;
+    }
+    const result = deleteSop(id);
+    if ("error" in result) {
+      errors.push(`${existing.code}: ${result.error}`);
+      continue;
+    }
+    deleted.push(id);
   }
-  if (!canManageSop(gate.user, existing.departmentId)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  if (deleted.length === 0) {
+    const status = errors.some((e) => e.includes("tidak diizinkan"))
+      ? 403
+      : 400;
+    return NextResponse.json(
+      { error: errors[0] || "Gagal menghapus SOP", errors },
+      { status },
+    );
   }
-  const result = deleteSop(id);
-  if ("error" in result) {
-    return NextResponse.json({ error: result.error }, { status: 400 });
-  }
-  return NextResponse.json({ ok: true });
+
+  return NextResponse.json({
+    ok: true,
+    deleted: deleted.length,
+    ids: deleted,
+    errors: errors.length ? errors : undefined,
+  });
 }
