@@ -1,3 +1,9 @@
+import {
+  activityActualValueForIndicator,
+  activityInScorePeriod,
+  activityProgressOf,
+  isActivitySourcedIndicator,
+} from "./activity-score-metrics";
 import { computeFunctionScoreFromIndicators } from "./kpi-score-compute";
 import {
   assigneeIdsForTicketScore,
@@ -39,32 +45,8 @@ export type IndividualScoreRow = {
   weightUsed: number;
 };
 
-function progressOf(status: string) {
-  if (status === "done") return 1;
-  if (status === "in_progress") return 0.5;
-  return 0;
-}
-
 function isDiscipline(name: string) {
   return /kedisiplinan|kehadiran/i.test(name);
-}
-
-function activityInPeriod(
-  activityDate: string | null,
-  createdAt: string,
-  periodLabel: string,
-): boolean {
-  const [ys, ms] = periodLabel.split("-").map(Number);
-  let startY = ys;
-  let startM = ms - 1;
-  if (startM < 1) {
-    startM = 12;
-    startY -= 1;
-  }
-  const start = `${startY}-${String(startM).padStart(2, "0")}-21`;
-  const end = `${ys}-${String(ms).padStart(2, "0")}-20`;
-  const d = activityDate || createdAt.slice(0, 10);
-  return d >= start && d <= end;
 }
 
 /**
@@ -117,7 +99,7 @@ export function computeIndividualScore(input: {
     (a) =>
       a.assigneeStaffId === staff.id &&
       a.status !== "cancelled" &&
-      activityInPeriod(a.activityDate, a.createdAt, periodLabel),
+      activityInScorePeriod(a.activityDate, a.createdAt, periodLabel),
   );
 
   const staffPool = allStaff.length > 0 ? allStaff : [staff];
@@ -168,6 +150,18 @@ export function computeIndividualScore(input: {
             }
             const auto = ticketActualValueForIndicator(ind, ticketMetrics);
             if (auto != null) return { actualValue: auto };
+            return null;
+          }
+          if (isActivitySourcedIndicator(ind)) {
+            const auto = activityActualValueForIndicator(ind, staffActs);
+            if (auto != null) return { actualValue: auto };
+            const fromDb = actualMap.get(ind.id);
+            if (fromDb?.actualValue != null) {
+              return {
+                actualValue: fromDb.actualValue,
+                targetOverride: fromDb.targetOverride,
+              };
+            }
             return null;
           }
           const a = actualMap.get(ind.id);
@@ -231,7 +225,7 @@ export function computeIndividualScore(input: {
 
     const list = staffActs.filter((a) => a.kpiFunctionId === fn.id);
     if (list.length > 0) {
-      const sum = list.reduce((s, a) => s + progressOf(a.status), 0);
+      const sum = list.reduce((s, a) => s + activityProgressOf(a.status), 0);
       const pct = Math.round((sum / list.length) * 1000) / 10;
       return {
         functionId: fn.id,

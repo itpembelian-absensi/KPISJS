@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { ActivityPhotoSlider } from "@/components/ActivityPhotoSlider";
+import { ActivityDocumentList } from "@/components/ActivityDocumentList";
 import type {
   KpiActivity,
   KpiActivityFrequency,
@@ -119,6 +120,22 @@ export function ActivityDetailClient({
             </div>
           ) : (
             <p className="mt-2 text-sm text-ink-muted">Belum ada foto.</p>
+          )}
+        </div>
+
+        <div>
+          <p className="text-xs font-medium tracking-wide text-ink-muted uppercase">
+            Dokumen kegiatan
+            {activity.documents?.length
+              ? ` (${activity.documents.length})`
+              : ""}
+          </p>
+          {activity.documents?.length ? (
+            <div className="mt-2">
+              <ActivityDocumentList documents={activity.documents} />
+            </div>
+          ) : (
+            <p className="mt-2 text-sm text-ink-muted">Belum ada dokumen.</p>
           )}
         </div>
 

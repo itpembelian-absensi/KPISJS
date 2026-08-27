@@ -124,6 +124,9 @@ export function ProjectDetailClient({
                         {a.photoUrls?.length
                           ? ` · ${a.photoUrls.length} foto`
                           : ""}
+                        {a.documents?.length
+                          ? ` · ${a.documents.length} dokumen`
+                          : ""}
                       </p>
                     </div>
                     <span className="text-xs text-ink-muted">Lihat →</span>

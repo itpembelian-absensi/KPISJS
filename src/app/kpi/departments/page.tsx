@@ -24,7 +24,7 @@ import {
   listKpiAssessments,
   listKpiProjects,
 } from "@/lib/kpi-ops";
-import { listKpiIndicatorActuals, syncTicketScoreActuals } from "@/lib/kpi-indicator-actuals-ops";
+import { listKpiIndicatorActuals, syncActivityScoreActuals, syncTicketScoreActuals } from "@/lib/kpi-indicator-actuals-ops";
 import {
   ensureDepartmentScoreRules,
   listKpiScoreIndicators,
@@ -45,6 +45,7 @@ export default async function DepartmentKpiPage() {
     ensureDisciplineKpiFunctions();
     ensureDepartmentScoreRules();
     syncTicketScoreActuals();
+    syncActivityScoreActuals();
   }
 
   const allDepartments = listDepartments(true);

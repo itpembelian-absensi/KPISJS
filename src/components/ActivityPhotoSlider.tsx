@@ -7,10 +7,13 @@ export function ActivityPhotoSlider({
   photos,
   onRemove,
   compact = false,
+  layout = "slider",
 }: {
   photos: string[];
   onRemove?: (url: string) => void;
   compact?: boolean;
+  /** thumbs = kotak kecil berjajar (laporan); slider = satu foto besar */
+  layout?: "slider" | "thumbs";
 }) {
   const [index, setIndex] = useState(0);
   const [zoomed, setZoomed] = useState(false);
@@ -108,6 +111,35 @@ export function ActivityPhotoSlider({
           document.body,
         )
       : null;
+
+  if (layout === "thumbs") {
+    return (
+      <div>
+        <div className="flex flex-wrap gap-1">
+          {photos.map((url, i) => (
+            <button
+              key={url}
+              type="button"
+              title={`Foto ${i + 1} dari ${photos.length} · klik untuk perbesar`}
+              onClick={() => {
+                setIndex(i);
+                setZoomed(true);
+              }}
+              className="overflow-hidden rounded-md border border-line"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={url}
+                alt={`Foto ${i + 1}`}
+                className="h-12 w-12 object-cover"
+              />
+            </button>
+          ))}
+        </div>
+        {lightbox}
+      </div>
+    );
+  }
 
   return (
     <div className={compact ? "mt-2" : "mt-1"}>

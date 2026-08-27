@@ -5,7 +5,7 @@ import {
 import { listAttendanceSummaries } from "@/lib/attendance-ops";
 import { disciplinePeriodFromDate } from "@/lib/discipline-period";
 import { listKpiActivities, listKpiAssessments } from "@/lib/kpi-ops";
-import { listKpiIndicatorActuals, syncTicketScoreActuals } from "@/lib/kpi-indicator-actuals-ops";
+import { listKpiIndicatorActuals, syncActivityScoreActuals, syncTicketScoreActuals } from "@/lib/kpi-indicator-actuals-ops";
 import {
   ensureDepartmentScoreRules,
   listKpiScoreIndicators,
@@ -34,6 +34,7 @@ export default async function IndividualScoresPage() {
 
   ensureDepartmentScoreRules();
   syncTicketScoreActuals();
+  syncActivityScoreActuals();
 
   const allDepartments = listDepartments(true);
   const departments =
@@ -82,8 +83,9 @@ export default async function IndividualScoresPage() {
         </h1>
         <p className="mt-2 max-w-3xl text-sm text-ink-muted">
           Nilai / skor KPI per karyawan dalam satu periode. Sumber skor:
-          capaian indikator, penilaian manual, absensi, atau kegiatan. Manager
-          IT memakai agregat tiket tim (anak buah).
+          capaian indikator (tiket, kegiatan, absensi otomatis), penilaian
+          manual, atau rata-rata kegiatan fungsi. Manager IT memakai agregat
+          tiket tim (anak buah).
         </p>
       </div>
 

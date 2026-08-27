@@ -70,8 +70,8 @@ export type KpiScoreMetricType =
  * - manual: diisi manager di Penilaian & Skor
  * - attendance: otomatis dari absensi (sudah terhubung)
  * - ticket: otomatis dari modul tiket (SLA, response, satisfaction, non-repeat)
- * - activity / project: dirancang otomatis dari modul terkait
- *   (jika belum terhubung, masih bisa diisi manual sebagai cadangan)
+ * - activity: otomatis dari kegiatan tertaut fungsi (judul relevan, mis. backup/patch)
+ * - project: dirancang otomatis (jika belum terhubung, masih bisa diisi manual)
  */
 export type KpiScoreDataSource =
   | "manual"
@@ -187,6 +187,12 @@ export interface KpiProject {
   updatedAt: string;
 }
 
+/** File dokumen yang dilampirkan ke kegiatan */
+export type KpiActivityDocument = {
+  url: string;
+  name: string;
+};
+
 /** Kegiatan harian/mingguan/bulanan departemen */
 export interface KpiActivity {
   id: string;
@@ -202,6 +208,8 @@ export interface KpiActivity {
   activityDate: string | null;
   /** URL publik foto kegiatan, mis. /uploads/activities/... */
   photoUrls: string[];
+  /** File dokumen kegiatan (PDF, Word, Excel, dll.) */
+  documents: KpiActivityDocument[];
   createdAt: string;
   updatedAt: string;
 }

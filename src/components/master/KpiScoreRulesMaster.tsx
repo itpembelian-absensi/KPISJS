@@ -321,9 +321,9 @@ export function KpiScoreRulesMaster({
           </div>
           <p className="text-[11px] text-ink-muted">
             <strong>Manual</strong> = diisi di Penilaian &amp; Skor.{" "}
-            <strong>Otomatis · Absensi</strong> sudah terhubung. Ticket /
-            Kegiatan / Project = rencana otomatis (sementara masih bisa diisi
-            manual).
+            <strong>Absensi</strong>, <strong>Ticket</strong>, dan{" "}
+            <strong>Kegiatan</strong> sudah terhubung otomatis. Project masih
+            rencana (sementara bisa diisi manual).
           </p>
           <label className="block text-sm">
             <span className="text-xs text-ink-muted">Target default (opsional)</span>

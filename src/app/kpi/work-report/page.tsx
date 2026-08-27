@@ -60,9 +60,10 @@ export default async function WorkReportPage() {
           Laporan Pekerjaan
         </h1>
         <p className="mt-2 max-w-3xl text-sm text-ink-muted">
-          Satu laporan terpadu dengan pengelompokan harian, mingguan, bulanan,
-          dan pending (kegiatan &amp; project). Bisa diexport ke Excel/PDF atau
-          dikirim ringkasannya lewat WhatsApp.
+          Satu laporan terpadu dari semua jenis kegiatan (harian, mingguan,
+          bulanan) plus pending kegiatan &amp; project. Foto dan dokumen
+          lampiran ditampilkan di kolom Lampiran. Bisa diexport ke Excel/PDF
+          atau dikirim ringkasannya lewat WhatsApp.
         </p>
       </div>
 

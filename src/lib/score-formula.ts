@@ -55,6 +55,9 @@ function indicatorFormulaLine(ind: KpiScoreIndicator): string {
     else if (/satisfaction|kepuasan/.test(n))
       how = "(avg rating÷5)×100 → skor skala";
     else if (/repeat/.test(n)) how = "% tiket non-repeat → skor skala";
+  } else if (source === "activity") {
+    how =
+      "rata-rata kegiatan tertaut (Selesai 100% · Berjalan 50%) sesuai kata kunci judul";
   }
 
   const bandHint = bands ? ` (${bands})` : "";

@@ -119,6 +119,8 @@ export async function GET(req: NextRequest) {
         "PIC",
         "Fungsi KPI",
         "Project",
+        "Foto",
+        "Dokumen",
       ],
       ...g.rows.map((r) => [
         r.kind === "activity" ? "Kegiatan" : "Project",
@@ -131,6 +133,10 @@ export async function GET(req: NextRequest) {
         r.picLabel,
         r.functionLabel,
         r.projectLabel,
+        r.photoUrls.length ? r.photoUrls.length : "",
+        r.documents.length
+          ? r.documents.map((d) => d.name).join("; ")
+          : "",
       ]),
     ];
     XLSX.utils.book_append_sheet(

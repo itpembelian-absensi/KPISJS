@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { StatCard } from "@/components/StatCard";
+import { ActivityDocumentList } from "@/components/ActivityDocumentList";
+import { ActivityPhotoSlider } from "@/components/ActivityPhotoSlider";
 import {
   activityStats,
   buildWorkReportGroups,
@@ -40,7 +42,7 @@ function GroupTable({
         <span className="text-xs text-ink-muted">{group.rows.length} item</span>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[720px] text-left text-sm">
+        <table className="w-full min-w-[880px] text-left text-sm">
           <thead>
             <tr className="border-b border-line text-xs text-ink-muted uppercase">
               {group.id === "pending" ? (
@@ -52,13 +54,14 @@ function GroupTable({
               <th className="px-3 py-2.5 font-medium">Tanggal</th>
               <th className="px-3 py-2.5 font-medium">PIC</th>
               <th className="px-3 py-2.5 font-medium">Fungsi / Project</th>
+              <th className="px-3 py-2.5 font-medium">Lampiran</th>
             </tr>
           </thead>
           <tbody>
             {group.rows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={group.id === "pending" ? 7 : 6}
+                  colSpan={group.id === "pending" ? 8 : 7}
                   className="px-3 py-6 text-center text-ink-muted"
                 >
                   Tidak ada data di kelompok ini.
@@ -68,7 +71,7 @@ function GroupTable({
               group.rows.map((r: WorkReportRow) => (
                 <tr
                   key={`${group.id}-${r.kind}-${r.id}`}
-                  className="border-b border-line last:border-0"
+                  className="border-b border-line last:border-0 align-top"
                 >
                   {group.id === "pending" ? (
                     <td className="px-3 py-2.5 text-xs text-ink-muted">
@@ -111,6 +114,23 @@ function GroupTable({
                       : r.kind === "project"
                         ? ` · ${r.projectLabel}`
                         : ""}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {r.photoUrls.length === 0 && r.documents.length === 0 ? (
+                      <span className="text-xs text-ink-muted">—</span>
+                    ) : (
+                      <div className="max-w-[220px] space-y-2">
+                        {r.photoUrls.length > 0 ? (
+                          <ActivityPhotoSlider
+                            photos={r.photoUrls}
+                            layout="thumbs"
+                          />
+                        ) : null}
+                        {r.documents.length > 0 ? (
+                          <ActivityDocumentList documents={r.documents} />
+                        ) : null}
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))
@@ -288,13 +308,15 @@ export function WorkReportClient({
         <p className="text-sm text-ink-muted">
           Laporan pekerjaan terpadu · <strong>{periodText}</strong> ·{" "}
           <strong>{departmentText}</strong>
+          . Sumber: semua kegiatan harian, mingguan, dan bulanan (kecuali batal).
+          Foto &amp; dokumen tampil di kolom Lampiran.
         </p>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
             label="Total kegiatan"
             value={String(overall.total)}
-            hint="Harian + mingguan + bulanan (aktif)"
+            hint="Harian + mingguan + bulanan (semua jenis)"
           />
           <StatCard
             label="Belum selesai"

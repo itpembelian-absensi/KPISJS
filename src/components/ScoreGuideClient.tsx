@@ -90,7 +90,9 @@ export function ScoreGuideClient({
             </ul>
             <p className="mt-2 text-xs text-ink-muted">
               Skor fungsi = rata-rata nilai kegiatan yang di-link ke fungsi itu
-              (kegiatan batal &amp; PIC admin tidak dihitung).
+              (kegiatan batal &amp; PIC admin tidak dihitung). Indikator dengan
+              sumber Kegiatan (Backup, Patch, dll.) memakai kegiatan yang
+              judulnya relevan, bukan semua kegiatan fungsi.
             </p>
           </div>
           <div className="rounded-xl border border-line bg-bg-elevated/50 p-3">

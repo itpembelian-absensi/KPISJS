@@ -4,6 +4,7 @@ import { getDb, getMeta, setMeta } from "./db";
 import { listDepartments, listKpiFunctions } from "./store";
 import type {
   KpiActivity,
+  KpiActivityDocument,
   KpiActivityFrequency,
   KpiActivityStatus,
   KpiAssessment,
@@ -54,6 +55,7 @@ type ActivityRow = {
   assignee_staff_id: string | null;
   activity_date: string | null;
   photo_urls_json?: string | null;
+  document_urls_json?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -101,6 +103,41 @@ function parsePhotoUrls(raw: string | null | undefined): string[] {
   }
 }
 
+function parseDocuments(raw: string | null | undefined): KpiActivityDocument[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    const docs: KpiActivityDocument[] = [];
+    for (const item of parsed) {
+      if (typeof item === "string" && item) {
+        docs.push({
+          url: item,
+          name: item.split("/").pop() || "dokumen",
+        });
+        continue;
+      }
+      if (
+        item &&
+        typeof item === "object" &&
+        typeof (item as { url?: unknown }).url === "string" &&
+        (item as { url: string }).url
+      ) {
+        const url = (item as { url: string }).url;
+        const name =
+          typeof (item as { name?: unknown }).name === "string" &&
+          (item as { name: string }).name
+            ? (item as { name: string }).name
+            : url.split("/").pop() || "dokumen";
+        docs.push({ url, name });
+      }
+    }
+    return docs;
+  } catch {
+    return [];
+  }
+}
+
 function mapActivity(row: ActivityRow): KpiActivity {
   return {
     id: row.id,
@@ -114,6 +151,7 @@ function mapActivity(row: ActivityRow): KpiActivity {
     assigneeStaffId: row.assignee_staff_id,
     activityDate: row.activity_date,
     photoUrls: parsePhotoUrls(row.photo_urls_json),
+    documents: parseDocuments(row.document_urls_json),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -371,6 +409,7 @@ export function upsertKpiActivity(
     assigneeStaffId: input.assigneeStaffId ?? null,
     activityDate: input.activityDate ?? now.slice(0, 10),
     photoUrls: [],
+    documents: [],
     createdAt: now,
     updatedAt: now,
   };
@@ -380,8 +419,8 @@ export function upsertKpiActivity(
       `INSERT INTO kpi_activities (
         id, department_id, project_id, kpi_function_id, title, description,
         status, frequency, assignee_staff_id, activity_date, photo_urls_json,
-        created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        document_urls_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       activity.id,
@@ -394,6 +433,7 @@ export function upsertKpiActivity(
       activity.frequency,
       activity.assigneeStaffId,
       activity.activityDate,
+      "[]",
       "[]",
       activity.createdAt,
       activity.updatedAt,
@@ -445,6 +485,61 @@ export function removeActivityPhoto(
   getDb()
     .prepare(
       `UPDATE kpi_activities SET photo_urls_json = ?, updated_at = ? WHERE id = ?`,
+    )
+    .run(JSON.stringify(next), now, activityId);
+  return mapActivity(
+    getDb()
+      .prepare("SELECT * FROM kpi_activities WHERE id = ?")
+      .get(activityId) as ActivityRow,
+  );
+}
+
+export function appendActivityDocuments(
+  activityId: string,
+  docs: KpiActivityDocument[],
+  maxTotal = 8,
+): KpiActivity | { error: string } {
+  listKpiFunctions();
+  const row = getDb()
+    .prepare("SELECT * FROM kpi_activities WHERE id = ?")
+    .get(activityId) as ActivityRow | undefined;
+  if (!row) return { error: "Kegiatan tidak ditemukan" };
+  const current = parseDocuments(row.document_urls_json);
+  if (current.length + docs.length > maxTotal) {
+    return {
+      error: `Maksimal ${maxTotal} dokumen per kegiatan (sudah ${current.length})`,
+    };
+  }
+  const next = [...current, ...docs];
+  const now = new Date().toISOString();
+  getDb()
+    .prepare(
+      `UPDATE kpi_activities SET document_urls_json = ?, updated_at = ? WHERE id = ?`,
+    )
+    .run(JSON.stringify(next), now, activityId);
+  return mapActivity(
+    getDb()
+      .prepare("SELECT * FROM kpi_activities WHERE id = ?")
+      .get(activityId) as ActivityRow,
+  );
+}
+
+export function removeActivityDocument(
+  activityId: string,
+  url: string,
+): KpiActivity | { error: string } {
+  listKpiFunctions();
+  const row = getDb()
+    .prepare("SELECT * FROM kpi_activities WHERE id = ?")
+    .get(activityId) as ActivityRow | undefined;
+  if (!row) return { error: "Kegiatan tidak ditemukan" };
+  const next = parseDocuments(row.document_urls_json).filter(
+    (d) => d.url !== url,
+  );
+  const now = new Date().toISOString();
+  getDb()
+    .prepare(
+      `UPDATE kpi_activities SET document_urls_json = ?, updated_at = ? WHERE id = ?`,
     )
     .run(JSON.stringify(next), now, activityId);
   return mapActivity(

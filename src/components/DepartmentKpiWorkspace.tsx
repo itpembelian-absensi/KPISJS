@@ -4,6 +4,12 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ActivityPhotoSlider } from "@/components/ActivityPhotoSlider";
+import { ActivityDocumentList } from "@/components/ActivityDocumentList";
+import {
+  activityActualValueForIndicator,
+  activityInScorePeriod,
+  isActivitySourcedIndicator,
+} from "@/lib/activity-score-metrics";
 import { formatDisciplinePeriodLabel, buildDisciplinePeriodOptions, disciplinePeriodFromDate } from "@/lib/discipline-period";
 import { computeFunctionScoreFromIndicators } from "@/lib/kpi-score-compute";
 import {
@@ -313,6 +319,7 @@ export function DepartmentKpiWorkspace({
   const [viewingProject, setViewingProject] = useState<KpiProject | null>(null);
   const [pendingPhotos, setPendingPhotos] = useState<File[]>([]);
   const [pendingPreview, setPendingPreview] = useState<string[]>([]);
+  const [pendingDocs, setPendingDocs] = useState<File[]>([]);
 
   useEffect(() => {
     const fromUrl = parseTab(searchParams.get("tab"), staffLimited);
@@ -361,7 +368,7 @@ export function DepartmentKpiWorkspace({
     setActivityFreq(freq);
     if (editingActivity && (editingActivity.frequency || "daily") !== freq) {
       setEditingActivity(null);
-      clearPendingPhotos();
+      clearPendingUploads();
     }
     const next = new URLSearchParams(searchParams.toString());
     next.set("tab", "kegiatan");
@@ -648,6 +655,7 @@ export function DepartmentKpiWorkspace({
       actualMap: Map<string, (typeof deptActuals)[number]>,
       disc: number | undefined,
       ticketMetrics: ReturnType<typeof computeTicketScoreMetrics>,
+      activityPool: typeof activeActs,
     ) => {
       if (ind.metricType === "attendance") {
         const fromDb = actualMap.get(ind.id);
@@ -673,6 +681,19 @@ export function DepartmentKpiWorkspace({
         }
         const auto = ticketActualValueForIndicator(ind, ticketMetrics);
         if (auto != null) return { actualValue: auto };
+        return null;
+      }
+
+      if (isActivitySourcedIndicator(ind)) {
+        const auto = activityActualValueForIndicator(ind, activityPool);
+        if (auto != null) return { actualValue: auto };
+        const fromDb = actualMap.get(ind.id);
+        if (fromDb?.actualValue != null) {
+          return {
+            actualValue: fromDb.actualValue,
+            targetOverride: fromDb.targetOverride,
+          };
+        }
         return null;
       }
 
@@ -755,7 +776,14 @@ export function DepartmentKpiWorkspace({
         const scores: number[] = [];
         let filledTotal = 0;
         let ticketCountUsed = 0;
+        let activityCountUsed = 0;
         const usesTicket = fnIndicators.some((i) => isTicketSourcedIndicator(i));
+        const usesActivity = fnIndicators.some((i) =>
+          isActivitySourcedIndicator(i),
+        );
+        const periodActs = activeActs.filter((a) =>
+          activityInScorePeriod(a.activityDate, a.createdAt, periodForRules),
+        );
 
         for (const sid of staffIdsForRules) {
           const disc = deptDiscipline.find(
@@ -769,11 +797,21 @@ export function DepartmentKpiWorkspace({
           );
           const ticketMetrics = ticketMetricsForStaff(sid);
           ticketCountUsed = Math.max(ticketCountUsed, ticketMetrics.ticketCount);
+          const activityPool = periodActs.filter(
+            (a) => a.assigneeStaffId === sid,
+          );
+          activityCountUsed = Math.max(activityCountUsed, activityPool.length);
           const result = computeFunctionScoreFromIndicators(
             fn.id,
             fnIndicators,
             (ind) =>
-              resolveActualForIndicator(ind, actualMap, disc, ticketMetrics),
+              resolveActualForIndicator(
+                ind,
+                actualMap,
+                disc,
+                ticketMetrics,
+                activityPool,
+              ),
           );
           if (result.filledCount > 0) {
             scores.push(result.score);
@@ -781,15 +819,26 @@ export function DepartmentKpiWorkspace({
           }
         }
 
-        // Agregat dept: jika tidak ada staf handler, pakai semua tiket periode
-        if (scores.length === 0 && usesTicket && !staffFilter) {
+        // Agregat dept: jika tidak ada staf handler, pakai tiket + kegiatan dept
+        if (
+          scores.length === 0 &&
+          (usesTicket || usesActivity) &&
+          !staffFilter
+        ) {
           const deptMetrics = ticketMetricsForStaff(null);
           ticketCountUsed = deptMetrics.ticketCount;
+          activityCountUsed = Math.max(activityCountUsed, periodActs.length);
           const result = computeFunctionScoreFromIndicators(
             fn.id,
             fnIndicators,
             (ind) =>
-              resolveActualForIndicator(ind, new Map(), undefined, deptMetrics),
+              resolveActualForIndicator(
+                ind,
+                new Map(),
+                undefined,
+                deptMetrics,
+                periodActs,
+              ),
           );
           if (result.filledCount > 0) {
             scores.push(result.score);
@@ -805,6 +854,10 @@ export function DepartmentKpiWorkspace({
           const ticketHint =
             usesTicket && ticketCountUsed > 0
               ? ` · tiket ${ticketCountUsed}`
+              : "";
+          const activityHint =
+            usesActivity && activityCountUsed > 0
+              ? ` · kegiatan ${activityCountUsed}`
               : "";
           return {
             id: fn.id,
@@ -827,10 +880,10 @@ export function DepartmentKpiWorkspace({
                   staffFilter && ticketScopeForStaff(staffFilter) === "team"
                     ? " · tiket tim"
                     : ticketHint
-                }`
+                }${activityHint}`
               : scores.length === 1 && usesTicket && !staffFilter
-                ? `otomatis tiket · ${periodForRules}${ticketHint}`
-                : `rata-rata ${scores.length} staf · ${periodForRules}${ticketHint}`,
+                ? `otomatis tiket · ${periodForRules}${ticketHint}${activityHint}`
+                : `rata-rata ${scores.length} staf · ${periodForRules}${ticketHint}${activityHint}`,
           };
         }
       }
@@ -1009,6 +1062,12 @@ export function DepartmentKpiWorkspace({
         assigneeIds,
       }),
     );
+    const staffPeriodActs = deptActivities.filter(
+      (a) =>
+        a.status !== "cancelled" &&
+        a.assigneeStaffId === scoreStaffId &&
+        activityInScorePeriod(a.activityDate, a.createdAt, scorePeriod),
+    );
     for (const ind of deptIndicators) {
       const existing = deptActuals.find(
         (a) =>
@@ -1034,6 +1093,14 @@ export function DepartmentKpiWorkspace({
             ? String(existing.actualValue)
             : auto != null
               ? String(auto)
+              : "";
+      } else if (isActivitySourcedIndicator(ind)) {
+        const auto = activityActualValueForIndicator(ind, staffPeriodActs);
+        drafts[ind.id] =
+          auto != null
+            ? String(auto)
+            : existing?.actualValue != null
+              ? String(existing.actualValue)
               : "";
       } else {
         drafts[ind.id] =
@@ -1063,6 +1130,7 @@ export function DepartmentKpiWorkspace({
     initialItTeam,
     staff,
     managerStaffIds,
+    deptActivities,
   ]);
 
   async function saveIndicatorActuals() {
@@ -1073,7 +1141,9 @@ export function DepartmentKpiWorkspace({
       const items = deptIndicators
         .filter(
           (i) =>
-            i.metricType !== "attendance" && !isTicketSourcedIndicator(i),
+            i.metricType !== "attendance" &&
+            !isTicketSourcedIndicator(i) &&
+            !isActivitySourcedIndicator(i),
         )
         .map((ind) => {
           const raw = actualDrafts[ind.id]?.trim();
@@ -1267,12 +1337,38 @@ export function DepartmentKpiWorkspace({
     return data.activity as KpiActivity;
   }
 
+  async function uploadActivityDocuments(activityId: string, files: File[]) {
+    if (!files.length) return null;
+    const fd = new FormData();
+    fd.append("activityId", activityId);
+    for (const f of files) fd.append("documents", f);
+    const res = await fetch("/api/kpi/activities/documents", {
+      method: "POST",
+      body: fd,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setError(data.error || "Gagal unggah dokumen");
+      return null;
+    }
+    return data.activity as KpiActivity;
+  }
+
   function clearPendingPhotos() {
     setPendingPreview((prev) => {
       for (const url of prev) URL.revokeObjectURL(url);
       return [];
     });
     setPendingPhotos([]);
+  }
+
+  function clearPendingDocs() {
+    setPendingDocs([]);
+  }
+
+  function clearPendingUploads() {
+    clearPendingPhotos();
+    clearPendingDocs();
   }
 
   function onPickPhotos(files: FileList | null) {
@@ -1288,6 +1384,12 @@ export function DepartmentKpiWorkspace({
     });
   }
 
+  function onPickDocs(files: FileList | null) {
+    if (!files?.length) return;
+    const picked = Array.from(files);
+    setPendingDocs((prev) => [...prev, ...picked].slice(0, 8));
+  }
+
   async function removeSavedPhoto(activityId: string, url: string) {
     if (!confirm("Hapus foto ini?")) return;
     const fd = new FormData();
@@ -1300,6 +1402,29 @@ export function DepartmentKpiWorkspace({
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       setError(data.error || "Gagal hapus foto");
+      return;
+    }
+    setActivities((prev) =>
+      prev.map((a) => (a.id === data.activity.id ? data.activity : a)),
+    );
+    setEditingActivity((prev) =>
+      prev?.id === data.activity.id ? data.activity : prev,
+    );
+    router.refresh();
+  }
+
+  async function removeSavedDocument(activityId: string, url: string) {
+    if (!confirm("Hapus dokumen ini?")) return;
+    const fd = new FormData();
+    fd.append("activityId", activityId);
+    fd.append("removeUrl", url);
+    const res = await fetch("/api/kpi/activities/documents", {
+      method: "POST",
+      body: fd,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setError(data.error || "Gagal hapus dokumen");
       return;
     }
     setActivities((prev) =>
@@ -1344,6 +1469,10 @@ export function DepartmentKpiWorkspace({
       const withPhotos = await uploadActivityPhotos(activity.id, pendingPhotos);
       if (withPhotos) activity = withPhotos;
     }
+    if (pendingDocs.length) {
+      const withDocs = await uploadActivityDocuments(activity.id, pendingDocs);
+      if (withDocs) activity = withDocs;
+    }
 
     if (editingActivity) {
       setActivities((prev) =>
@@ -1357,7 +1486,7 @@ export function DepartmentKpiWorkspace({
     if (savedFreq !== activityFreq) {
       goActivityFreq(savedFreq);
     }
-    clearPendingPhotos();
+    clearPendingUploads();
     (e.target as HTMLFormElement).reset();
     setSaving(false);
     router.refresh();
@@ -2047,6 +2176,10 @@ export function DepartmentKpiWorkspace({
                   </option>
                 ))}
               </select>
+              <p className="text-[11px] text-ink-muted">
+                Tautkan fungsi agar masuk skor. Untuk indikator otomatis
+                (Backup, Patch), tulis kata itu di judul kegiatan.
+              </p>
               <select
                 name="projectId"
                 defaultValue={editingActivity?.projectId ?? ""}
@@ -2134,6 +2267,60 @@ export function DepartmentKpiWorkspace({
                   </div>
                 ) : null}
               </div>
+              <div className="space-y-2 rounded-xl border border-dashed border-brand/40 bg-brand-soft/30 p-3">
+                <p className="text-xs font-medium text-brand-deep">
+                  Dokumen kegiatan (bisa lebih dari 1, max 8)
+                </p>
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-brand px-4 py-3 text-sm font-medium text-white hover:bg-brand-deep">
+                  Pilih / unggah dokumen
+                  <input
+                    type="file"
+                    accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv"
+                    multiple
+                    className="sr-only"
+                    onChange={(e) => {
+                      onPickDocs(e.target.files);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+                <p className="text-[11px] text-ink-muted">
+                  Format PDF, Word, Excel, PowerPoint, TXT, atau CSV · max 10MB
+                  per file
+                </p>
+                {editingActivity && (editingActivity.documents?.length ?? 0) > 0 ? (
+                  <ActivityDocumentList
+                    documents={editingActivity.documents}
+                    onRemove={(url) =>
+                      void removeSavedDocument(editingActivity.id, url)
+                    }
+                  />
+                ) : null}
+                {pendingDocs.length > 0 ? (
+                  <div>
+                    <p className="text-xs text-ink-muted">
+                      File baru ({pendingDocs.length})
+                    </p>
+                    <ul className="mt-1 space-y-1 text-sm">
+                      {pendingDocs.map((f, i) => (
+                        <li
+                          key={`${f.name}-${i}`}
+                          className="truncate rounded-lg border border-line bg-surface px-3 py-2"
+                        >
+                          {f.name}
+                        </li>
+                      ))}
+                    </ul>
+                    <button
+                      type="button"
+                      onClick={clearPendingDocs}
+                      className="mt-1 text-xs text-danger hover:underline"
+                    >
+                      Buang dokumen baru
+                    </button>
+                  </div>
+                ) : null}
+              </div>
               <select
                 name="assigneeStaffId"
                 defaultValue={editingActivity?.assigneeStaffId ?? ""}
@@ -2159,7 +2346,7 @@ export function DepartmentKpiWorkspace({
                     type="button"
                     onClick={() => {
                       setEditingActivity(null);
-                      clearPendingPhotos();
+                      clearPendingUploads();
                     }}
                     className="rounded-xl border border-line px-4 py-2 text-sm"
                   >
@@ -2230,6 +2417,9 @@ export function DepartmentKpiWorkspace({
                           {a.photoUrls?.length
                             ? ` · ${a.photoUrls.length} foto`
                             : ""}
+                          {a.documents?.length
+                            ? ` · ${a.documents.length} dokumen`
+                            : ""}
                         </p>
                         <p className="mt-1 text-[11px] text-ink-muted">
                           Klik untuk buka halaman detail
@@ -2246,7 +2436,7 @@ export function DepartmentKpiWorkspace({
                           type="button"
                           onClick={() => {
                             setEditingActivity(a);
-                            clearPendingPhotos();
+                            clearPendingUploads();
                             setError(null);
                           }}
                           className="text-xs text-brand hover:underline"
@@ -2279,7 +2469,7 @@ export function DepartmentKpiWorkspace({
                   <h3 className="font-semibold">Skor otomatis (Master Fungsi KPI)</h3>
                   <p className="mt-1 text-xs text-ink-muted">
                     {hasScoreRules
-                      ? "Prioritas: capaian indikator (absensi & tiket otomatis) → penilaian manual → kegiatan."
+                      ? "Prioritas: capaian indikator (absensi, tiket, dan kegiatan otomatis) → penilaian manual → rata-rata kegiatan fungsi."
                       : "Filter per departemen & karyawan. Penilaian manual dipakai jika ada; selain itu kegiatan (Selesai 100% · Berjalan 50%) / absensi."}
                   </p>
                 </div>
@@ -2353,7 +2543,7 @@ export function DepartmentKpiWorkspace({
               {hasScoreRules && !canInputActuals ? (
                 <p className="mt-3 rounded-lg border border-line bg-surface/80 px-3 py-2 text-xs text-ink-muted">
                   Indikator tiket (SLA, response, satisfaction, non-repeat)
-                  terisi otomatis dari antrian tiket. Pilih{" "}
+                  dan kegiatan (Backup, Patch, dll.) terisi otomatis. Pilih{" "}
                   <strong>satu karyawan</strong> dan{" "}
                   <strong>satu periode</strong> untuk melihat detail / isi
                   indikator manual.
@@ -2369,8 +2559,9 @@ export function DepartmentKpiWorkspace({
                       </h4>
                       <p className="mt-0.5 text-xs text-ink-muted">
                         {autoScores.selectedStaff?.name} ·{" "}
-                        {formatDisciplinePeriodLabel(scorePeriod)}. Absensi &amp;
-                        tiket terisi otomatis. Simpan untuk indikator manual.
+                        {formatDisciplinePeriodLabel(scorePeriod)}. Absensi,
+                        tiket, dan kegiatan terisi otomatis. Simpan untuk
+                        indikator manual.
                       </p>
                     </div>
                     <button
@@ -2420,7 +2611,8 @@ export function DepartmentKpiWorkspace({
                                     ind.config.defaultTarget ?? null;
                                   const readonly =
                                     ind.metricType === "attendance" ||
-                                    isTicketSourcedIndicator(ind);
+                                    isTicketSourcedIndicator(ind) ||
+                                    isActivitySourcedIndicator(ind);
                                   const srcBadge = dataSourceBadgeLabel(
                                     ind.metricType,
                                     ind.config,

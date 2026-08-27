@@ -5,7 +5,14 @@ import {
   computeIndicatorScore,
 } from "./kpi-score-compute";
 import { listKpiScoreIndicators } from "./kpi-score-ops";
-import { upsertKpiAssessment } from "./kpi-ops";
+import { listKpiActivities, upsertKpiAssessment } from "./kpi-ops";
+import {
+  activityActualValueForIndicator,
+  activityMetricItemsForIndicators,
+  activityPeriodLabels,
+  filterActivitiesForScoreMetrics,
+  isActivitySourcedIndicator,
+} from "./activity-score-metrics";
 import {
   assigneeIdsForTicketScore,
   computeTicketScoreMetrics,
@@ -16,6 +23,7 @@ import {
   ticketPeriodLabels,
 } from "./ticket-score-metrics";
 import {
+  listAdminStaffIds,
   listAgents,
   listDepartments,
   listItTeam,
@@ -24,7 +32,7 @@ import {
   listTickets,
   listUsers,
 } from "./store";
-import type { KpiIndicatorActual, KpiScoreIndicator } from "./types";
+import type { KpiActivity, KpiIndicatorActual, KpiScoreIndicator } from "./types";
 
 type ActualRow = {
   id: string;
@@ -343,6 +351,7 @@ export function scoreStaffPeriodFromIndicators(input: {
   disciplineScore?: number | null;
   tickets?: import("./types").Ticket[];
   agents?: import("./types").Agent[];
+  activities?: KpiActivity[];
 }): {
   byFunction: Map<string, ReturnType<typeof computeFunctionScoreFromIndicators>>;
   overall: number;
@@ -388,6 +397,16 @@ export function scoreStaffPeriodFromIndicators(input: {
   );
   void scope;
 
+  const staffActivities = filterActivitiesForScoreMetrics(
+    input.activities ?? listKpiActivities(input.departmentId),
+    {
+      departmentId: input.departmentId,
+      periodLabel: input.periodLabel,
+      assigneeStaffId: input.staffId,
+      adminStaffIds: listAdminStaffIds(),
+    },
+  );
+
   let weighted = 0;
   let usedW = 0;
   let hasAny = false;
@@ -426,6 +445,18 @@ export function scoreStaffPeriodFromIndicators(input: {
           }
           const auto = ticketActualValueForIndicator(ind, ticketMetrics);
           if (auto != null) return { actualValue: auto };
+          return null;
+        }
+        if (isActivitySourcedIndicator(ind)) {
+          const auto = activityActualValueForIndicator(ind, staffActivities);
+          if (auto != null) return { actualValue: auto };
+          const fromDb = actualMap.get(ind.id);
+          if (fromDb?.actualValue != null) {
+            return {
+              actualValue: fromDb.actualValue,
+              targetOverride: fromDb.targetOverride,
+            };
+          }
           return null;
         }
         const a = actualMap.get(ind.id);
@@ -596,6 +627,145 @@ export function syncTicketScoreActuals(opts?: {
             assessedByName: "Sistem · sync tiket",
           });
         }
+      }
+    }
+  }
+
+  return { departments, periods, staffSynced, itemsWritten };
+}
+
+/**
+ * Hitung ulang capaian indikator kegiatan dari modul Kegiatan,
+ * simpan ke kpi_indicator_actuals + sync penilaian fungsi.
+ * Dipanggil setelah syncTicketScoreActuals agar skor fungsi gabungan lengkap.
+ */
+export function syncActivityScoreActuals(opts?: {
+  departmentId?: string;
+  periodLabel?: string;
+}): {
+  departments: number;
+  periods: number;
+  staffSynced: number;
+  itemsWritten: number;
+} {
+  const activities = listKpiActivities();
+  const tickets = listTickets();
+  const staff = listStaff(true);
+  const adminStaffIds = listAdminStaffIds();
+  const depts = listDepartments(true).filter((d) =>
+    opts?.departmentId ? d.id === opts.departmentId : true,
+  );
+
+  let departments = 0;
+  let periods = 0;
+  let staffSynced = 0;
+  let itemsWritten = 0;
+
+  for (const dept of depts) {
+    const indicators = listKpiScoreIndicators(dept.id).filter(
+      (i) => i.active && isActivitySourcedIndicator(i),
+    );
+    if (indicators.length === 0) continue;
+    departments += 1;
+
+    const allIndicators = listKpiScoreIndicators(dept.id).filter(
+      (i) => i.active,
+    );
+    const deptActivities = filterActivitiesForScoreMetrics(activities, {
+      departmentId: dept.id,
+      adminStaffIds,
+    });
+    const periodList = opts?.periodLabel
+      ? [opts.periodLabel]
+      : activityPeriodLabels(deptActivities);
+    if (periodList.length === 0) continue;
+
+    const deptStaff = staff.filter(
+      (s) => s.departmentId === dept.id && s.active && !adminStaffIds.includes(s.id),
+    );
+
+    for (const periodLabel of periodList) {
+      periods += 1;
+      const periodActs = filterActivitiesForScoreMetrics(deptActivities, {
+        departmentId: dept.id,
+        periodLabel,
+        adminStaffIds,
+      });
+
+      for (const member of deptStaff) {
+        const staffActs = periodActs.filter(
+          (a) => a.assigneeStaffId === member.id,
+        );
+        const items = activityMetricItemsForIndicators(
+          allIndicators,
+          staffActs,
+        );
+        if (items.length === 0) continue;
+
+        const result = upsertKpiIndicatorActualsBatch({
+          departmentId: dept.id,
+          staffId: member.id,
+          periodLabel,
+          items,
+          updatedBy: "Sistem · sync kegiatan",
+          syncAssessments: true,
+        });
+        if ("ok" in result && result.ok) {
+          staffSynced += 1;
+          itemsWritten += items.length;
+        }
+      }
+
+      if (periodActs.length === 0) continue;
+
+      const deptMetrics = computeTicketScoreMetrics(
+        filterTicketsForScoreMetrics(tickets, {
+          periodYm: periodLabel,
+          assigneeIds: null,
+        }),
+      );
+      const functions = listKpiFunctions(true, dept.id);
+      for (const fn of functions) {
+        const fnInds = allIndicators.filter((i) => i.kpiFunctionId === fn.id);
+        if (!fnInds.some((i) => isActivitySourcedIndicator(i))) continue;
+        const result = computeFunctionScoreFromIndicators(
+          fn.id,
+          fnInds,
+          (ind) => {
+            if (isTicketSourcedIndicator(ind)) {
+              const auto = ticketActualValueForIndicator(ind, deptMetrics);
+              return auto == null ? null : { actualValue: auto };
+            }
+            if (isActivitySourcedIndicator(ind)) {
+              const auto = activityActualValueForIndicator(ind, periodActs);
+              return auto == null ? null : { actualValue: auto };
+            }
+            return null;
+          },
+        );
+        if (result.filledCount === 0) continue;
+        const db = getDb();
+        const existingAsm = db
+          .prepare(
+            `SELECT id FROM kpi_assessments
+             WHERE department_id = ? AND period_label = ?
+               AND kpi_function_id = ? AND staff_id IS NULL`,
+          )
+          .get(dept.id, periodLabel, fn.id) as { id: string } | undefined;
+        const actCount = periodActs.filter(
+          (a) => a.kpiFunctionId === fn.id,
+        ).length;
+        upsertKpiAssessment({
+          id: existingAsm?.id,
+          departmentId: dept.id,
+          periodLabel,
+          staffId: null,
+          kpiFunctionId: fn.id,
+          score: result.score,
+          targetScore: 100,
+          notes: `Auto dari kegiatan · ${actCount} kegiatan tertaut`,
+          assessedByName: "Sistem · sync kegiatan",
+        });
       }
     }
   }

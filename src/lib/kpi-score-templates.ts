@@ -408,6 +408,8 @@ export const IT_SCORE_TEMPLATE: ScoreFunctionTemplate[] = [
       }),
       opIndicator("Backup Harian", "Keberhasilan backup harian", 100, 6, {
         weightPercent: 5,
+        notes:
+          "Capaian = rata-rata kegiatan tertaut fungsi ini yang judulnya memuat backup/cadangan. Selesai 100% · Berjalan 50%.",
         dataSource: "activity",
       }),
     ],
@@ -497,7 +499,11 @@ export const IT_SCORE_TEMPLATE: ScoreFunctionTemplate[] = [
         "Keberhasilan proses backup sesuai jadwal",
         20,
         1,
-        { dataSource: "activity" },
+        {
+          notes:
+            "Otomatis dari kegiatan tertaut fungsi ini (judul memuat backup/cadangan). Selesai 100% · Berjalan 50%.",
+          dataSource: "activity",
+        },
       ),
       leafIndicator(
         "Restore Test",
@@ -516,7 +522,11 @@ export const IT_SCORE_TEMPLATE: ScoreFunctionTemplate[] = [
         "Patch / update keamanan server tepat waktu",
         15,
         4,
-        { dataSource: "activity" },
+        {
+          notes:
+            "Otomatis dari kegiatan tertaut fungsi ini (judul memuat patch/hotfix). Selesai 100% · Berjalan 50%.",
+          dataSource: "activity",
+        },
       ),
       leafIndicator(
         "Audit IT",
@@ -585,7 +595,7 @@ export const DATA_SOURCE_WIRED: Record<KpiScoreDataSource, boolean> = {
   manual: false,
   attendance: true,
   ticket: true,
-  activity: false,
+  activity: true,
   project: false,
 };
 

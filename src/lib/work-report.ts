@@ -116,6 +116,8 @@ export type WorkReportRow = {
   functionLabel: string;
   projectLabel: string;
   detailHref: string;
+  photoUrls: string[];
+  documents: { url: string; name: string }[];
 };
 
 function deptLabel(departments: Department[], id: string) {
@@ -161,6 +163,8 @@ export function buildActivityRows(
       functionLabel: fn?.name ?? "—",
       projectLabel: project ? `${project.code} — ${project.title}` : "—",
       detailHref: `/kpi/activities/${a.id}`,
+      photoUrls: a.photoUrls ?? [],
+      documents: a.documents ?? [],
     };
   });
 }
@@ -192,6 +196,8 @@ export function buildProjectRows(
       functionLabel: fn?.name ?? "—",
       projectLabel: p.code,
       detailHref: `/kpi/projects/${p.id}`,
+      photoUrls: [],
+      documents: [],
     };
   });
 }
@@ -256,6 +262,22 @@ export function buildWorkReportGroups(
   });
 }
 
+export function attachmentSummary(row: {
+  photoUrls: string[];
+  documents: { url: string; name: string }[];
+}): string {
+  const parts: string[] = [];
+  if (row.photoUrls.length) parts.push(`${row.photoUrls.length} foto`);
+  if (row.documents.length) {
+    parts.push(
+      row.documents.length === 1
+        ? row.documents[0].name
+        : `${row.documents.length} dokumen (${row.documents.map((d) => d.name).join("; ")})`,
+    );
+  }
+  return parts.join(" · ") || "—";
+}
+
 export function workReportSheetRows(
   groups: WorkReportGroup[],
   meta: {
@@ -276,11 +298,27 @@ export function workReportSheetRows(
     "PIC",
     "Fungsi KPI",
     "Project",
+    "Foto",
+    "Dokumen",
   ];
   const body: (string | number)[][] = [];
   for (const g of groups) {
     if (g.rows.length === 0) {
-      body.push([g.label, "—", "(kosong)", "", "", "", "", "", "", "", ""]);
+      body.push([
+        g.label,
+        "—",
+        "(kosong)",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+      ]);
       continue;
     }
     for (const r of g.rows) {
@@ -296,6 +334,10 @@ export function workReportSheetRows(
         r.picLabel,
         r.functionLabel,
         r.projectLabel,
+        r.photoUrls.length ? r.photoUrls.length : "",
+        r.documents.length
+          ? r.documents.map((d) => d.name).join("; ")
+          : "",
       ]);
     }
   }
@@ -370,7 +412,11 @@ export function formatWorkReportWhatsAppText(
             : "[Proj] "
           : "";
       lines.push(
-        `- ${kind}${r.title} · ${r.statusLabel}${r.picLabel !== "—" ? ` · ${r.picLabel}` : ""}`,
+        `- ${kind}${r.title} · ${r.statusLabel}${r.picLabel !== "—" ? ` · ${r.picLabel}` : ""}${
+          r.photoUrls.length || r.documents.length
+            ? ` · ${attachmentSummary(r)}`
+            : ""
+        }`,
       );
     }
     if (g.rows.length > show.length) {

@@ -1,5 +1,8 @@
+import fs from "fs";
+import path from "path";
 import PDFDocument from "pdfkit";
-import type { WorkReportGroup } from "./work-report";
+import { absolutePathFromPublicUrl } from "./activity-photos";
+import { attachmentSummary, type WorkReportGroup } from "./work-report";
 
 function collectBuffers(doc: PDFKit.PDFDocument): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -14,6 +17,38 @@ function ensureSpace(doc: PDFKit.PDFDocument, needed: number) {
   if (doc.y + needed > doc.page.height - doc.page.margins.bottom) {
     doc.addPage();
   }
+}
+
+function drawRowPhotos(doc: PDFKit.PDFDocument, urls: string[]) {
+  const embeddable = urls.filter((url) => {
+    const abs = absolutePathFromPublicUrl(url);
+    if (!abs || !fs.existsSync(abs)) return false;
+    const ext = path.extname(abs).toLowerCase();
+    return ext === ".jpg" || ext === ".jpeg" || ext === ".png";
+  });
+  if (embeddable.length === 0) return;
+
+  const size = 52;
+  const gap = 6;
+  const needed = size + 10;
+  ensureSpace(doc, needed);
+  const startX = doc.x;
+  const startY = doc.y;
+  let x = startX;
+  const maxX = doc.page.width - doc.page.margins.right;
+  for (const url of embeddable.slice(0, 6)) {
+    const abs = absolutePathFromPublicUrl(url);
+    if (!abs) continue;
+    if (x + size > maxX) break;
+    try {
+      doc.image(abs, x, startY, { fit: [size, size] });
+    } catch {
+      continue;
+    }
+    x += size + gap;
+  }
+  doc.x = startX;
+  doc.y = startY + size + 6;
 }
 
 export async function buildWorkReportPdf(input: {
@@ -60,7 +95,7 @@ export async function buildWorkReportPdf(input: {
     }
 
     for (const row of group.rows) {
-      ensureSpace(doc, 52);
+      ensureSpace(doc, row.photoUrls.length ? 120 : 52);
       const kind =
         group.id === "pending"
           ? `${row.kind === "activity" ? "Kegiatan" : "Project"} · `
@@ -85,6 +120,13 @@ export async function buildWorkReportPdf(input: {
             .join(" · "),
           { width: 500 },
         );
+      if (row.photoUrls.length || row.documents.length) {
+        doc
+          .fontSize(8)
+          .fillColor("#0f766e")
+          .text(`Lampiran: ${attachmentSummary(row)}`, { width: 500 });
+        drawRowPhotos(doc, row.photoUrls);
+      }
       doc.moveDown(0.45);
     }
     doc.moveDown(0.5);

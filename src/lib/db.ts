@@ -399,6 +399,11 @@ function createSchema(db: Database.Database) {
       "ALTER TABLE kpi_activities ADD COLUMN photo_urls_json TEXT NOT NULL DEFAULT '[]'",
     );
   }
+  if (!actNames.has("document_urls_json")) {
+    db.exec(
+      "ALTER TABLE kpi_activities ADD COLUMN document_urls_json TEXT NOT NULL DEFAULT '[]'",
+    );
+  }
   if (!actNames.has("frequency")) {
     db.exec(
       "ALTER TABLE kpi_activities ADD COLUMN frequency TEXT NOT NULL DEFAULT 'daily'",

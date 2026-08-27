@@ -400,12 +400,38 @@ export function ensureDisciplineScoreIndicators() {
   tx();
 }
 
+/** Tandai indikator Backup/Patch yang sudah ada sebagai sumber kegiatan */
+function ensureActivityIndicatorSources() {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT id, name, config_json FROM kpi_score_indicators WHERE active = 1`,
+    )
+    .all() as Array<{ id: string; name: string; config_json: string }>;
+  const now = new Date().toISOString();
+  for (const row of rows) {
+    if (!/backup|patch/i.test(row.name)) continue;
+    let config: KpiScoreIndicatorConfig = {};
+    try {
+      config = JSON.parse(row.config_json || "{}") as KpiScoreIndicatorConfig;
+    } catch {
+      continue;
+    }
+    if (config.dataSource === "activity") continue;
+    config.dataSource = "activity";
+    db.prepare(
+      `UPDATE kpi_score_indicators SET config_json = ?, updated_at = ? WHERE id = ?`,
+    ).run(JSON.stringify(config), now, row.id);
+  }
+}
+
 /** Pastikan template skor dept yang sudah didukung terisi */
 export function ensureDepartmentScoreRules() {
   ensureBuiltInScoreTemplates();
   ensureMekanikScoreRules();
   ensureITScoreRules();
   ensureDisciplineScoreIndicators();
+  ensureActivityIndicatorSources();
 }
 
 export function listScoreTemplateCodes(): Array<{
