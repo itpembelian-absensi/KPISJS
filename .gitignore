@@ -40,10 +40,18 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# local helpdesk database
-/data/db.json
-/data/*.db
-/data/*.db-*
+# local helpdesk database & runtime data
+/data/*
+!/data/.gitkeep
+
+# sync & backup archives
+*.rar
+*.zip
+*.tar.gz
+*.7z
+/_sync-to-server/
 
 # uploaded activity photos
 /public/uploads/
+!/public/uploads/.gitkeep
+
