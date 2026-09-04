@@ -26,6 +26,8 @@ import type {
   Department,
   ItMember,
   ItMemberType,
+  ItServer,
+  ItServerLog,
   SessionUser,
   StaffMember,
   Ticket,
