@@ -41,8 +41,7 @@ yarn-error.log*
 next-env.d.ts
 
 # local helpdesk database & runtime data
-/data/*
-!/data/.gitkeep
+/data/
 
 # sync & backup archives
 *.rar
@@ -53,5 +52,4 @@ next-env.d.ts
 
 # uploaded activity photos
 /public/uploads/
-!/public/uploads/.gitkeep
 
