@@ -1,0 +1,93 @@
+{
+  "sync": {
+    "departments": 1,
+    "periods": 1,
+    "staffSynced": 3,
+    "itemsWritten": 9
+  },
+  "period": "2026-08",
+  "metrics": {
+    "ticketCount": 2,
+    "resolvedCount": 2,
+    "slaCompliancePercent": 100,
+    "responseWithinTargetPercent": 100,
+    "satisfactionPercent": null,
+    "nonRepeatPercent": 100
+  },
+  "score": 100,
+  "filledCount": 3,
+  "weightUsed": 70,
+  "indicators": [
+    {
+      "indicatorId": "5acbd7ef-9b89-405a-b6f7-ee5336528a43",
+      "name": "Ticket selesai SLA",
+      "weightPercent": 30,
+      "actualValue": 100,
+      "computedScore": 100,
+      "metricType": "scale_percent"
+    },
+    {
+      "indicatorId": "cb8977f2-1dfb-4f7d-9255-c431d8ad32fa",
+      "name": "Response User",
+      "weightPercent": 25,
+      "actualValue": 100,
+      "computedScore": 100,
+      "metricType": "scale_percent"
+    },
+    {
+      "indicatorId": "0757f2c1-edb7-4215-92ef-e5f938b598a8",
+      "name": "User Satisfaction",
+      "weightPercent": 20,
+      "actualValue": null,
+      "computedScore": 0,
+      "metricType": "scale_percent"
+    },
+    {
+      "indicatorId": "7c69050a-8dc0-497e-9ffc-63164076dc83",
+      "name": "Non-repeat Issue",
+      "weightPercent": 15,
+      "actualValue": 100,
+      "computedScore": 100,
+      "metricType": "scale_percent"
+    },
+    {
+      "indicatorId": "c7c0a505-7dad-4114-a6df-528bbe1329a8",
+      "name": "Server Uptime",
+      "weightPercent": 5,
+      "actualValue": null,
+      "computedScore": 0,
+      "metricType": "scale_percent"
+    },
+    {
+      "indicatorId": "a1ef26ca-a5b7-436f-87d0-0babab33d11b",
+      "name": "Backup Harian",
+      "weightPercent": 5,
+      "actualValue": null,
+      "computedScore": 0,
+      "metricType": "scale_percent"
+    }
+  ],
+  "actualsSaved": 9,
+  "assessments": [
+    {
+      "staffId": null,
+      "score": 100,
+      "notes": "Auto dari tiket · 2 tiket"
+    },
+    {
+      "staffId": "9bd54a26-9faf-4d4a-82b3-11454e78d5ac",
+      "score": 100,
+      "notes": "Auto dari capaian indikator Aturan Skor KPI"
+    },
+    {
+      "staffId": "ed247cce-f2de-4aa5-8661-65aca6123c9b",
+      "score": 100,
+      "notes": "Auto dari capaian indikator Aturan Skor KPI"
+    },
+    {
+      "staffId": "656c14d6-0c28-4d05-8ff2-26a4249dbd73",
+      "score": 100,
+      "notes": "Auto dari capaian indikator Aturan Skor KPI"
+    }
+  ]
+}

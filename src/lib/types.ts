@@ -608,3 +608,49 @@ export function defaultSopDispositions(deptName = ""): SopDisposition[] {
 
 export const DEFAULT_SOP_DISPOSITIONS: SopDisposition[] =
   defaultSopDispositions("Departemen");
+
+export interface CredentialItem {
+  id: string;
+  username: string;
+  password?: string;
+  description?: string;
+}
+
+export interface AppItem {
+  id: string;
+  name: string;
+  description?: string;
+  credentials: CredentialItem[];
+}
+
+export type AssetCategory = "Server" | "Aplikasi" | "Domain/Email" | "Lainnya";
+
+export interface ItServer {
+  id: string;
+  category: AssetCategory;
+  name: string;
+  ipAddress: string;
+  url: string; // Used for Application/Domain
+  username: string; // legacy/primary
+  password?: string; // legacy/primary
+  hardwareSpec: string;
+  os: string;
+  location: string;
+  notes: string;
+  active: boolean;
+  osCredentials: CredentialItem[];
+  apps: AppItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ItServerLog {
+  id: string;
+  serverId: string;
+  actionType: string;
+  description: string;
+  logDate: string;
+  createdByName: string;
+  createdByStaffId: string | null;
+  createdAt: string;
+}

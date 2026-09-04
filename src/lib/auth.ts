@@ -356,6 +356,12 @@ export const NAV_ENTRIES: NavEntry[] = [
           roles: ["admin", "it_staff"],
         },
         {
+          href: "/master/servers",
+          label: "Dokumentasi IT",
+          hint: "Server, Aplikasi & Akun",
+          roles: ["admin", "it_staff"],
+        },
+        {
           href: "/master/kpi-functions",
           label: "Fungsi KPI",
           hint: "Bobot & fokus penilaian",

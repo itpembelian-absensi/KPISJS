@@ -309,6 +309,35 @@ function createSchema(db: Database.Database) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_sops_active ON sops(active);
+
+    CREATE TABLE IF NOT EXISTS it_servers (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      ip_address TEXT NOT NULL DEFAULT '',
+      username TEXT NOT NULL DEFAULT '',
+      password TEXT NOT NULL DEFAULT '',
+      hardware_spec TEXT NOT NULL DEFAULT '',
+      os TEXT NOT NULL DEFAULT '',
+      location TEXT NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT '',
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS it_server_logs (
+      id TEXT PRIMARY KEY,
+      server_id TEXT NOT NULL,
+      action_type TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      log_date TEXT NOT NULL,
+      created_by_name TEXT NOT NULL,
+      created_by_staff_id TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (server_id) REFERENCES it_servers(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_it_server_logs_server ON it_server_logs(server_id);
   `);
 
   // Migrasi kolom SOP formal (aman jika tabel lama tanpa kolom baru)
@@ -515,6 +544,26 @@ function createSchema(db: Database.Database) {
       CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
       PRAGMA foreign_keys = ON;
     `);
+  }
+
+  // Migrasi it_servers untuk credentials_json dan apps_json serta category
+  const itServerCols = db
+    .prepare("PRAGMA table_info(it_servers)")
+    .all() as Array<{ name: string }>;
+  if (itServerCols.length > 0) {
+    const itServerNames = new Set(itServerCols.map((c) => c.name));
+    if (!itServerNames.has("os_credentials_json")) {
+      db.exec("ALTER TABLE it_servers ADD COLUMN os_credentials_json TEXT NOT NULL DEFAULT '[]'");
+    }
+    if (!itServerNames.has("apps_json")) {
+      db.exec("ALTER TABLE it_servers ADD COLUMN apps_json TEXT NOT NULL DEFAULT '[]'");
+    }
+    if (!itServerNames.has("category")) {
+      db.exec("ALTER TABLE it_servers ADD COLUMN category TEXT NOT NULL DEFAULT 'Server'");
+    }
+    if (!itServerNames.has("url")) {
+      db.exec("ALTER TABLE it_servers ADD COLUMN url TEXT NOT NULL DEFAULT ''");
+    }
   }
 }
 

@@ -2527,6 +2527,156 @@ export function deleteTicket(id: string): { ok: true } | { error: string } {
   deleteTicketUploadFolder(existing.id);
   return { ok: true };
 }
+export function getServers(): ItServer[] {
+  ensureDb();
+  const rows = getDb().prepare("SELECT * FROM it_servers ORDER BY name ASC").all() as any[];
+  return rows.map((r) => ({
+    id: r.id,
+    category: r.category || "Server",
+    name: r.name,
+    ipAddress: r.ip_address,
+    url: r.url || "",
+    username: r.username,
+    password: r.password,
+    hardwareSpec: r.hardware_spec,
+    os: r.os,
+    location: r.location,
+    notes: r.notes,
+    active: intToBool(r.active),
+    osCredentials: parseJsonStringArray(r.os_credentials_json) as any || [],
+    apps: parseJsonStringArray(r.apps_json) as any || [],
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }));
+}
 
+export function getServerById(id: string): ItServer | undefined {
+  ensureDb();
+  const r = getDb().prepare("SELECT * FROM it_servers WHERE id = ?").get(id) as any;
+  if (!r) return undefined;
+  return {
+    id: r.id,
+    category: r.category || "Server",
+    name: r.name,
+    ipAddress: r.ip_address,
+    url: r.url || "",
+    username: r.username,
+    password: r.password,
+    hardwareSpec: r.hardware_spec,
+    os: r.os,
+    location: r.location,
+    notes: r.notes,
+    active: intToBool(r.active),
+    osCredentials: parseJsonStringArray(r.os_credentials_json) as any || [],
+    apps: parseJsonStringArray(r.apps_json) as any || [],
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
 
+export function insertServer(server: ItServer) {
+  ensureDb();
+  getDb().prepare(`
+    INSERT INTO it_servers (
+      id, category, name, ip_address, url, username, password, hardware_spec, os, location, notes, active, os_credentials_json, apps_json, created_at, updated_at
+    ) VALUES (
+      @id, @category, @name, @ipAddress, @url, @username, @password, @hardwareSpec, @os, @location, @notes, @active, @osCredentialsJson, @appsJson, @createdAt, @updatedAt
+    )
+  `).run({
+    id: server.id,
+    category: server.category || "Server",
+    name: server.name,
+    ipAddress: server.ipAddress,
+    url: server.url || "",
+    username: server.username,
+    password: server.password || '',
+    hardwareSpec: server.hardwareSpec,
+    os: server.os,
+    location: server.location,
+    notes: server.notes,
+    active: boolToInt(server.active),
+    osCredentialsJson: JSON.stringify(server.osCredentials || []),
+    appsJson: JSON.stringify(server.apps || []),
+    createdAt: server.createdAt,
+    updatedAt: server.updatedAt,
+  });
+}
+
+export function updateServer(server: ItServer) {
+  ensureDb();
+  getDb().prepare(`
+    UPDATE it_servers SET
+      category = @category,
+      name = @name,
+      ip_address = @ipAddress,
+      url = @url,
+      username = @username,
+      password = @password,
+      hardware_spec = @hardwareSpec,
+      os = @os,
+      location = @location,
+      notes = @notes,
+      active = @active,
+      os_credentials_json = @osCredentialsJson,
+      apps_json = @appsJson,
+      updated_at = @updatedAt
+    WHERE id = @id
+  `).run({
+    id: server.id,
+    category: server.category || "Server",
+    name: server.name,
+    ipAddress: server.ipAddress,
+    url: server.url || "",
+    username: server.username,
+    password: server.password || '',
+    hardwareSpec: server.hardwareSpec,
+    os: server.os,
+    location: server.location,
+    notes: server.notes,
+    active: boolToInt(server.active),
+    osCredentialsJson: JSON.stringify(server.osCredentials || []),
+    appsJson: JSON.stringify(server.apps || []),
+    updatedAt: server.updatedAt,
+  });
+}
+
+export function deleteServer(id: string) {
+  ensureDb();
+  getDb().prepare("DELETE FROM it_servers WHERE id = ?").run(id);
+}
+
+export function getServerLogs(serverId: string): ItServerLog[] {
+  ensureDb();
+  const rows = getDb().prepare("SELECT * FROM it_server_logs WHERE server_id = ? ORDER BY log_date DESC").all(serverId) as any[];
+  return rows.map((r) => ({
+    id: r.id,
+    serverId: r.server_id,
+    actionType: r.action_type,
+    description: r.description,
+    logDate: r.log_date,
+    createdByName: r.created_by_name,
+    createdByStaffId: r.created_by_staff_id,
+    createdAt: r.created_at,
+  }));
+}
+
+export function insertServerLog(log: ItServerLog) {
+  ensureDb();
+  getDb().prepare(`
+    INSERT INTO it_server_logs (
+      id, server_id, action_type, description, log_date, created_by_name, created_by_staff_id, created_at
+    ) VALUES (
+      @id, @serverId, @actionType, @description, @logDate, @createdByName, @createdByStaffId, @createdAt
+    )
+  `).run({
+    id: log.id,
+    serverId: log.serverId,
+    actionType: log.actionType,
+    description: log.description,
+    logDate: log.logDate,
+    createdByName: log.createdByName,
+    createdByStaffId: log.createdByStaffId,
+    createdAt: log.createdAt,
+  });
+}
 
