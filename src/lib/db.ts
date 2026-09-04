@@ -313,7 +313,9 @@ function createSchema(db: Database.Database) {
     CREATE TABLE IF NOT EXISTS it_servers (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'Server',
       ip_address TEXT NOT NULL DEFAULT '',
+      url TEXT NOT NULL DEFAULT '',
       username TEXT NOT NULL DEFAULT '',
       password TEXT NOT NULL DEFAULT '',
       hardware_spec TEXT NOT NULL DEFAULT '',
@@ -321,6 +323,8 @@ function createSchema(db: Database.Database) {
       location TEXT NOT NULL DEFAULT '',
       notes TEXT NOT NULL DEFAULT '',
       active INTEGER NOT NULL DEFAULT 1,
+      os_credentials_json TEXT NOT NULL DEFAULT '[]',
+      apps_json TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );

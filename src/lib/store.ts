@@ -2527,6 +2527,16 @@ export function deleteTicket(id: string): { ok: true } | { error: string } {
   deleteTicketUploadFolder(existing.id);
   return { ok: true };
 }
+function parseJsonGenericArray<T>(raw: string | null | undefined): T[] {
+  if (raw == null || raw === "") return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 export function getServers(): ItServer[] {
   ensureDb();
   const rows = getDb().prepare("SELECT * FROM it_servers ORDER BY name ASC").all() as any[];
@@ -2543,8 +2553,8 @@ export function getServers(): ItServer[] {
     location: r.location,
     notes: r.notes,
     active: intToBool(r.active),
-    osCredentials: parseJsonStringArray(r.os_credentials_json) as any || [],
-    apps: parseJsonStringArray(r.apps_json) as any || [],
+    osCredentials: parseJsonGenericArray(r.os_credentials_json),
+    apps: parseJsonGenericArray(r.apps_json),
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }));
@@ -2567,8 +2577,8 @@ export function getServerById(id: string): ItServer | undefined {
     location: r.location,
     notes: r.notes,
     active: intToBool(r.active),
-    osCredentials: parseJsonStringArray(r.os_credentials_json) as any || [],
-    apps: parseJsonStringArray(r.apps_json) as any || [],
+    osCredentials: parseJsonGenericArray(r.os_credentials_json),
+    apps: parseJsonGenericArray(r.apps_json),
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
