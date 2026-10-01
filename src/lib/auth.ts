@@ -159,6 +159,31 @@ export function canAccessTicket(
   return Boolean(userStaffId && ticketRequesterStaffId === userStaffId);
 }
 
+/** Setujui / tolak pengajuan: Admin, IT, dan Manager. */
+export function canReviewPengajuan(role: UserRole): boolean {
+  return role === "admin" || role === "it_staff" || role === "manager";
+}
+
+/** Tandai selesai setelah diproses di sistem: Admin dan IT. */
+export function canCompletePengajuan(role: UserRole): boolean {
+  return role === "admin" || role === "it_staff";
+}
+
+/** Staf & penilai hanya melihat pengajuan sendiri. Manager mengikuti scope departemen. */
+export function canSeePengajuan(
+  user: SessionUser,
+  row: { requesterStaffId: string | null; departmentId: string },
+): boolean {
+  if (user.role === "admin" || user.role === "it_staff") return true;
+  if (user.staffId && row.requesterStaffId === user.staffId) return true;
+  if (user.role === "manager") {
+    const scope = getEffectiveDepartmentScope(user);
+    if (scope === "all") return true;
+    return scope.includes(row.departmentId);
+  }
+  return false;
+}
+
 export type NavItem = {
   href: string;
   label: string;
@@ -226,6 +251,59 @@ export const NAV_ENTRIES: NavEntry[] = [
           label: "Buat Perintah",
           hint: "Tugas project / inovasi / security",
           roles: ["admin", "manager", "it_staff"],
+        },
+      ],
+    },
+  },
+  {
+    type: "group",
+    group: {
+      id: "pengajuan",
+      label: "Pengajuan",
+      hint: "Permintaan resmi yang perlu persetujuan",
+      roles: ["admin", "manager", "staff", "it_staff", "assessor"],
+      children: [
+        {
+          href: "/pengajuan",
+          label: "Semua Pengajuan",
+          hint: "Status seluruh formulir",
+          roles: ["admin", "manager", "staff", "it_staff", "assessor"],
+        },
+        {
+          href: "/pengajuan/void",
+          label: "Approve & Void",
+          hint: "Setujui atau batalkan transaksi",
+          roles: ["admin", "manager", "staff", "it_staff", "assessor"],
+        },
+        {
+          href: "/pengajuan/customer",
+          label: "Master Customer",
+          hint: "Tambah atau ubah data customer",
+          roles: ["admin", "manager", "staff", "it_staff", "assessor"],
+        },
+        {
+          href: "/pengajuan/barang",
+          label: "Master Barang",
+          hint: "Tambah item / barang baru",
+          roles: ["admin", "manager", "staff", "it_staff", "assessor"],
+        },
+        {
+          href: "/pengajuan/perubahan",
+          label: "Perubahan Data",
+          hint: "Ubah data master yang sudah ada",
+          roles: ["admin", "manager", "staff", "it_staff", "assessor"],
+        },
+        {
+          href: "/pengajuan/asset",
+          label: "Asset IT",
+          hint: "Ajukan perangkat IT baru",
+          roles: ["admin", "manager", "staff", "it_staff", "assessor"],
+        },
+        {
+          href: "/pengajuan/akses",
+          label: "Akses Sistem",
+          hint: "User baru, hak akses, reset",
+          roles: ["admin", "manager", "staff", "it_staff", "assessor"],
         },
       ],
     },

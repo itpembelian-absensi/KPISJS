@@ -1,5 +1,7 @@
 import { randomUUID } from "crypto";
 import { SESSION_DAYS } from "./auth";
+import { backfillCustomersFromSubmissions } from "./customer-ops";
+import { seedPengajuanMenusIfMissing } from "./pengajuan-ops";
 import { boolToInt, getDb, getMeta, intToBool, setMeta } from "./db";
 import {
   defaultEmployeeExcelPath,
@@ -1136,6 +1138,8 @@ function ensureDb() {
   seedSopMenuIfMissing();
   seedBrandingMenuIfMissing();
   seedBackupMenuIfMissing();
+  seedPengajuanMenusIfMissing();
+  backfillCustomersFromSubmissions();
 }
 
 export function readData(): AppData {

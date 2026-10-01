@@ -342,6 +342,58 @@ function createSchema(db: Database.Database) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_it_server_logs_server ON it_server_logs(server_id);
+
+    CREATE TABLE IF NOT EXISTS submissions (
+      id TEXT PRIMARY KEY,
+      code TEXT NOT NULL UNIQUE,
+      type TEXT NOT NULL CHECK (type IN ('void', 'customer', 'barang', 'perubahan', 'asset', 'akses')),
+      title TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('submitted', 'approved', 'rejected', 'done')),
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      note TEXT NOT NULL DEFAULT '',
+      requester_name TEXT NOT NULL,
+      requester_dept TEXT NOT NULL,
+      requester_staff_id TEXT,
+      department_id TEXT NOT NULL DEFAULT '',
+      reviewer_name TEXT NOT NULL DEFAULT '',
+      reviewer_note TEXT NOT NULL DEFAULT '',
+      reviewed_at TEXT,
+      completed_by TEXT NOT NULL DEFAULT '',
+      completion_note TEXT NOT NULL DEFAULT '',
+      completed_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_submissions_type ON submissions(type);
+    CREATE INDEX IF NOT EXISTS idx_submissions_status ON submissions(status);
+    CREATE INDEX IF NOT EXISTS idx_submissions_requester ON submissions(requester_staff_id);
+    CREATE INDEX IF NOT EXISTS idx_submissions_department ON submissions(department_id);
+
+    CREATE TABLE IF NOT EXISTS customers (
+      id TEXT PRIMARY KEY,
+      code TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      customer_type TEXT NOT NULL DEFAULT '',
+      phone TEXT NOT NULL DEFAULT '',
+      email TEXT NOT NULL DEFAULT '',
+      npwp TEXT NOT NULL DEFAULT '',
+      pic_name TEXT NOT NULL DEFAULT '',
+      address TEXT NOT NULL DEFAULT '',
+      credit_limit TEXT NOT NULL DEFAULT '',
+      term_of_payment TEXT NOT NULL DEFAULT '',
+      photo_urls_json TEXT NOT NULL DEFAULT '[]',
+      note TEXT NOT NULL DEFAULT '',
+      last_change TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'submitted' CHECK (status IN ('submitted', 'approved', 'rejected', 'done')),
+      submission_id TEXT NOT NULL UNIQUE,
+      requester_name TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name);
+    CREATE INDEX IF NOT EXISTS idx_customers_status ON customers(status);
   `);
 
   // Migrasi kolom SOP formal (aman jika tabel lama tanpa kolom baru)
@@ -568,6 +620,82 @@ function createSchema(db: Database.Database) {
     if (!itServerNames.has("url")) {
       db.exec("ALTER TABLE it_servers ADD COLUMN url TEXT NOT NULL DEFAULT ''");
     }
+  }
+
+  // Foto pendukung pengajuan
+  const submissionCols = db
+    .prepare("PRAGMA table_info(submissions)")
+    .all() as Array<{ name: string }>;
+  if (submissionCols.length > 0) {
+    const submissionNames = new Set(submissionCols.map((c) => c.name));
+    if (!submissionNames.has("photo_urls_json")) {
+      db.exec(
+        "ALTER TABLE submissions ADD COLUMN photo_urls_json TEXT NOT NULL DEFAULT '[]'",
+      );
+    }
+  }
+
+  // Jenis customer_ubah: perubahan data customer di sheet Master Customer
+  const submissionsTable = db
+    .prepare(
+      `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'submissions'`,
+    )
+    .get() as { sql: string } | undefined;
+  if (
+    submissionsTable?.sql &&
+    !submissionsTable.sql.includes("'customer_ubah'")
+  ) {
+    db.exec(`
+      PRAGMA foreign_keys = OFF;
+
+      CREATE TABLE submissions_mig (
+        id TEXT PRIMARY KEY,
+        code TEXT NOT NULL UNIQUE,
+        type TEXT NOT NULL CHECK (type IN ('void', 'customer', 'barang', 'perubahan', 'asset', 'akses', 'customer_ubah')),
+        title TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('submitted', 'approved', 'rejected', 'done')),
+        payload_json TEXT NOT NULL DEFAULT '{}',
+        note TEXT NOT NULL DEFAULT '',
+        requester_name TEXT NOT NULL,
+        requester_dept TEXT NOT NULL,
+        requester_staff_id TEXT,
+        department_id TEXT NOT NULL DEFAULT '',
+        reviewer_name TEXT NOT NULL DEFAULT '',
+        reviewer_note TEXT NOT NULL DEFAULT '',
+        reviewed_at TEXT,
+        completed_by TEXT NOT NULL DEFAULT '',
+        completion_note TEXT NOT NULL DEFAULT '',
+        completed_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        photo_urls_json TEXT NOT NULL DEFAULT '[]'
+      );
+
+      INSERT INTO submissions_mig (
+        id, code, type, title, status, payload_json, note,
+        requester_name, requester_dept, requester_staff_id, department_id,
+        reviewer_name, reviewer_note, reviewed_at,
+        completed_by, completion_note, completed_at,
+        created_at, updated_at, photo_urls_json
+      )
+      SELECT
+        id, code, type, title, status, payload_json, note,
+        requester_name, requester_dept, requester_staff_id, department_id,
+        reviewer_name, reviewer_note, reviewed_at,
+        completed_by, completion_note, completed_at,
+        created_at, updated_at, photo_urls_json
+      FROM submissions;
+
+      DROP TABLE submissions;
+      ALTER TABLE submissions_mig RENAME TO submissions;
+
+      CREATE INDEX IF NOT EXISTS idx_submissions_type ON submissions(type);
+      CREATE INDEX IF NOT EXISTS idx_submissions_status ON submissions(status);
+      CREATE INDEX IF NOT EXISTS idx_submissions_requester ON submissions(requester_staff_id);
+      CREATE INDEX IF NOT EXISTS idx_submissions_department ON submissions(department_id);
+
+      PRAGMA foreign_keys = ON;
+    `);
   }
 }
 

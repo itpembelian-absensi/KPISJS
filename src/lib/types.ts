@@ -654,3 +654,61 @@ export interface ItServerLog {
   createdByStaffId: string | null;
   createdAt: string;
 }
+
+/** Jenis formulir di menu Pengajuan */
+export type PengajuanType =
+  | "void"
+  | "customer"
+  | "customer_ubah"
+  | "barang"
+  | "perubahan"
+  | "asset"
+  | "akses";
+
+export type PengajuanStatus = "submitted" | "approved" | "rejected" | "done";
+
+export interface Pengajuan {
+  id: string;
+  code: string;
+  type: PengajuanType;
+  title: string;
+  status: PengajuanStatus;
+  payload: Record<string, string>;
+  photoUrls: string[];
+  note: string;
+  requesterName: string;
+  requesterDept: string;
+  requesterStaffId: string | null;
+  departmentId: string;
+  reviewerName: string;
+  reviewerNote: string;
+  reviewedAt: string | null;
+  completedBy: string;
+  completionNote: string;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Master customer yang lahir dari pengajuan penambahan. */
+export interface MasterCustomer {
+  id: string;
+  code: string;
+  name: string;
+  customerType: string;
+  phone: string;
+  email: string;
+  npwp: string;
+  picName: string;
+  address: string;
+  creditLimit: string;
+  termOfPayment: string;
+  photoUrls: string[];
+  note: string;
+  lastChange: string;
+  status: PengajuanStatus;
+  submissionId: string;
+  requesterName: string;
+  createdAt: string;
+  updatedAt: string;
+}
