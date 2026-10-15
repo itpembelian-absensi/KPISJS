@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { getDb, getMeta, setMeta } from "./db";
+import { fallbackApproval } from "./pengajuan-approval-view";
 import type { MasterCustomer, Pengajuan, PengajuanStatus } from "./types";
 
 const CUSTOMER_CODE_START_META = "customer_code_start";
@@ -236,6 +237,38 @@ function findCustomerId(code: string, name: string): string | null {
   return byName.length === 1 ? byName[0].id : null;
 }
 
+/** Kembalikan limit, TOP, dan catatan bila persetujuan terakhir dibatalkan. */
+export function revertCustomerChange(item: Pengajuan) {
+  if (item.type !== "customer_ubah") return;
+  const id = findCustomerId(
+    item.payload.kodeCustomer || "",
+    item.payload.namaCustomer || "",
+  );
+  if (!id) return;
+
+  const current = getDb()
+    .prepare(`SELECT * FROM customers WHERE id = ?`)
+    .get(id) as CustomerRow;
+  const payload = item.payload;
+  const limit = payload.limitBaru?.trim()
+    ? payload.limitLama?.trim() || current.credit_limit
+    : current.credit_limit;
+  const top = payload.termOfPayment?.trim()
+    ? payload.topLama?.trim() || current.term_of_payment
+    : current.term_of_payment;
+  const lastChange = payload.dataBaru?.trim()
+    ? payload.dataLama?.trim() || ""
+    : current.last_change;
+
+  getDb()
+    .prepare(
+      `UPDATE customers
+       SET credit_limit = ?, term_of_payment = ?, last_change = ?, updated_at = ?
+       WHERE id = ?`,
+    )
+    .run(limit, top, lastChange, new Date().toISOString(), id);
+}
+
 /** Terapkan perubahan limit, TOP, dan catatan setelah pengajuan disetujui. */
 export function applyCustomerChange(item: Pengajuan) {
   if (item.type !== "customer_ubah") return;
@@ -326,6 +359,12 @@ export function backfillCustomersFromSubmissions() {
       completedAt: null,
       createdAt: row.created_at,
       updatedAt: row.created_at,
+      approval: fallbackApproval({
+        status: row.status,
+        reviewerName: "",
+        reviewerNote: "",
+        reviewedAt: null,
+      }),
     });
   }
 }

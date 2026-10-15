@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { listAssetCategories } from "@/lib/asset-category-ops";
+import { allocatePerubahanNumber, listJenisData } from "@/lib/jenis-data-ops";
 import {
   canAccessMenu,
   canViewAllTickets,
@@ -38,6 +40,36 @@ export async function POST(req: NextRequest) {
   const parsed = parsePengajuanPayload(type, body?.payload);
   if ("error" in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
+  }
+
+  if (parsed.payload.kategoriAsset) {
+    const names = listAssetCategories(true).map((item) => item.name);
+    if (!names.includes(parsed.payload.kategoriAsset)) {
+      return NextResponse.json(
+        { error: "Kategori tidak ada di master kategori aset" },
+        { status: 400 },
+      );
+    }
+  }
+
+  if (parsed.payload.objek) {
+    const names = listJenisData(true).map((item) => item.name);
+    if (!names.includes(parsed.payload.objek)) {
+      return NextResponse.json(
+        { error: "Jenis data tidak ada di master jenis data" },
+        { status: 400 },
+      );
+    }
+  }
+
+  if (def.type === "perubahan") {
+    try {
+      parsed.payload.identitas = allocatePerubahanNumber(parsed.payload.objek || "");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Nomor perubahan gagal dibuat";
+      return NextResponse.json({ error: message }, { status: 400 });
+    }
   }
 
   if (def.type === "customer_ubah") {
@@ -96,7 +128,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ pengajuan }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
-    if (message.startsWith("Counter kode") || message.startsWith("Kode customer")) {
+    if (
+      message.startsWith("Counter kode") ||
+      message.startsWith("Kode customer") ||
+      message.startsWith("Rantai approval")
+    ) {
       return NextResponse.json({ error: message }, { status: 400 });
     }
     throw error;

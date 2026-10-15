@@ -24,6 +24,7 @@ import {
   listKpiAssessments,
   listKpiProjects,
 } from "@/lib/kpi-ops";
+import { listKpiWaReports } from "@/lib/wa-report-ops";
 import { listKpiIndicatorActuals, syncActivityScoreActuals, syncTicketScoreActuals } from "@/lib/kpi-indicator-actuals-ops";
 import {
   ensureDepartmentScoreRules,
@@ -103,6 +104,9 @@ export default async function DepartmentKpiPage() {
           activities={
             staffLimited ? listKpiActivities(deptId) : listKpiActivities()
           }
+          initialWaReports={
+            staffLimited ? listKpiWaReports(deptId) : listKpiWaReports()
+          }
           assessments={staffLimited ? [] : listKpiAssessments()}
           disciplineSummaries={
             staffLimited ? [] : listAttendanceSummaries()
@@ -115,6 +119,13 @@ export default async function DepartmentKpiPage() {
           staff={listStaff(true)}
           defaultDepartmentId={defaultDepartmentId}
           assessorName={user.name}
+          sessionUser={{
+            id: user.id,
+            name: user.name,
+            role: user.role,
+            departmentId: user.departmentId,
+            staffId: user.staffId,
+          }}
           staffLimited={staffLimited}
           managerStaffIds={managerStaffIds}
           adminStaffIds={adminStaffIds}

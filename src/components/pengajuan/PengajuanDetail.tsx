@@ -2,9 +2,15 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { formatMoneyCurrency, terbilangRupiah } from "@/lib/money";
 import type { PengajuanField } from "@/lib/pengajuan";
-import { PENGAJUAN_STATUS_LABEL } from "@/lib/pengajuan";
-import type { Pengajuan, PengajuanStatus } from "@/lib/types";
+import {
+  approvalActorNames,
+  approvedSignerNames,
+  currentApprovalStep,
+  unapproveTarget,
+} from "@/lib/pengajuan-approval-view";
+import type { Pengajuan } from "@/lib/types";
 import { ActivityPhotoSlider } from "@/components/ActivityPhotoSlider";
 import { PengajuanStatusBadge } from "@/components/pengajuan/PengajuanStatusBadge";
 
@@ -23,6 +29,7 @@ function formatWhen(iso: string | null) {
 
 function displayValue(field: PengajuanField, value: string) {
   if (!value) return "—";
+  if (field.kind === "money") return formatMoneyCurrency(value) || "—";
   if (field.kind === "date") {
     const [y, m, d] = value.split("-");
     if (y && m && d) return `${d}/${m}/${y}`;
@@ -30,12 +37,10 @@ function displayValue(field: PengajuanField, value: string) {
   return value;
 }
 
-const STEPS: PengajuanStatus[] = ["submitted", "approved", "done"];
-
 function StepMark({
   state,
 }: {
-  state: "done" | "wait" | "rejected";
+  state: "done" | "current" | "wait" | "rejected";
 }) {
   if (state === "done") {
     return (
@@ -68,9 +73,65 @@ function StepMark({
       </span>
     );
   }
+  if (state === "current") {
+    return (
+      <span className="h-5 w-5 shrink-0 rounded-full border-2 border-brand bg-white" />
+    );
+  }
   return (
     <span className="h-5 w-5 shrink-0 rounded-full border-2 border-line bg-white" />
   );
+}
+
+type UiStep = {
+  key: string;
+  label: string;
+  state: "done" | "current" | "wait" | "rejected";
+  hint: string;
+};
+
+function progressSteps(item: Pengajuan): UiStep[] {
+  const steps: UiStep[] = [
+    { key: "submitted", label: "Diajukan", state: "done", hint: "Sudah" },
+  ];
+  for (const step of item.approval.steps) {
+    const who = approvalActorNames(item, step);
+    if (step.status === "approved") {
+      steps.push({
+        key: step.id,
+        label: step.label,
+        state: "done",
+        hint: step.actorName ? `Disetujui ${step.actorName}` : "Sudah disetujui",
+      });
+      continue;
+    }
+    if (step.status === "rejected") {
+      steps.push({
+        key: step.id,
+        label: step.label,
+        state: "rejected",
+        hint: step.actorName ? `Ditolak ${step.actorName}` : "Ditolak",
+      });
+      continue;
+    }
+    const current = step.order === item.approval.currentOrder;
+    steps.push({
+      key: step.id,
+      label: step.label,
+      state: current ? "current" : "wait",
+      hint: current ? `Menunggu ${who}` : "Belum",
+    });
+  }
+  if (item.status !== "rejected") {
+    const finished = item.status === "approved" || item.status === "done";
+    steps.push({
+      key: "approved",
+      label: "Disetujui",
+      state: finished ? "done" : "wait",
+      hint: finished ? "Sudah disetujui" : "Belum",
+    });
+  }
+  return steps;
 }
 
 export function PengajuanDetail({
@@ -78,26 +139,27 @@ export function PengajuanDetail({
   def,
   displayCode,
   canReview,
-  canComplete,
+  canUnapprove,
 }: {
   item: Pengajuan;
   displayCode?: string;
   def: { label: string; fields: PengajuanField[]; photos?: boolean };
   canReview: boolean;
-  canComplete: boolean;
+  canUnapprove: boolean;
 }) {
   const router = useRouter();
   const [note, setNote] = useState("");
-  const [loading, setLoading] = useState<"approve" | "reject" | "done" | null>(
+  const [loading, setLoading] = useState<"approve" | "reject" | "unapprove" | null>(
     null,
   );
   const [error, setError] = useState<string | null>(null);
+  const steps = progressSteps(item);
+  const current = currentApprovalStep(item);
+  const undoStep = unapproveTarget(item);
+  const notes = item.approval.steps.filter((step) => step.note.trim());
+  const signers = approvedSignerNames(item);
 
-  const rejected = item.status === "rejected";
-  const steps = rejected ? (["submitted", "rejected"] as PengajuanStatus[]) : STEPS;
-  const activeIndex = steps.indexOf(item.status);
-
-  async function act(action: "approve" | "reject" | "done") {
+  async function act(action: "approve" | "reject" | "unapprove") {
     setLoading(action);
     setError(null);
     try {
@@ -139,46 +201,30 @@ export function PengajuanDetail({
           <PengajuanStatusBadge status={item.status} />
         </div>
 
-        <ol className="grid gap-2 sm:grid-cols-3">
-          {steps.map((step, index) => {
-            const state =
-              step === "rejected"
-                ? "rejected"
-                : index <= activeIndex
-                  ? "done"
-                  : "wait";
-            const hint =
-              state === "rejected"
-                ? "Ditolak"
-                : state === "wait"
-                  ? "Belum"
-                  : index === activeIndex && item.status === "submitted"
-                    ? "Masih proses"
-                    : index === activeIndex && item.status === "approved"
-                      ? "Sudah disetujui"
-                      : index === activeIndex && item.status === "done"
-                        ? "Selesai"
-                        : "Sudah";
-            return (
-              <li
-                key={step}
-                aria-current={index === activeIndex ? "step" : undefined}
-                className={`flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm ${
-                  state === "rejected"
-                    ? "bg-danger-soft text-danger"
-                    : state === "wait"
-                      ? "bg-bg-elevated text-ink-muted"
-                      : "bg-brand-soft text-brand-deep"
-                }`}
-              >
-                <StepMark state={state} />
-                <div className="min-w-0">
-                  <div className="font-medium">{PENGAJUAN_STATUS_LABEL[step]}</div>
-                  <div className="text-[11px] opacity-80">{hint}</div>
+        <ol className="grid gap-2 sm:grid-cols-2">
+          {steps.map((step, index) => (
+            <li
+              key={step.key}
+              aria-current={step.state === "current" ? "step" : undefined}
+              className={`flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm ${
+                step.state === "rejected"
+                  ? "bg-danger-soft text-danger"
+                  : step.state === "wait"
+                    ? "bg-bg-elevated text-ink-muted"
+                    : "bg-brand-soft text-brand-deep"
+              }`}
+            >
+              <StepMark state={step.state} />
+              <div className="min-w-0">
+                <div className="font-medium">
+                  {index === 0 || step.key === "approved"
+                    ? step.label
+                    : `${index}. ${step.label}`}
                 </div>
-              </li>
-            );
-          })}
+                <div className="text-[11px] opacity-80">{step.hint}</div>
+              </div>
+            </li>
+          ))}
         </ol>
 
         <dl className="grid gap-3 sm:grid-cols-2">
@@ -191,14 +237,21 @@ export function PengajuanDetail({
                 {field.label}
               </dt>
               <dd className="mt-1 whitespace-pre-wrap text-sm">
-                {displayValue(field, item.payload[field.key] ?? "")}
+                <div className={field.kind === "money" ? "font-medium tabular-nums" : ""}>
+                  {displayValue(field, item.payload[field.key] ?? "")}
+                </div>
+                {field.kind === "money" && item.payload[field.key] ? (
+                  <p className="mt-0.5 text-xs font-normal text-ink-muted">
+                    {terbilangRupiah(item.payload[field.key] ?? "")}
+                  </p>
+                ) : null}
               </dd>
             </div>
           ))}
           {def.photos ? (
             <div className="sm:col-span-2">
               <dt className="text-xs tracking-wide text-ink-muted uppercase">
-                Foto
+                Foto bukti
               </dt>
               <dd className="mt-2">
                 {item.photoUrls.length > 0 ? (
@@ -221,45 +274,67 @@ export function PengajuanDetail({
 
         <p className="text-xs text-ink-muted">
           Diajukan {formatWhen(item.createdAt)}
-          {item.reviewedAt
-            ? ` · ${item.status === "rejected" ? "Ditolak" : "Disetujui"} oleh ${item.reviewerName} ${formatWhen(item.reviewedAt)}`
-            : ""}
-          {item.completedAt
-            ? ` · Diselesaikan oleh ${item.completedBy} ${formatWhen(item.completedAt)}`
-            : ""}
         </p>
-        {item.reviewerNote ? (
-          <p className="rounded-xl bg-bg-elevated px-3 py-2 text-sm">
-            <span className="text-ink-muted">Catatan persetujuan: </span>
-            {item.reviewerNote}
+        {notes.map((step) => (
+          <p key={step.id} className="rounded-xl bg-bg-elevated px-3 py-2 text-sm">
+            <span className="text-ink-muted">
+              {step.status === "rejected" ? "Alasan penolakan" : "Catatan persetujuan"}
+              {item.approval.mode === "chain" ? ` ${step.label}` : ""}:{" "}
+            </span>
+            {step.note}
+          </p>
+        ))}
+        {item.status === "done" && (item.completedBy || item.completionNote) ? (
+          <p className="text-xs text-ink-muted">
+            Riwayat proses
+            {item.completedBy ? ` oleh ${item.completedBy}` : ""}{" "}
+            {formatWhen(item.completedAt)}
+            {item.completionNote ? ` · ${item.completionNote}` : ""}
           </p>
         ) : null}
-        {item.completionNote ? (
-          <p className="rounded-xl bg-bg-elevated px-3 py-2 text-sm">
-            <span className="text-ink-muted">Catatan penyelesaian: </span>
-            {item.completionNote}
-          </p>
-        ) : null}
+
+        <div className="grid grid-cols-2 gap-6 border-t border-line pt-5">
+          <div>
+            <p className="text-xs tracking-wide text-ink-muted uppercase">
+              Dibuat oleh
+            </p>
+            <p className="mt-6 text-sm font-semibold">{item.requesterName || "—"}</p>
+          </div>
+          <div>
+            <p className="text-xs tracking-wide text-ink-muted uppercase">
+              Disetujui oleh
+            </p>
+            <div className="mt-6 space-y-2">
+              {signers.length > 0 ? (
+                signers.map((name, index) => (
+                  <p key={`${name}-${index}`} className="text-sm font-semibold">
+                    {name}
+                  </p>
+                ))
+              ) : (
+                <p className="text-sm text-ink-muted">—</p>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
 
-      {canReview || canComplete ? (
+      {canReview && current ? (
         <form
           className="panel space-y-3 p-5 print:hidden md:p-6"
           onSubmit={(e) => e.preventDefault()}
         >
           <div>
-            <h3 className="text-sm font-semibold">
-              {canReview ? "Persetujuan" : "Penyelesaian"}
-            </h3>
+            <h3 className="text-sm font-semibold">Persetujuan</h3>
             <p className="mt-1 text-xs text-ink-muted">
-              {canReview
-                ? "Setujui bila data sudah cukup. Tolak bila perlu dikoreksi pemohon."
-                : "Tandai selesai setelah permintaan benar-benar diproses di sistem."}
+              Giliran {current.label}. Yang boleh menyetujui:{" "}
+              {approvalActorNames(item, current)}. Satu orang di tingkat ini
+              sudah cukup. Tolak bila data perlu dikoreksi pemohon.
             </p>
           </div>
           <label className="block">
             <span className="text-xs font-medium tracking-wide text-ink-muted uppercase">
-              {canReview ? "Catatan (wajib jika ditolak)" : "Catatan penyelesaian (opsional)"}
+              Catatan (wajib jika ditolak)
             </span>
             <textarea
               value={note}
@@ -270,36 +345,50 @@ export function PengajuanDetail({
           </label>
           {error ? <p className="text-sm text-danger">{error}</p> : null}
           <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
-            {canReview ? (
-              <>
-                <button
-                  type="button"
-                  disabled={loading !== null}
-                  onClick={() => act("reject")}
-                  className="rounded-xl border border-danger/30 bg-danger-soft px-4 py-2.5 text-sm font-medium text-danger disabled:opacity-60"
-                >
-                  {loading === "reject" ? "Menolak..." : "Tolak"}
-                </button>
-                <button
-                  type="button"
-                  disabled={loading !== null}
-                  onClick={() => act("approve")}
-                  className="rounded-xl bg-brand px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-deep disabled:opacity-60"
-                >
-                  {loading === "approve" ? "Menyetujui..." : "Setujui"}
-                </button>
-              </>
-            ) : null}
-            {canComplete ? (
-              <button
-                type="button"
-                disabled={loading !== null}
-                onClick={() => act("done")}
-                className="rounded-xl bg-brand px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-deep disabled:opacity-60"
-              >
-                {loading === "done" ? "Menyimpan..." : "Tandai selesai"}
-              </button>
-            ) : null}
+            <button
+              type="button"
+              disabled={loading !== null}
+              onClick={() => act("reject")}
+              className="rounded-xl border border-danger/30 bg-danger-soft px-4 py-2.5 text-sm font-medium text-danger disabled:opacity-60"
+            >
+              {loading === "reject" ? "Menolak..." : "Tolak"}
+            </button>
+            <button
+              type="button"
+              disabled={loading !== null}
+              onClick={() => act("approve")}
+              className="rounded-xl bg-brand px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-deep disabled:opacity-60"
+            >
+              {loading === "approve" ? "Menyetujui..." : "Setujui"}
+            </button>
+          </div>
+        </form>
+      ) : null}
+
+      {canUnapprove && undoStep ? (
+        <form
+          className="panel space-y-3 p-5 print:hidden md:p-6"
+          onSubmit={(e) => e.preventDefault()}
+        >
+          <div>
+            <h3 className="text-sm font-semibold">Batalkan persetujuan</h3>
+            <p className="mt-1 text-xs text-ink-muted">
+              Membatalkan {undoStep.label}
+              {undoStep.actorName ? ` yang disetujui ${undoStep.actorName}` : ""}.
+              Tingkat ini kembali menunggu. Pengajuan yang sudah disetujui penuh
+              dibuka lagi.
+            </p>
+          </div>
+          {error && !canReview ? <p className="text-sm text-danger">{error}</p> : null}
+          <div className="flex justify-end">
+            <button
+              type="button"
+              disabled={loading !== null}
+              onClick={() => act("unapprove")}
+              className="rounded-xl border border-line bg-bg-elevated px-4 py-2.5 text-sm font-medium text-ink hover:border-brand disabled:opacity-60"
+            >
+              {loading === "unapprove" ? "Membatalkan..." : "Batalkan persetujuan"}
+            </button>
           </div>
         </form>
       ) : null}

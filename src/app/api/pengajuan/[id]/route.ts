@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  canAccessMenu,
-  canCompletePengajuan,
-  canReviewPengajuan,
-  canSeePengajuan,
-  SESSION_COOKIE,
-} from "@/lib/auth";
+import { canAccessMenu, SESSION_COOKIE } from "@/lib/auth";
+import { canSeePengajuanItem } from "@/lib/pengajuan-approval-view";
 import { getPengajuanType } from "@/lib/pengajuan";
-import { getPengajuan, reviewPengajuan } from "@/lib/pengajuan-ops";
+import {
+  getPengajuan,
+  reviewPengajuan,
+  unapprovePengajuan,
+} from "@/lib/pengajuan-ops";
 import { getUserBySessionToken } from "@/lib/store";
 
 export const runtime = "nodejs";
@@ -27,31 +26,45 @@ export async function PATCH(
     return NextResponse.json({ error: "Pengajuan tidak ditemukan" }, { status: 404 });
   }
   const def = getPengajuanType(current.type);
-  if (!def || !canAccessMenu(user, def.href) || !canSeePengajuan(user, current)) {
+  if (
+    !def ||
+    !canAccessMenu(user, def.href) ||
+    !canSeePengajuanItem(user, current)
+  ) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const body = await req.json().catch(() => null);
   const action = String(body?.action || "");
-  if (action !== "approve" && action !== "reject" && action !== "done") {
+  if (action === "done") {
+    return NextResponse.json(
+      { error: "Aksi tidak berlaku. Pengajuan berakhir pada persetujuan terakhir." },
+      { status: 400 },
+    );
+  }
+  if (action === "unapprove") {
+    const result = unapprovePengajuan({
+      id: current.id,
+      actorUserId: user.id,
+      actorRole: user.role,
+      actorStaffId: user.staffId,
+    });
+    if ("error" in result) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
+    }
+    return NextResponse.json({ pengajuan: result.pengajuan });
+  }
+  if (action !== "approve" && action !== "reject") {
     return NextResponse.json({ error: "Aksi tidak valid" }, { status: 400 });
-  }
-  if (
-    (action === "approve" || action === "reject") &&
-    !canReviewPengajuan(user.role)
-  ) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-  if (action === "done" && !canCompletePengajuan(user.role)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const result = reviewPengajuan({
     id: current.id,
     action,
+    actorUserId: user.id,
     actorName: user.name || user.username,
+    actorRole: user.role,
     actorStaffId: user.staffId,
-    allowSelfReview: user.role === "admin",
     note: String(body?.note || ""),
   });
   if ("error" in result) {

@@ -1,6 +1,13 @@
+import { formatMoneyCurrency, moneyDigits } from "./money";
 import type { PengajuanStatus, PengajuanType } from "./types";
 
-export type PengajuanFieldKind = "text" | "textarea" | "date" | "number" | "select";
+export type PengajuanFieldKind =
+  | "text"
+  | "textarea"
+  | "date"
+  | "number"
+  | "select"
+  | "money";
 
 export type PengajuanField = {
   key: string;
@@ -75,9 +82,9 @@ export const PENGAJUAN_TYPES: PengajuanTypeDef[] = [
       {
         key: "nominal",
         label: "Nominal",
-        kind: "text",
+        kind: "money",
         required: true,
-        placeholder: "Contoh: 1500000",
+        placeholder: "1.500.000",
       },
       {
         key: "namaCustomer",
@@ -101,6 +108,7 @@ export const PENGAJUAN_TYPES: PengajuanTypeDef[] = [
         wide: true,
       },
     ],
+    photos: true,
     titleFrom: (p) =>
       `${p.jenisAksi || "Void"} ${p.noTransaksi || "transaksi"}`,
   },
@@ -165,9 +173,9 @@ export const PENGAJUAN_TYPES: PengajuanTypeDef[] = [
       {
         key: "limit",
         label: "Limit yang diberikan",
-        kind: "text",
+        kind: "money",
         required: true,
-        placeholder: "Contoh: 50.000.000",
+        placeholder: "50.000.000",
       },
       {
         key: "termOfPayment",
@@ -215,14 +223,14 @@ export const PENGAJUAN_TYPES: PengajuanTypeDef[] = [
       {
         key: "limitLama",
         label: "Limit saat ini",
-        kind: "text",
+        kind: "money",
         placeholder: "Kosongkan jika tidak diubah",
       },
       {
         key: "limitBaru",
         label: "Limit baru",
-        kind: "text",
-        placeholder: "Contoh: 75.000.000",
+        kind: "money",
+        placeholder: "75.000.000",
       },
       {
         key: "topLama",
@@ -263,9 +271,135 @@ export const PENGAJUAN_TYPES: PengajuanTypeDef[] = [
       `Ubah customer ${p.namaCustomer || p.kodeCustomer || ""}`.trim(),
   },
   {
+    type: "perubahan",
+    href: "/pengajuan/perubahan",
+    label: "Perubahan Data Orlansoft",
+    menuHint: "Ubah data master yang sudah ada",
+    kicker: "Perubahan master",
+    intro:
+      "Ajukan perubahan data yang sudah ada: customer, barang, harga, atau user. Tuliskan data lama dan data baru supaya tidak salah ubah.",
+    fields: [
+      {
+        key: "objek",
+        label: "Jenis data",
+        kind: "select",
+        required: true,
+      },
+      {
+        key: "identitas",
+        label: "Nomor perubahan",
+        kind: "text",
+        placeholder: "Pilih jenis data dulu",
+      },
+      {
+        key: "nomorDokumen",
+        label:
+          "Nomor SO, PO, Surat Jalan, Receiving, Invoice, Cash & Bank, Kode Item, dll",
+        kind: "text",
+        required: true,
+        placeholder: "Nomor dokumen yang akan diubah",
+        wide: true,
+      },
+      {
+        key: "dataLama",
+        label: "Data lama",
+        kind: "textarea",
+        required: true,
+        placeholder: "Isi yang sekarang tercatat",
+        wide: true,
+      },
+      {
+        key: "dataBaru",
+        label: "Data baru",
+        kind: "textarea",
+        required: true,
+        placeholder: "Isi yang diminta",
+        wide: true,
+      },
+      {
+        key: "alasan",
+        label: "Alasan perubahan",
+        kind: "textarea",
+        required: true,
+        wide: true,
+      },
+    ],
+    photos: true,
+    titleFrom: (p) =>
+      `Ubah ${p.objek || "data"} ${p.nomorDokumen || p.identitas || ""}`.trim(),
+  },
+  {
+    type: "asset",
+    href: "/pengajuan/asset",
+    label: "Asset IT",
+    menuHint: "Ajukan perangkat IT baru",
+    kicker: "Penambahan asset",
+    intro:
+      "Ajukan perangkat IT baru: komputer, laptop, printer, atau perangkat jaringan. Cantumkan jumlah, spesifikasi, dan siapa pemakainya.",
+    fields: [
+      {
+        key: "namaAsset",
+        label: "Nama asset",
+        kind: "text",
+        required: true,
+        placeholder: "Contoh: Laptop operasional sales",
+        wide: true,
+      },
+      {
+        key: "kategoriAsset",
+        label: "Kategori",
+        kind: "select",
+        required: true,
+      },
+      {
+        key: "jumlah",
+        label: "Jumlah",
+        kind: "number",
+        required: true,
+        placeholder: "1",
+      },
+      {
+        key: "pengguna",
+        label: "Pengguna",
+        kind: "text",
+        placeholder: "Nama staf yang akan memakai",
+      },
+      {
+        key: "lokasi",
+        label: "Lokasi",
+        kind: "text",
+        placeholder: "Ruangan / cabang",
+      },
+      {
+        key: "tanggalButuh",
+        label: "Dibutuhkan pada",
+        kind: "date",
+      },
+      {
+        key: "spesifikasi",
+        label: "Spesifikasi",
+        kind: "textarea",
+        placeholder: "RAM, storage, ukuran kertas, atau kebutuhan khusus.",
+        wide: true,
+      },
+      {
+        key: "alasan",
+        label: "Alasan pengajuan",
+        kind: "textarea",
+        required: true,
+        wide: true,
+      },
+    ],
+    photos: true,
+    titleFrom: (p) => {
+      const qty = p.jumlah ? ` x${p.jumlah}` : "";
+      return `Asset ${p.namaAsset || "IT"}${qty}`;
+    },
+  },
+  {
     type: "barang",
     href: "/pengajuan/barang",
-    label: "Master Barang",
+    label: "Master Item / Stock",
     menuHint: "Tambah item / barang baru",
     kicker: "Penambahan master",
     intro:
@@ -313,124 +447,8 @@ export const PENGAJUAN_TYPES: PengajuanTypeDef[] = [
         wide: true,
       },
     ],
+    photos: true,
     titleFrom: (p) => `Barang ${p.namaBarang || "baru"}`,
-  },
-  {
-    type: "perubahan",
-    href: "/pengajuan/perubahan",
-    label: "Perubahan Data",
-    menuHint: "Ubah data master yang sudah ada",
-    kicker: "Perubahan master",
-    intro:
-      "Ajukan perubahan data yang sudah ada: customer, barang, harga, atau user. Tuliskan data lama dan data baru supaya tidak salah ubah.",
-    fields: [
-      {
-        key: "objek",
-        label: "Jenis data",
-        kind: "select",
-        required: true,
-        options: ["Customer", "Barang", "Harga", "User", "Lainnya"],
-      },
-      {
-        key: "identitas",
-        label: "Kode / nama data",
-        kind: "text",
-        required: true,
-        placeholder: "Kode atau nama record yang diubah",
-      },
-      {
-        key: "dataLama",
-        label: "Data lama",
-        kind: "textarea",
-        required: true,
-        placeholder: "Isi yang sekarang tercatat",
-        wide: true,
-      },
-      {
-        key: "dataBaru",
-        label: "Data baru",
-        kind: "textarea",
-        required: true,
-        placeholder: "Isi yang diminta",
-        wide: true,
-      },
-      {
-        key: "alasan",
-        label: "Alasan perubahan",
-        kind: "textarea",
-        required: true,
-        wide: true,
-      },
-    ],
-    titleFrom: (p) => `Ubah ${p.objek || "data"} ${p.identitas || ""}`.trim(),
-  },
-  {
-    type: "asset",
-    href: "/pengajuan/asset",
-    label: "Asset IT",
-    menuHint: "Ajukan perangkat IT baru",
-    kicker: "Penambahan asset",
-    intro:
-      "Ajukan perangkat IT baru: komputer, laptop, printer, atau perangkat jaringan. Cantumkan jumlah, spesifikasi, dan siapa pemakainya.",
-    fields: [
-      {
-        key: "namaAsset",
-        label: "Nama asset",
-        kind: "text",
-        required: true,
-        placeholder: "Contoh: Laptop operasional sales",
-        wide: true,
-      },
-      {
-        key: "kategoriAsset",
-        label: "Kategori",
-        kind: "select",
-        required: true,
-        options: ["PC", "Laptop", "Printer", "Monitor", "UPS", "Jaringan", "Lainnya"],
-      },
-      {
-        key: "jumlah",
-        label: "Jumlah",
-        kind: "number",
-        required: true,
-        placeholder: "1",
-      },
-      {
-        key: "pengguna",
-        label: "Pengguna",
-        kind: "text",
-        placeholder: "Nama staf yang akan memakai",
-      },
-      {
-        key: "lokasi",
-        label: "Lokasi",
-        kind: "text",
-        placeholder: "Ruangan / cabang",
-      },
-      {
-        key: "tanggalButuh",
-        label: "Dibutuhkan pada",
-        kind: "date",
-      },
-      {
-        key: "spesifikasi",
-        label: "Spesifikasi",
-        kind: "textarea",
-        placeholder: "RAM, storage, ukuran kertas, atau kebutuhan khusus.",
-        wide: true,
-      },
-      {
-        key: "alasan",
-        label: "Alasan pengajuan",
-        kind: "textarea",
-        required: true,
-        wide: true,
-      },
-    ],
-    titleFrom: (p) => {
-      const qty = p.jumlah ? ` x${p.jumlah}` : "";
-      return `Asset ${p.namaAsset || "IT"}${qty}`;
-    },
   },
   {
     type: "akses",
@@ -483,6 +501,7 @@ export const PENGAJUAN_TYPES: PengajuanTypeDef[] = [
         wide: true,
       },
     ],
+    photos: true,
     titleFrom: (p) =>
       `${p.jenisAkses || "Akses"} — ${p.namaSistem || "sistem"}`.replace(
         /^ — /,
@@ -495,7 +514,7 @@ export const PENGAJUAN_STATUS_LABEL: Record<PengajuanStatus, string> = {
   submitted: "Diajukan",
   approved: "Disetujui",
   rejected: "Ditolak",
-  done: "Selesai",
+  done: "Disetujui",
 };
 
 export function pengajuanMenuHrefs(): string[] {
@@ -542,6 +561,17 @@ export function parsePengajuanPayload(
         return { error: `${field.label} harus bilangan 1–999` };
       }
       payload[field.key] = String(n);
+      continue;
+    }
+    if (field.kind === "money") {
+      const digits = moneyDigits(value);
+      if (!digits) {
+        return { error: `${field.label} harus berupa angka` };
+      }
+      if (value.replace(/\D/g, "").length > 15) {
+        return { error: `${field.label} terlalu besar` };
+      }
+      payload[field.key] = formatMoneyCurrency(digits);
       continue;
     }
     payload[field.key] = value;

@@ -394,6 +394,27 @@ function createSchema(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name);
     CREATE INDEX IF NOT EXISTS idx_customers_status ON customers(status);
+
+    CREATE TABLE IF NOT EXISTS kpi_wa_reports (
+      id TEXT PRIMARY KEY,
+      department_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      user_name TEXT NOT NULL DEFAULT '',
+      activity_id TEXT,
+      project_id TEXT,
+      title TEXT NOT NULL,
+      leader_name TEXT NOT NULL,
+      report_date TEXT NOT NULL,
+      notes TEXT NOT NULL DEFAULT '',
+      photo_urls_json TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'reported',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_kpi_wa_reports_dept ON kpi_wa_reports(department_id);
+    CREATE INDEX IF NOT EXISTS idx_kpi_wa_reports_date ON kpi_wa_reports(report_date);
+    CREATE INDEX IF NOT EXISTS idx_kpi_wa_reports_act ON kpi_wa_reports(activity_id);
   `);
 
   // Migrasi kolom SOP formal (aman jika tabel lama tanpa kolom baru)
@@ -697,6 +718,112 @@ function createSchema(db: Database.Database) {
       PRAGMA foreign_keys = ON;
     `);
   }
+
+  // Rantai approval pengajuan (pengaturan) dan salinan per pengajuan
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pengajuan_approval_levels (
+      id TEXT PRIMARY KEY,
+      sort_order INTEGER NOT NULL,
+      label TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_pengajuan_approval_levels_order
+      ON pengajuan_approval_levels(sort_order);
+
+    CREATE TABLE IF NOT EXISTS pengajuan_approval_level_users (
+      id TEXT PRIMARY KEY,
+      level_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE (level_id, user_id),
+      FOREIGN KEY (level_id) REFERENCES pengajuan_approval_levels(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_pengajuan_approval_level_users_level
+      ON pengajuan_approval_level_users(level_id);
+    CREATE INDEX IF NOT EXISTS idx_pengajuan_approval_level_users_user
+      ON pengajuan_approval_level_users(user_id);
+
+    CREATE TABLE IF NOT EXISTS submission_approval_steps (
+      id TEXT PRIMARY KEY,
+      submission_id TEXT NOT NULL,
+      sort_order INTEGER NOT NULL,
+      label TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+      actor_user_id TEXT,
+      actor_name TEXT NOT NULL DEFAULT '',
+      note TEXT NOT NULL DEFAULT '',
+      acted_at TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_submission_approval_steps_order
+      ON submission_approval_steps(submission_id, sort_order);
+
+    CREATE TABLE IF NOT EXISTS submission_approval_assignees (
+      id TEXT PRIMARY KEY,
+      step_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      user_name TEXT NOT NULL DEFAULT '',
+      UNIQUE (step_id, user_id),
+      FOREIGN KEY (step_id) REFERENCES submission_approval_steps(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_submission_approval_assignees_step
+      ON submission_approval_assignees(step_id);
+    CREATE INDEX IF NOT EXISTS idx_submission_approval_assignees_user
+      ON submission_approval_assignees(user_id);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS asset_categories (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_asset_categories_order
+      ON asset_categories(sort_order, name);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS jenis_data (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_jenis_data_order
+      ON jenis_data(sort_order, name);
+  `);
+
+  const jenisCols = db
+    .prepare("PRAGMA table_info(jenis_data)")
+    .all() as Array<{ name: string }>;
+  const jenisNames = new Set(jenisCols.map((col) => col.name));
+  if (!jenisNames.has("code")) {
+    db.exec("ALTER TABLE jenis_data ADD COLUMN code TEXT NOT NULL DEFAULT ''");
+  }
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_jenis_data_code
+      ON jenis_data(code) WHERE code != '';
+
+    CREATE TABLE IF NOT EXISTS perubahan_counters (
+      jenis_code TEXT NOT NULL,
+      period TEXT NOT NULL,
+      last_number INTEGER NOT NULL,
+      PRIMARY KEY (jenis_code, period)
+    );
+  `);
 }
 
 export function getDb(): Database.Database {

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ActivityPhotoSlider } from "@/components/ActivityPhotoSlider";
+import { formatMoneyGrouped, terbilangRupiah } from "@/lib/money";
 import {
   PENGAJUAN_MAX_PHOTOS,
   type PengajuanField,
@@ -42,6 +43,81 @@ function currentOtherData(customer: CustomerChoice) {
     .join("\n");
 }
 
+function caretAfterDigits(formatted: string, digitCount: number) {
+  if (digitCount <= 0) return 0;
+  let seen = 0;
+  for (let i = 0; i < formatted.length; i += 1) {
+    if (/\d/.test(formatted[i] ?? "")) {
+      seen += 1;
+      if (seen === digitCount) return i + 1;
+    }
+  }
+  return formatted.length;
+}
+
+function MoneyField({
+  field,
+  value,
+  onValue,
+  readOnly = false,
+}: {
+  field: PengajuanField;
+  value?: string;
+  onValue?: (value: string) => void;
+  readOnly?: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const pendingCaret = useRef<number | null>(null);
+  const [local, setLocal] = useState("");
+  const shown = value === undefined ? local : formatMoneyGrouped(value);
+  const words = terbilangRupiah(shown);
+
+  useEffect(() => {
+    if (pendingCaret.current == null || !inputRef.current) return;
+    const pos = pendingCaret.current;
+    pendingCaret.current = null;
+    inputRef.current.setSelectionRange(pos, pos);
+  }, [shown]);
+
+  return (
+    <label className={`block ${field.wide ? "md:col-span-2" : ""}`}>
+      <span className="text-xs font-medium tracking-wide text-ink-muted uppercase">
+        {field.label}
+        {field.required ? "" : " (opsional)"}
+      </span>
+      <div className="relative mt-1.5">
+        <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-ink-muted">
+          Rp
+        </span>
+        <input
+          ref={inputRef}
+          name={field.key}
+          required={field.required}
+          readOnly={readOnly}
+          inputMode="numeric"
+          autoComplete="off"
+          placeholder={field.placeholder}
+          value={shown}
+          onChange={(e) => {
+            const raw = e.target.value;
+            const caret = e.target.selectionStart ?? raw.length;
+            const digitsBefore = raw.slice(0, caret).replace(/\D/g, "").length;
+            const next = formatMoneyGrouped(raw);
+            const pos = caretAfterDigits(next, digitsBefore);
+            e.target.value = next;
+            e.target.setSelectionRange(pos, pos);
+            pendingCaret.current = pos;
+            if (value === undefined) setLocal(next);
+            onValue?.(next);
+          }}
+          className="w-full rounded-xl border border-line bg-bg-elevated py-2.5 pr-3 pl-10 tabular-nums outline-none read-only:bg-bg read-only:text-ink-muted focus:border-brand"
+        />
+      </div>
+      {words ? <p className="mt-1 text-xs text-ink-muted">{words}</p> : null}
+    </label>
+  );
+}
+
 function FieldControl({
   field,
   value,
@@ -79,6 +155,17 @@ function FieldControl({
     );
   }
 
+  if (field.kind === "money") {
+    return (
+      <MoneyField
+        field={field}
+        value={value}
+        onValue={onValue}
+        readOnly={readOnly}
+      />
+    );
+  }
+
   if (field.kind === "select") {
     return (
       <label className={`block ${field.wide ? "md:col-span-2" : ""}`}>
@@ -102,6 +189,16 @@ function FieldControl({
             </option>
           ))}
         </select>
+        {field.key === "kategoriAsset" && (field.options ?? []).length === 0 ? (
+          <p className="mt-1 text-xs text-ink-muted">
+            Belum ada kategori aktif. Isi dulu di Master Kategori Aset.
+          </p>
+        ) : null}
+        {field.key === "objek" && (field.options ?? []).length === 0 ? (
+          <p className="mt-1 text-xs text-ink-muted">
+            Belum ada jenis data aktif. Isi dulu di Master Jenis Data.
+          </p>
+        ) : null}
       </label>
     );
   }
@@ -150,6 +247,7 @@ export function PengajuanForm({
   const [pendingPreview, setPendingPreview] = useState<string[]>([]);
   const [customerName, setCustomerName] = useState("");
   const [codePreview, setCodePreview] = useState("");
+  const [jenisDataName, setJenisDataName] = useState("");
   const [pickedCode, setPickedCode] = useState("");
   const [currentData, setCurrentData] = useState({
     namaCustomer: "",
@@ -188,6 +286,25 @@ export function PengajuanForm({
     }, 250);
     return () => clearTimeout(timer);
   }, [customerName, def.type]);
+
+  useEffect(() => {
+    if (def.type !== "perubahan") return;
+    const jenis = jenisDataName.trim();
+    if (!jenis) {
+      setCodePreview("");
+      return;
+    }
+    const timer = setTimeout(() => {
+      const query = new URLSearchParams({ jenis });
+      fetch(`/api/pengajuan/perubahan-code?${query.toString()}`)
+        .then((res) => res.json())
+        .then((data: { code?: string }) => {
+          setCodePreview(typeof data.code === "string" ? data.code : "");
+        })
+        .catch(() => setCodePreview(""));
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [def.type, jenisDataName]);
 
   function pickCustomer(code: string) {
     setPickedCode(code);
@@ -308,6 +425,13 @@ export function PengajuanForm({
         ) {
           setCustomerName(target.value);
         }
+        if (
+          def.type === "perubahan" &&
+          target instanceof HTMLSelectElement &&
+          target.name === "objek"
+        ) {
+          setJenisDataName(target.value);
+        }
       }}
       className="panel space-y-4 p-5 md:p-6"
     >
@@ -346,11 +470,16 @@ export function PengajuanForm({
             ) : (
               <FieldControl
                 field={field}
-                readOnly={def.type === "customer_ubah" && field.key === "namaCustomer"}
+                readOnly={
+                  (def.type === "customer_ubah" && field.key === "namaCustomer") ||
+                  (def.type === "perubahan" && field.key === "identitas")
+                }
                 value={
-                  def.type === "customer_ubah" && field.key in currentData
-                    ? currentData[field.key as keyof typeof currentData]
-                    : undefined
+                  def.type === "perubahan" && field.key === "identitas"
+                    ? codePreview
+                    : def.type === "customer_ubah" && field.key in currentData
+                      ? currentData[field.key as keyof typeof currentData]
+                      : undefined
                 }
                 onValue={
                   def.type === "customer_ubah" && field.key in currentData
@@ -360,6 +489,12 @@ export function PengajuanForm({
                 }
               />
             )}
+            {def.type === "perubahan" && field.key === "identitas" ? (
+              <p className="mt-1 text-xs text-ink-muted">
+                Dibuat otomatis: 2 digit jenis data + bulan + tahun + urutan 3
+                digit. Contoh 01102026001. Nomor akhir ditetapkan saat disimpan.
+              </p>
+            ) : null}
             {def.type === "customer" && field.key === "namaCustomer" ? (
               <div className="mt-3 rounded-xl border border-line bg-bg px-3 py-2.5">
                 <span className="text-xs font-medium tracking-wide text-ink-muted uppercase">
@@ -380,15 +515,15 @@ export function PengajuanForm({
         {def.photos ? (
           <div className="block space-y-2 md:col-span-2">
             <span className="text-xs font-medium tracking-wide text-ink-muted uppercase">
-              Foto (opsional)
+              Foto bukti (opsional)
             </span>
             <label className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-line bg-bg-elevated px-4 py-6 text-center transition hover:border-brand">
               <span className="text-sm font-medium text-ink">
                 Pilih / unggah beberapa foto
               </span>
               <span className="text-[11px] text-ink-muted">
-                Toko, KTP, NPWP, atau dokumen pendukung · JPG, PNG, WebP, GIF ·
-                max 5MB · maks {PENGAJUAN_MAX_PHOTOS} foto
+                Bukti pendukung · JPG, PNG, WebP, GIF · max 5MB · maks{" "}
+                {PENGAJUAN_MAX_PHOTOS} foto
               </span>
               <input
                 type="file"

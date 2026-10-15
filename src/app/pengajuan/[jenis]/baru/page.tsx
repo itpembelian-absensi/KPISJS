@@ -3,6 +3,8 @@ import { notFound, redirect } from "next/navigation";
 import { CustomerSheets } from "@/components/pengajuan/CustomerSheets";
 import { PengajuanForm } from "@/components/pengajuan/PengajuanForm";
 import { canViewAllTickets } from "@/lib/auth";
+import { listAssetCategories } from "@/lib/asset-category-ops";
+import { listJenisData } from "@/lib/jenis-data-ops";
 import { listCustomers } from "@/lib/customer-ops";
 import { getPengajuanType } from "@/lib/pengajuan";
 import { requireMenu } from "@/lib/session";
@@ -30,6 +32,17 @@ export default async function PengajuanBaruPage({
   if (!formDef) notFound();
 
   const user = await requireMenu(def.href);
+  const assetCategories =
+    formDef.type === "asset" ? listAssetCategories(true).map((item) => item.name) : null;
+  const jenisData =
+    formDef.type === "perubahan" ? listJenisData(true).map((item) => item.name) : null;
+  const fields = formDef.fields.map((field) => {
+    if (field.key === "kategoriAsset") {
+      return { ...field, options: assetCategories ?? [] };
+    }
+    if (field.key === "objek") return { ...field, options: jenisData ?? [] };
+    return field;
+  });
   const departments = listDepartments(true);
   const allStaff = listStaff(true);
   const canPickOthers = canViewAllTickets(user.role);
@@ -67,7 +80,7 @@ export default async function PengajuanBaruPage({
         <PengajuanForm
           def={{
             type: formDef.type,
-            fields: formDef.fields,
+            fields,
             photos: formDef.photos,
           }}
           departments={departments}

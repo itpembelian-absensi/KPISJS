@@ -4,18 +4,30 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getPengajuanType, PENGAJUAN_STATUS_LABEL } from "@/lib/pengajuan";
-import type { Pengajuan, PengajuanStatus } from "@/lib/types";
+import {
+  approvalWaitingText,
+  canActOnPengajuan,
+  canUnapprovePengajuan,
+} from "@/lib/pengajuan-approval-view";
+import type { Pengajuan, UserRole } from "@/lib/types";
 import { PengajuanStatusBadge } from "@/components/pengajuan/PengajuanStatusBadge";
 
-type StatusFilter = "all" | PengajuanStatus;
+type StatusFilter = "all" | "submitted" | "approved" | "rejected";
 
 const FILTERS: { id: StatusFilter; label: string }[] = [
   { id: "all", label: "Semua" },
   { id: "submitted", label: PENGAJUAN_STATUS_LABEL.submitted },
   { id: "approved", label: PENGAJUAN_STATUS_LABEL.approved },
   { id: "rejected", label: PENGAJUAN_STATUS_LABEL.rejected },
-  { id: "done", label: PENGAJUAN_STATUS_LABEL.done },
 ];
+
+function matchesStatus(item: Pengajuan, status: StatusFilter) {
+  if (status === "all") return true;
+  if (status === "approved") {
+    return item.status === "approved" || item.status === "done";
+  }
+  return item.status === status;
+}
 
 function formatWhen(iso: string) {
   const d = new Date(iso);
@@ -33,42 +45,46 @@ export function PengajuanList({
   items,
   showType = false,
   customerCodes,
-  canApprove = false,
-  approverStaffId = null,
-  allowSelfApprove = false,
+  viewer,
 }: {
   items: Pengajuan[];
   showType?: boolean;
   customerCodes?: Record<string, string>;
-  canApprove?: boolean;
-  approverStaffId?: string | null;
-  allowSelfApprove?: boolean;
+  viewer: { id: string; role: UserRole; staffId: string | null };
 }) {
   const router = useRouter();
   const [status, setStatus] = useState<StatusFilter>("all");
   const [q, setQ] = useState("");
-  const [overrides, setOverrides] = useState<Record<string, PengajuanStatus>>({});
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [overrides, setOverrides] = useState<Record<string, Pengajuan>>({});
+  const [busy, setBusy] = useState<{
+    id: string;
+    action: "approve" | "unapprove";
+  } | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
 
   const rows = useMemo(
-    () =>
-      items.map((item) =>
-        overrides[item.id] ? { ...item, status: overrides[item.id] } : item,
-      ),
+    () => items.map((item) => overrides[item.id] ?? item),
     [items, overrides],
+  );
+  const showApprove = useMemo(
+    () =>
+      rows.some(
+        (item) =>
+          canActOnPengajuan(viewer, item) || canUnapprovePengajuan(viewer, item),
+      ),
+    [rows, viewer],
   );
 
   function mayApprove(item: Pengajuan) {
-    if (!canApprove || item.status !== "submitted") return false;
-    const own = Boolean(
-      approverStaffId && item.requesterStaffId === approverStaffId,
-    );
-    return !own || allowSelfApprove;
+    return canActOnPengajuan(viewer, item);
+  }
+
+  function mayUnapprove(item: Pengajuan) {
+    return canUnapprovePengajuan(viewer, item);
   }
 
   async function approve(item: Pengajuan) {
-    setBusyId(item.id);
+    setBusy({ id: item.id, action: "approve" });
     setRowError(null);
     try {
       const res = await fetch(`/api/pengajuan/${item.id}`, {
@@ -81,34 +97,70 @@ export function PengajuanList({
         setRowError(
           typeof data.error === "string" ? data.error : "Gagal menyetujui",
         );
-        setBusyId(null);
+        setBusy(null);
         return;
       }
-      setOverrides((prev) => ({ ...prev, [item.id]: "approved" }));
-      setBusyId(null);
+      if (data.pengajuan) {
+        setOverrides((prev) => ({ ...prev, [item.id]: data.pengajuan as Pengajuan }));
+      }
+      setBusy(null);
       router.refresh();
     } catch {
       setRowError("Koneksi gagal — coba lagi");
-      setBusyId(null);
+      setBusy(null);
+    }
+  }
+
+  async function unapprove(item: Pengajuan) {
+    setBusy({ id: item.id, action: "unapprove" });
+    setRowError(null);
+    try {
+      const res = await fetch(`/api/pengajuan/${item.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "unapprove" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRowError(
+          typeof data.error === "string"
+            ? data.error
+            : "Gagal membatalkan persetujuan",
+        );
+        setBusy(null);
+        return;
+      }
+      if (data.pengajuan) {
+        setOverrides((prev) => ({ ...prev, [item.id]: data.pengajuan as Pengajuan }));
+      }
+      setBusy(null);
+      router.refresh();
+    } catch {
+      setRowError("Koneksi gagal — coba lagi");
+      setBusy(null);
     }
   }
 
   const counts = useMemo(() => {
     const base: Record<StatusFilter, number> = {
-      all: items.length,
+      all: rows.length,
       submitted: 0,
       approved: 0,
       rejected: 0,
-      done: 0,
     };
-    for (const item of rows) base[item.status] += 1;
+    for (const item of rows) {
+      if (item.status === "approved" || item.status === "done") base.approved += 1;
+      else if (item.status === "submitted" || item.status === "rejected") {
+        base[item.status] += 1;
+      }
+    }
     return base;
   }, [rows]);
 
   const visible = useMemo(() => {
     const query = q.trim().toLowerCase();
     return rows.filter((item) => {
-      if (status !== "all" && item.status !== status) return false;
+      if (!matchesStatus(item, status)) return false;
       if (!query) return true;
       const typeLabel = getPengajuanType(item.type)?.label ?? item.type;
       const customerCode = customerCodes?.[item.id] ?? "";
@@ -170,7 +222,7 @@ export function PengajuanList({
                 <th className="px-4 py-3 font-medium">Pemohon</th>
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium">Diajukan</th>
-                {canApprove ? (
+                {showApprove ? (
                   <th className="px-4 py-3 font-medium print:hidden">Approval</th>
                 ) : null}
               </tr>
@@ -179,7 +231,7 @@ export function PengajuanList({
               {visible.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={(showType ? 6 : 5) + (canApprove ? 1 : 0)}
+                    colSpan={(showType ? 6 : 5) + (showApprove ? 1 : 0)}
                     className="px-4 py-10 text-center text-sm text-ink-muted"
                   >
                     Belum ada pengajuan pada filter ini.
@@ -220,24 +272,46 @@ export function PengajuanList({
                       </td>
                       <td className="px-4 py-3 align-top">
                         <PengajuanStatusBadge status={item.status} />
+                        {approvalWaitingText(item) ? (
+                          <div className="mt-1 max-w-[220px] text-xs text-ink-muted">
+                            {approvalWaitingText(item)}
+                          </div>
+                        ) : null}
                       </td>
                       <td className="px-4 py-3 align-top text-ink-muted">
                         {formatWhen(item.createdAt)}
                       </td>
-                      {canApprove ? (
+                      {showApprove ? (
                         <td className="px-4 py-3 align-top print:hidden">
-                          {mayApprove(item) ? (
-                            <button
-                              type="button"
-                              onClick={() => approve(item)}
-                              disabled={busyId === item.id}
-                              className="rounded-xl bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-deep disabled:opacity-60"
-                            >
-                              {busyId === item.id ? "Menyetujui..." : "Approval"}
-                            </button>
-                          ) : (
-                            <span className="text-xs text-ink-muted">—</span>
-                          )}
+                          <div className="flex flex-col items-start gap-1.5">
+                            {mayApprove(item) ? (
+                              <button
+                                type="button"
+                                onClick={() => approve(item)}
+                                disabled={busy?.id === item.id}
+                                className="rounded-xl bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-deep disabled:opacity-60"
+                              >
+                                {busy?.id === item.id && busy.action === "approve"
+                                  ? "Menyetujui..."
+                                  : "Approval"}
+                              </button>
+                            ) : null}
+                            {mayUnapprove(item) ? (
+                              <button
+                                type="button"
+                                onClick={() => unapprove(item)}
+                                disabled={busy?.id === item.id}
+                                className="rounded-xl border border-line bg-bg-elevated px-3 py-1.5 text-xs font-medium text-ink hover:border-brand disabled:opacity-60"
+                              >
+                                {busy?.id === item.id && busy.action === "unapprove"
+                                  ? "Membatalkan..."
+                                  : "Batalkan"}
+                              </button>
+                            ) : null}
+                            {!mayApprove(item) && !mayUnapprove(item) ? (
+                              <span className="text-xs text-ink-muted">—</span>
+                            ) : null}
+                          </div>
                         </td>
                       ) : null}
                     </tr>

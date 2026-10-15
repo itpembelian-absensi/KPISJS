@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { PengajuanExportActions } from "@/components/pengajuan/PengajuanExportActions";
 import { PengajuanList } from "@/components/pengajuan/PengajuanList";
-import { canSeePengajuan } from "@/lib/auth";
+import { canSeePengajuanItem } from "@/lib/pengajuan-approval-view";
 import { PENGAJUAN_TYPES } from "@/lib/pengajuan";
 import { listPengajuan } from "@/lib/pengajuan-ops";
 import { requireMenu } from "@/lib/session";
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export default async function PengajuanPage() {
   const user = await requireMenu("/pengajuan");
   const ownOnly = user.role === "staff" || user.role === "assessor";
-  const items = listPengajuan().filter((item) => canSeePengajuan(user, item));
+  const items = listPengajuan().filter((item) => canSeePengajuanItem(user, item));
   const counts = new Map<string, number>();
   for (const item of items) {
     counts.set(item.type, (counts.get(item.type) ?? 0) + 1);
@@ -31,8 +31,8 @@ export default async function PengajuanPage() {
         </h1>
         <p className="mt-2 max-w-2xl text-sm text-ink-muted">
           Approve dan void transaksi, penambahan master, asset IT, dan akses sistem.
-          Alur: diajukan, disetujui atasan atau IT, lalu ditandai selesai setelah
-          diproses di sistem.
+          Alur: diajukan, lalu disetujui sesuai rantai approval. Persetujuan
+          terakhir menyelesaikan pengajuan.
         </p>
         <div className="mt-3">
           <PengajuanExportActions pdfHref="/api/pengajuan/export" />
@@ -67,9 +67,7 @@ export default async function PengajuanPage() {
       <PengajuanList
         items={items}
         showType
-        canApprove={user.role === "admin" || user.role === "manager"}
-        approverStaffId={user.staffId}
-        allowSelfApprove={user.role === "admin"}
+        viewer={{ id: user.id, role: user.role, staffId: user.staffId }}
       />
     </div>
   );

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { canAccessMenu, canSeePengajuan, SESSION_COOKIE } from "@/lib/auth";
+import { canAccessMenu, SESSION_COOKIE } from "@/lib/auth";
+import { canSeePengajuanItem } from "@/lib/pengajuan-approval-view";
 import { getPengajuanType } from "@/lib/pengajuan";
 import { appendPengajuanPhotos, getPengajuan } from "@/lib/pengajuan-ops";
 import {
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest) {
     if (!def?.photos || !canAccessMenu(user, def.href)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    if (!canSeePengajuan(user, existing)) {
+    if (!canSeePengajuanItem(user, existing)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 

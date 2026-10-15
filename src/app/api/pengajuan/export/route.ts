@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { canAccessMenu, canSeePengajuan, SESSION_COOKIE } from "@/lib/auth";
+import { canAccessMenu, SESSION_COOKIE } from "@/lib/auth";
+import { canSeePengajuanItem } from "@/lib/pengajuan-approval-view";
 import { getPengajuanType } from "@/lib/pengajuan";
 import { buildPengajuanPdf } from "@/lib/pengajuan-pdf";
 import { getPengajuan, listPengajuan } from "@/lib/pengajuan-ops";
@@ -28,7 +29,7 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: "Pengajuan tidak ditemukan" }, { status: 404 });
       }
       const def = getPengajuanType(item.type);
-      if (!def || !canAccessMenu(user, def.href) || !canSeePengajuan(user, item)) {
+      if (!def || !canAccessMenu(user, def.href) || !canSeePengajuanItem(user, item)) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
       const buffer = await buildPengajuanPdf({
@@ -54,7 +55,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const items = listPengajuan(def?.type).filter((item) => canSeePengajuan(user, item));
+    const items = listPengajuan(def?.type).filter((item) => canSeePengajuanItem(user, item));
     const title = def ? def.label : "Semua Pengajuan";
     const buffer = await buildPengajuanPdf({
       items,

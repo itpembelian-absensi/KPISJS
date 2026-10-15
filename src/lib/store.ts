@@ -1,5 +1,7 @@
 import { randomUUID } from "crypto";
 import { SESSION_DAYS } from "./auth";
+import { seedAssetCategoriesIfEmpty, seedAssetCategoryMenuIfMissing } from "./asset-category-ops";
+import { seedJenisDataIfEmpty, seedJenisDataMenuIfMissing } from "./jenis-data-ops";
 import { backfillCustomersFromSubmissions } from "./customer-ops";
 import { seedPengajuanMenusIfMissing } from "./pengajuan-ops";
 import { boolToInt, getDb, getMeta, intToBool, setMeta } from "./db";
@@ -273,6 +275,33 @@ function seedBackupMenuIfMissing() {
     }
     if (!Array.isArray(menus) || menus.includes("/master/backup")) continue;
     update.run(JSON.stringify([...menus, "/master/backup"]), row.id);
+  }
+}
+
+/** Menu rantai approval untuk Admin yang punya allowlist kustom. */
+function seedApprovalChainMenuIfMissing() {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT id, role, allowed_menus_json FROM users
+       WHERE allowed_menus_json IS NOT NULL AND trim(allowed_menus_json) != ''`,
+    )
+    .all() as Array<{ id: string; role: string; allowed_menus_json: string }>;
+  const update = db.prepare(
+    "UPDATE users SET allowed_menus_json = ? WHERE id = ?",
+  );
+  for (const row of rows) {
+    if (row.role !== "admin") continue;
+    let menus: unknown;
+    try {
+      menus = JSON.parse(row.allowed_menus_json);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(menus) || menus.includes("/master/approval-pengajuan")) {
+      continue;
+    }
+    update.run(JSON.stringify([...menus, "/master/approval-pengajuan"]), row.id);
   }
 }
 
@@ -1138,7 +1167,12 @@ function ensureDb() {
   seedSopMenuIfMissing();
   seedBrandingMenuIfMissing();
   seedBackupMenuIfMissing();
+  seedApprovalChainMenuIfMissing();
   seedPengajuanMenusIfMissing();
+  seedAssetCategoriesIfEmpty();
+  seedAssetCategoryMenuIfMissing();
+  seedJenisDataIfEmpty();
+  seedJenisDataMenuIfMissing();
   backfillCustomersFromSubmissions();
 }
 

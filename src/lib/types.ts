@@ -41,6 +41,24 @@ export interface Department {
   active: boolean;
 }
 
+/** Kategori pilihan pada pengajuan asset IT. */
+export interface MasterAssetCategory {
+  id: string;
+  name: string;
+  sortOrder: number;
+  active: boolean;
+}
+
+/** Pilihan jenis data pada pengajuan Perubahan Data Orlansoft. */
+export interface MasterJenisData {
+  id: string;
+  name: string;
+  /** Dua digit, dipakai di nomor perubahan. */
+  code: string;
+  sortOrder: number;
+  active: boolean;
+}
+
 /** Fungsi penilaian KPI per departemen (bobot + fokus) */
 export interface KpiFunction {
   id: string;
@@ -210,6 +228,24 @@ export interface KpiActivity {
   photoUrls: string[];
   /** File dokumen kegiatan (PDF, Word, Excel, dll.) */
   documents: KpiActivityDocument[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Bukti Lapor Pimpinan via WhatsApp */
+export interface KpiWaReport {
+  id: string;
+  departmentId: string;
+  userId: string;
+  userName: string;
+  activityId: string | null;
+  projectId: string | null;
+  title: string;
+  leaderName: string;
+  reportDate: string;
+  notes: string;
+  photoUrls: string[];
+  status: "reported" | "acknowledged";
   createdAt: string;
   updatedAt: string;
 }
@@ -667,6 +703,49 @@ export type PengajuanType =
 
 export type PengajuanStatus = "submitted" | "approved" | "rejected" | "done";
 
+export type PengajuanApprovalMode = "chain" | "fallback";
+
+export type PengajuanApprovalStepStatus = "pending" | "approved" | "rejected";
+
+export interface PengajuanApprovalPerson {
+  userId: string;
+  name: string;
+}
+
+export interface PengajuanApprovalStepView {
+  id: string;
+  order: number;
+  label: string;
+  status: PengajuanApprovalStepStatus;
+  actorUserId: string;
+  actorName: string;
+  note: string;
+  actedAt: string | null;
+  assignees: PengajuanApprovalPerson[];
+}
+
+/** Progres approval satu pengajuan. `fallback` = satu tingkat Admin/Manager. */
+export interface PengajuanApprovalProgress {
+  mode: PengajuanApprovalMode;
+  currentOrder: number | null;
+  steps: PengajuanApprovalStepView[];
+}
+
+export interface ApprovalChainUserOption {
+  id: string;
+  name: string;
+  username: string;
+  role: UserRole;
+  active: boolean;
+}
+
+export interface ApprovalChainLevel {
+  id: string;
+  order: number;
+  label: string;
+  userIds: string[];
+}
+
 export interface Pengajuan {
   id: string;
   code: string;
@@ -688,6 +767,7 @@ export interface Pengajuan {
   completedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  approval: PengajuanApprovalProgress;
 }
 
 /** Master customer yang lahir dari pengajuan penambahan. */

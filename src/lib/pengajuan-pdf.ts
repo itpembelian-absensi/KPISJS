@@ -2,13 +2,15 @@ import fs from "fs";
 import path from "path";
 import PDFDocument from "pdfkit";
 import { getCompanyName } from "./branding";
+import { formatMoneyCurrency, terbilangRupiah } from "./money";
 import { customerCodesBySubmission } from "./customer-ops";
 import {
   getPengajuanType,
   PENGAJUAN_STATUS_LABEL,
 } from "./pengajuan";
+import { approvalWaitingText, approvedSignerNames } from "./pengajuan-approval-view";
 import { absolutePathFromPengajuanPhotoUrl } from "./pengajuan-photos";
-import type { Pengajuan } from "./types";
+import type { Pengajuan, PengajuanApprovalStepView } from "./types";
 
 function collectBuffers(doc: PDFKit.PDFDocument): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -52,6 +54,7 @@ function displayCode(item: Pengajuan, codes: Record<string, string>) {
 
 function fieldValue(kind: string, value: string) {
   if (!value) return "—";
+  if (kind === "money") return formatMoneyCurrency(value) || "—";
   if (kind === "date") {
     const [y, m, d] = value.split("-");
     if (y && m && d) return `${d}/${m}/${y}`;
@@ -104,6 +107,89 @@ function drawPhotos(doc: PDFKit.PDFDocument, urls: string[]) {
   doc.y = y + rowHeight + 8;
 }
 
+function approvalStepLine(item: Pengajuan, step: PengajuanApprovalStepView) {
+  const waitingNames =
+    step.assignees.map((person) => person.name).filter(Boolean).join(", ") || "—";
+  if (step.status === "approved") {
+    const note = step.note ? ` · Catatan: ${step.note}` : "";
+    return `${step.label}: disetujui oleh ${step.actorName || "—"} · ${formatWhen(step.actedAt)}${note}`;
+  }
+  if (step.status === "rejected") {
+    const note = step.note ? ` · Alasan: ${step.note}` : "";
+    return `${step.label}: ditolak oleh ${step.actorName || "—"} · ${formatWhen(step.actedAt)}${note}`;
+  }
+  if (step.order === item.approval.currentOrder) {
+    const who = item.approval.mode === "fallback" ? "Admin atau Manager" : waitingNames;
+    return `${step.label}: menunggu persetujuan (${who})`;
+  }
+  return `${step.label}: belum giliran`;
+}
+
+function drawApprovalHistory(
+  doc: PDFKit.PDFDocument,
+  item: Pengajuan,
+  width: number,
+) {
+  if (item.approval.mode === "chain") {
+    doc.moveDown(0.25);
+    doc.fontSize(10).fillColor("#0f172a").text("Persetujuan", { width });
+    for (const step of item.approval.steps) {
+      doc.fontSize(9).fillColor("#334155").text(approvalStepLine(item, step), { width });
+    }
+    return;
+  }
+
+  const step = item.approval.steps[0];
+  if (step?.status === "approved") {
+    doc.text(
+      `Disetujui oleh ${step.actorName || item.reviewerName || "—"} · ${formatWhen(step.actedAt || item.reviewedAt)}`,
+      { width },
+    );
+  } else if (step?.status === "rejected") {
+    doc.text(
+      `Ditolak oleh ${step.actorName || item.reviewerName || "—"} · ${formatWhen(step.actedAt || item.reviewedAt)}`,
+      { width },
+    );
+  } else if (item.status === "submitted") {
+    doc.text("Menunggu persetujuan Admin atau Manager", { width });
+  }
+  const note = step?.note || item.reviewerNote;
+  if (note) doc.text(`Catatan persetujuan: ${note}`, { width });
+  if (
+    item.completedAt &&
+    item.completedBy &&
+    item.completedBy !== (step?.actorName || item.reviewerName)
+  ) {
+    doc.text(
+      `Riwayat proses: ${item.completedBy} · ${formatWhen(item.completedAt)}`,
+      { width },
+    );
+  }
+  if (item.completionNote && item.completionNote !== note) {
+    doc.text(`Catatan riwayat: ${item.completionNote}`, { width });
+  }
+}
+
+function drawSignatures(doc: PDFKit.PDFDocument, item: Pengajuan, width: number) {
+  const names = approvedSignerNames(item);
+  const block = 28 + Math.max(1, names.length) * 16;
+  ensureSpace(doc, block + 24);
+  doc.moveDown(1.2);
+  const left = doc.page.margins.left;
+  const col = width / 2;
+  const y = doc.y;
+  doc.fontSize(9).fillColor("#64748b");
+  doc.text("Dibuat oleh", left, y, { width: col - 16 });
+  doc.text("Disetujui oleh", left + col, y, { width: col - 16 });
+  doc.fontSize(12).fillColor("#0f172a");
+  doc.text(item.requesterName || "—", left, y + 28, { width: col - 16 });
+  doc.text(names.length > 0 ? names.join("\n") : "—", left + col, y + 28, {
+    width: col - 16,
+  });
+  doc.x = left;
+  doc.y = y + 28 + Math.max(18, names.length * 16);
+}
+
 function drawOne(doc: PDFKit.PDFDocument, item: Pengajuan, codes: Record<string, string>) {
   const def = getPengajuanType(item.type);
   const width = contentWidth(doc);
@@ -118,27 +204,19 @@ function drawOne(doc: PDFKit.PDFDocument, item: Pengajuan, codes: Record<string,
   doc.text(`Status: ${PENGAJUAN_STATUS_LABEL[item.status]}`);
   doc.text(`Pemohon: ${item.requesterName} · ${item.requesterDept}`);
   doc.text(`Diajukan: ${formatWhen(item.createdAt)}`);
-  if (item.reviewedAt) {
-    doc.text(
-      `${item.status === "rejected" ? "Ditolak" : "Disetujui"} oleh ${item.reviewerName || "—"} · ${formatWhen(item.reviewedAt)}`,
-      { width },
-    );
-  }
-  if (item.reviewerNote) doc.text(`Catatan persetujuan: ${item.reviewerNote}`, { width });
-  if (item.completedAt) {
-    doc.text(
-      `Diselesaikan oleh ${item.completedBy || "—"} · ${formatWhen(item.completedAt)}`,
-      { width },
-    );
-  }
-  if (item.completionNote) doc.text(`Catatan penyelesaian: ${item.completionNote}`, { width });
+  drawApprovalHistory(doc, item, width);
   doc.moveDown(0.6);
 
   for (const field of def?.fields ?? []) {
-    ensureSpace(doc, 36);
-    const value = fieldValue(field.kind, item.payload[field.key] ?? "");
+    const raw = item.payload[field.key] ?? "";
+    const words = field.kind === "money" ? terbilangRupiah(raw) : "";
+    ensureSpace(doc, words ? 52 : 36);
+    const value = fieldValue(field.kind, raw);
     doc.fontSize(8).fillColor("#64748b").text(field.label.toUpperCase(), { width });
     doc.fontSize(11).fillColor("#0f172a").text(value, { width });
+    if (words) {
+      doc.fontSize(9).fillColor("#64748b").text(words, { width });
+    }
     doc.moveDown(0.35);
   }
 
@@ -151,10 +229,12 @@ function drawOne(doc: PDFKit.PDFDocument, item: Pengajuan, codes: Record<string,
 
   if (item.photoUrls.length > 0) {
     ensureSpace(doc, 24);
-    doc.fontSize(8).fillColor("#64748b").text("FOTO", { width });
+    doc.fontSize(8).fillColor("#64748b").text("FOTO BUKTI", { width });
     doc.moveDown(0.2);
     drawPhotos(doc, item.photoUrls);
   }
+
+  drawSignatures(doc, item, width);
 }
 
 function drawList(
@@ -186,8 +266,10 @@ function drawList(
       [
         def?.label,
         PENGAJUAN_STATUS_LABEL[item.status],
-        item.requesterName,
+        approvalWaitingText(item),
         item.requesterDept,
+        `Dibuat oleh ${item.requesterName || "—"}`,
+        `Disetujui oleh ${approvedSignerNames(item).join(", ") || "—"}`,
         formatWhen(item.createdAt),
       ]
         .filter(Boolean)

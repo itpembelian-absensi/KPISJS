@@ -159,16 +159,6 @@ export function canAccessTicket(
   return Boolean(userStaffId && ticketRequesterStaffId === userStaffId);
 }
 
-/** Setujui / tolak pengajuan: Admin, IT, dan Manager. */
-export function canReviewPengajuan(role: UserRole): boolean {
-  return role === "admin" || role === "it_staff" || role === "manager";
-}
-
-/** Tandai selesai setelah diproses di sistem: Admin dan IT. */
-export function canCompletePengajuan(role: UserRole): boolean {
-  return role === "admin" || role === "it_staff";
-}
-
 /** Staf & penilai hanya melihat pengajuan sendiri. Manager mengikuti scope departemen. */
 export function canSeePengajuan(
   user: SessionUser,
@@ -282,14 +272,8 @@ export const NAV_ENTRIES: NavEntry[] = [
           roles: ["admin", "manager", "staff", "it_staff", "assessor"],
         },
         {
-          href: "/pengajuan/barang",
-          label: "Master Barang",
-          hint: "Tambah item / barang baru",
-          roles: ["admin", "manager", "staff", "it_staff", "assessor"],
-        },
-        {
           href: "/pengajuan/perubahan",
-          label: "Perubahan Data",
+          label: "Perubahan Data Orlansoft",
           hint: "Ubah data master yang sudah ada",
           roles: ["admin", "manager", "staff", "it_staff", "assessor"],
         },
@@ -297,6 +281,12 @@ export const NAV_ENTRIES: NavEntry[] = [
           href: "/pengajuan/asset",
           label: "Asset IT",
           hint: "Ajukan perangkat IT baru",
+          roles: ["admin", "manager", "staff", "it_staff", "assessor"],
+        },
+        {
+          href: "/pengajuan/barang",
+          label: "Master Item / Stock",
+          hint: "Tambah item / barang baru",
           roles: ["admin", "manager", "staff", "it_staff", "assessor"],
         },
         {
@@ -463,6 +453,18 @@ export const NAV_ENTRIES: NavEntry[] = [
           hint: "IT Staff & IT Manager",
           roles: ["admin", "it_staff"],
         },
+        {
+          href: "/master/asset-categories",
+          label: "Kategori Aset",
+          hint: "Pilihan kategori pengajuan asset IT",
+          roles: ["admin", "it_staff"],
+        },
+        {
+          href: "/master/jenis-data",
+          label: "Jenis Data",
+          hint: "Pilihan jenis data Perubahan Data Orlansoft",
+          roles: ["admin", "it_staff"],
+        },
       ],
     },
   },
@@ -479,6 +481,12 @@ export const NAV_ENTRIES: NavEntry[] = [
           label: "User & Role",
           hint: "Login, password, role",
           roles: ["admin", "it_staff"],
+        },
+        {
+          href: "/master/approval-pengajuan",
+          label: "Approval Pengajuan",
+          hint: "Rantai persetujuan bertingkat",
+          roles: ["admin"],
         },
         {
           href: "/master/branding",

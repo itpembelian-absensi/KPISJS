@@ -5,6 +5,13 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ActivityPhotoSlider } from "@/components/ActivityPhotoSlider";
 import { ActivityDocumentList } from "@/components/ActivityDocumentList";
+import { ActivityExportBar } from "@/components/ActivityExportBar";
+import { WaReportWorkspace } from "@/components/WaReportWorkspace";
+import {
+  frequencyExportLabel,
+  progressExportLabel,
+  type ActivityExportFreq,
+} from "@/lib/activity-report";
 import {
   activityActualValueForIndicator,
   activityInScorePeriod,
@@ -37,21 +44,23 @@ import type {
   KpiIndicatorActual,
   KpiProject,
   KpiScoreIndicator,
+  KpiWaReport,
   StaffMember,
   Ticket,
 } from "@/lib/types";
 
-type Tab = "fungsi" | "project" | "kegiatan" | "penilaian" | "kedisiplinan";
+type Tab = "fungsi" | "project" | "kegiatan" | "lapor_wa" | "penilaian" | "kedisiplinan";
 type DisciplineRow = AttendancePeriodSummary & { staff: StaffMember | null };
 
 const ALL_TABS: Tab[] = [
   "fungsi",
   "project",
   "kegiatan",
+  "lapor_wa",
   "kedisiplinan",
   "penilaian",
 ];
-const STAFF_TABS: Tab[] = ["project", "kegiatan"];
+const STAFF_TABS: Tab[] = ["project", "kegiatan", "lapor_wa"];
 
 function parseTab(
   raw: string | null,
@@ -214,6 +223,7 @@ export function DepartmentKpiWorkspace({
   functions: initialFunctions,
   projects: initialProjects,
   activities: initialActivities,
+  initialWaReports = [],
   assessments: initialAssessments,
   disciplineSummaries: initialDiscipline,
   scoreIndicators: initialIndicators = [],
@@ -224,6 +234,7 @@ export function DepartmentKpiWorkspace({
   staff,
   defaultDepartmentId,
   assessorName,
+  sessionUser,
   staffLimited = false,
   managerStaffIds = [],
   adminStaffIds = [],
@@ -235,6 +246,7 @@ export function DepartmentKpiWorkspace({
   functions: KpiFunction[];
   projects: KpiProject[];
   activities: KpiActivity[];
+  initialWaReports?: KpiWaReport[];
   assessments: KpiAssessment[];
   disciplineSummaries: DisciplineRow[];
   scoreIndicators?: KpiScoreIndicator[];
@@ -245,6 +257,13 @@ export function DepartmentKpiWorkspace({
   staff: StaffMember[];
   defaultDepartmentId: string;
   assessorName: string;
+  sessionUser?: {
+    id: string;
+    name: string;
+    role: string;
+    departmentId: string | null;
+    staffId?: string | null;
+  };
   /** Staf: hanya project & kegiatan, dept terkunci */
   staffLimited?: boolean;
   /** staffId yang punya akun role manager (untuk label di form penilaian) */
@@ -271,6 +290,10 @@ export function DepartmentKpiWorkspace({
   const [activityFreq, setActivityFreq] = useState<KpiActivityFrequency>(() =>
     parseActivityFreq(searchParams.get("freq")),
   );
+  const [activityExportFreq, setActivityExportFreq] =
+    useState<ActivityExportFreq>(() =>
+      parseActivityFreq(searchParams.get("freq")),
+    );
   const [activityProgress, setActivityProgress] = useState<ProgressFilter>(() =>
     parseProgressFilter(searchParams.get("progress")),
   );
@@ -279,6 +302,8 @@ export function DepartmentKpiWorkspace({
   );
   const [projects, setProjects] = useState(initialProjects);
   const [activities, setActivities] = useState(initialActivities);
+  const [waReports, setWaReports] = useState(initialWaReports);
+  const [targetWaActivityId, setTargetWaActivityId] = useState<string | null>(null);
   const [assessments, setAssessments] = useState(initialAssessments);
   const [discipline, setDiscipline] = useState(initialDiscipline);
   const [scoreIndicators, setScoreIndicators] = useState(initialIndicators);
@@ -298,6 +323,9 @@ export function DepartmentKpiWorkspace({
       prev === initialActuals ? prev : initialActuals,
     );
   }, [initialActuals]);
+  useEffect(() => {
+    setWaReports(initialWaReports);
+  }, [initialWaReports]);
   const [error, setError] = useState<string | null>(null);
   const [assessMessage, setAssessMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -357,6 +385,17 @@ export function DepartmentKpiWorkspace({
     if (projectProgress === "done") return p.status === "done";
     return true;
   });
+  const printActivities = deptActivities.filter((a) => {
+    if (
+      activityExportFreq !== "all" &&
+      (a.frequency || "daily") !== activityExportFreq
+    ) {
+      return false;
+    }
+    if (activityProgress === "pending") return isActivityPending(a.status);
+    if (activityProgress === "done") return a.status === "done";
+    return true;
+  });
   const pendingActivityCount = freqActivities.filter((a) =>
     isActivityPending(a.status),
   ).length;
@@ -366,6 +405,7 @@ export function DepartmentKpiWorkspace({
 
   function goActivityFreq(freq: KpiActivityFrequency) {
     setActivityFreq(freq);
+    setActivityExportFreq(freq);
     if (editingActivity && (editingActivity.frequency || "daily") !== freq) {
       setEditingActivity(null);
       clearPendingUploads();
@@ -1641,18 +1681,25 @@ export function DepartmentKpiWorkspace({
     ? [
         { id: "project", label: "Project / Rencana Kerja" },
         { id: "kegiatan", label: "Kegiatan" },
+        { id: "lapor_wa", label: "Lapor WhatsApp" },
       ]
     : [
         { id: "fungsi", label: "Fungsi KPI" },
         { id: "project", label: "Project / Rencana Kerja" },
         { id: "kegiatan", label: "Kegiatan" },
+        { id: "lapor_wa", label: "Lapor WhatsApp" },
         { id: "kedisiplinan", label: "Kedisiplinan" },
         { id: "penilaian", label: "Penilaian & Skor" },
       ];
 
+  const currentDept = departments.find((d) => d.id === deptId);
+  const deptPrintLabel = currentDept
+    ? `${currentDept.code} — ${currentDept.name}`
+    : "Departemen";
+
   return (
     <div className="space-y-4">
-      <div className="panel grid gap-3 p-3 sm:grid-cols-2 sm:p-4">
+      <div className="panel grid gap-3 p-3 print:hidden sm:grid-cols-2 sm:p-4">
         <label className="text-sm">
           <span className="text-xs text-ink-muted">Departemen</span>
           <select
@@ -1688,15 +1735,14 @@ export function DepartmentKpiWorkspace({
         ) : (
           <div className="flex items-end">
             <p className="text-sm text-ink-muted">
-              Akses staf: hanya <strong>Project</strong> &amp;{" "}
-              <strong>Kegiatan</strong>
+              Akses staf: <strong>Project</strong>, <strong>Kegiatan</strong> &amp; <strong>Lapor WhatsApp</strong>
             </p>
           </div>
         )}
       </div>
 
       <div className="panel overflow-hidden">
-        <div className="flex gap-1 overflow-x-auto border-b border-line px-2 pt-2">
+        <div className="flex gap-1 overflow-x-auto border-b border-line px-2 pt-2 print:hidden">
           {tabs.map((t) => (
             <button
               key={t.id}
@@ -2117,7 +2163,7 @@ export function DepartmentKpiWorkspace({
 
         {tab === "kegiatan" ? (
           <div className="space-y-4 p-4">
-            <div className="flex flex-wrap gap-1 rounded-xl bg-bg-elevated/80 p-1">
+            <div className="flex flex-wrap gap-1 rounded-xl bg-bg-elevated/80 p-1 print:hidden">
               {ACTIVITY_FREQ_TABS.map((f) => {
                 const count = deptActivities.filter(
                   (a) => (a.frequency || "daily") === f.id,
@@ -2146,7 +2192,76 @@ export function DepartmentKpiWorkspace({
               })}
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-[1fr_1.1fr]">
+            <ActivityExportBar
+              departmentId={deptId}
+              exportFreq={activityExportFreq}
+              onExportFreqChange={setActivityExportFreq}
+              progress={activityProgress}
+            />
+
+            <div className="hidden print:block print-report space-y-3">
+              <div>
+                <p className="text-xs tracking-wide text-ink-muted uppercase">
+                  Laporan Kegiatan
+                </p>
+                <p className="mt-1 text-xl font-semibold">{deptPrintLabel}</p>
+                <p className="mt-1 text-xs text-ink-muted">
+                  Jenis: {frequencyExportLabel(activityExportFreq)} · Status:{" "}
+                  {progressExportLabel(activityProgress)} ·{" "}
+                  {printActivities.length} kegiatan
+                </p>
+              </div>
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-line text-xs text-ink-muted uppercase">
+                    <th className="py-2 pr-2 font-medium">No</th>
+                    <th className="py-2 pr-2 font-medium">Jenis</th>
+                    <th className="py-2 pr-2 font-medium">Judul</th>
+                    <th className="py-2 pr-2 font-medium">Status</th>
+                    <th className="py-2 pr-2 font-medium">Tanggal</th>
+                    <th className="py-2 pr-2 font-medium">PIC</th>
+                    <th className="py-2 pr-2 font-medium">Fungsi KPI</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {printActivities.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-4 text-ink-muted">
+                        Tidak ada kegiatan untuk dicetak.
+                      </td>
+                    </tr>
+                  ) : (
+                    printActivities.map((a, i) => (
+                      <tr key={a.id} className="border-b border-line align-top">
+                        <td className="py-2 pr-2">{i + 1}</td>
+                        <td className="py-2 pr-2">
+                          {ACTIVITY_FREQUENCY[a.frequency || "daily"]}
+                        </td>
+                        <td className="py-2 pr-2 font-medium">{a.title}</td>
+                        <td className="py-2 pr-2">
+                          {ACTIVITY_STATUS[a.status]}
+                        </td>
+                        <td className="py-2 pr-2">
+                          {a.activityDate
+                            ? new Date(a.activityDate).toLocaleDateString(
+                                "id-ID",
+                              )
+                            : "—"}
+                        </td>
+                        <td className="py-2 pr-2">
+                          {staffName(a.assigneeStaffId)}
+                        </td>
+                        <td className="py-2 pr-2 text-ink-muted">
+                          {fnName(a.kpiFunctionId)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="grid gap-4 print:hidden lg:grid-cols-[1fr_1.1fr]">
             <form
               key={`${editingActivity?.id ?? "new-activity"}-${activityFreq}`}
               onSubmit={saveActivity}
@@ -2395,69 +2510,121 @@ export function DepartmentKpiWorkspace({
                       : `Belum ada kegiatan ${ACTIVITY_FREQUENCY[activityFreq].toLowerCase()}.`}
                 </p>
               ) : (
-                filteredActivities.map((a) => (
-                  <div
-                    key={a.id}
-                    className="rounded-xl border border-line px-3 py-3"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <Link
-                        href={`/kpi/activities/${a.id}`}
-                        className="min-w-0 flex-1 text-left"
-                      >
-                        <p className="font-medium hover:underline">{a.title}</p>
-                        <p className="mt-1 text-xs text-ink-muted">
-                          {ACTIVITY_STATUS[a.status]} ·{" "}
-                          {ACTIVITY_FREQUENCY[a.frequency || "daily"]} ·{" "}
-                          {fnName(a.kpiFunctionId)} ·{" "}
-                          {staffName(a.assigneeStaffId)}
-                          {a.activityDate
-                            ? ` · ${new Date(a.activityDate).toLocaleDateString("id-ID")}`
-                            : ""}
-                          {a.photoUrls?.length
-                            ? ` · ${a.photoUrls.length} foto`
-                            : ""}
-                          {a.documents?.length
-                            ? ` · ${a.documents.length} dokumen`
-                            : ""}
-                        </p>
-                        <p className="mt-1 text-[11px] text-ink-muted">
-                          Klik untuk buka halaman detail
-                        </p>
-                      </Link>
-                      <div className="flex shrink-0 gap-2">
+                filteredActivities.map((a) => {
+                  const aWaReports = waReports.filter((w) => w.activityId === a.id);
+                  return (
+                    <div
+                      key={a.id}
+                      className="rounded-xl border border-line px-3 py-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
                         <Link
                           href={`/kpi/activities/${a.id}`}
-                          className="text-xs text-ink-muted hover:underline"
+                          className="min-w-0 flex-1 text-left"
                         >
-                          Lihat
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-medium hover:underline">{a.title}</p>
+                            {aWaReports.length > 0 ? (
+                              <span
+                                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-600/30 dark:text-emerald-300"
+                                title="Sudah ada bukti screenshot chat WhatsApp ke pimpinan"
+                              >
+                                <svg
+                                  className="h-3 w-3 fill-current"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+                                </svg>
+                                Terlapor WA ({aWaReports.length})
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="mt-1 text-xs text-ink-muted">
+                            {ACTIVITY_STATUS[a.status]} ·{" "}
+                            {ACTIVITY_FREQUENCY[a.frequency || "daily"]} ·{" "}
+                            {fnName(a.kpiFunctionId)} ·{" "}
+                            {staffName(a.assigneeStaffId)}
+                            {a.activityDate
+                              ? ` · ${new Date(a.activityDate).toLocaleDateString("id-ID")}`
+                              : ""}
+                            {a.photoUrls?.length
+                              ? ` · ${a.photoUrls.length} foto`
+                              : ""}
+                            {a.documents?.length
+                              ? ` · ${a.documents.length} dokumen`
+                              : ""}
+                          </p>
+                          <p className="mt-1 text-[11px] text-ink-muted">
+                            Klik untuk buka halaman detail
+                          </p>
                         </Link>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingActivity(a);
-                            clearPendingUploads();
-                            setError(null);
-                          }}
-                          className="text-xs text-brand hover:underline"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => removeItem("activities", a.id)}
-                          className="text-xs text-danger hover:underline"
-                        >
-                          Hapus
-                        </button>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTargetWaActivityId(a.id);
+                              setTab("lapor_wa");
+                              const next = new URLSearchParams();
+                              next.set("tab", "lapor_wa");
+                              router.replace(`/kpi/departments?${next.toString()}`, {
+                                scroll: false,
+                              });
+                            }}
+                            className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-300"
+                            title="Upload screenshot WhatsApp laporan ke pimpinan untuk kegiatan ini"
+                          >
+                            + Lapor WA
+                          </button>
+                          <Link
+                            href={`/kpi/activities/${a.id}`}
+                            className="text-xs text-ink-muted hover:underline"
+                          >
+                            Lihat
+                          </Link>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingActivity(a);
+                              clearPendingUploads();
+                              setError(null);
+                            }}
+                            className="text-xs text-brand hover:underline"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeItem("activities", a.id)}
+                            className="text-xs text-danger hover:underline"
+                          >
+                            Hapus
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
             </div>
           </div>
+        ) : null}
+
+        {tab === "lapor_wa" ? (
+          <WaReportWorkspace
+            departmentId={deptId}
+            departments={departments}
+            activities={activities}
+            projects={projects}
+            staff={staff}
+            managerStaffIds={managerStaffIds}
+            sessionUser={sessionUser}
+            reports={waReports}
+            onReportsChange={setWaReports}
+            staffLimited={staffLimited}
+            preselectedActivityId={targetWaActivityId}
+            onClearPreselectedActivity={() => setTargetWaActivityId(null)}
+          />
         ) : null}
 
         

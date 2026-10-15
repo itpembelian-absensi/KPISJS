@@ -2,12 +2,12 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { PengajuanDetail } from "@/components/pengajuan/PengajuanDetail";
 import { PengajuanExportActions } from "@/components/pengajuan/PengajuanExportActions";
+import { canAccessMenu } from "@/lib/auth";
 import {
-  canAccessMenu,
-  canCompletePengajuan,
-  canReviewPengajuan,
-  canSeePengajuan,
-} from "@/lib/auth";
+  canActOnPengajuan,
+  canSeePengajuanItem,
+  canUnapprovePengajuan,
+} from "@/lib/pengajuan-approval-view";
 import { getCustomerCodeBySubmission } from "@/lib/customer-ops";
 import { getPengajuanType } from "@/lib/pengajuan";
 import { getPengajuan } from "@/lib/pengajuan-ops";
@@ -28,19 +28,15 @@ export default async function PengajuanDetailPage({
   if (!canAccessMenu(user, def.href)) redirect("/");
   const item = getPengajuan(id);
   if (!item || item.type !== def.type) notFound();
-  if (!canSeePengajuan(user, item)) {
+  if (!canSeePengajuanItem(user, item)) {
     redirect(
       def.type === "customer_ubah" ? "/pengajuan/customer?sheet=ubah" : def.href,
     );
   }
 
-  const isOwn = Boolean(user.staffId && item.requesterStaffId === user.staffId);
-  const canReview =
-    canReviewPengajuan(user.role) &&
-    item.status === "submitted" &&
-    (!isOwn || user.role === "admin");
-  const canComplete =
-    canCompletePengajuan(user.role) && item.status === "approved";
+  const viewer = { id: user.id, role: user.role, staffId: user.staffId };
+  const canReview = canActOnPengajuan(viewer, item);
+  const canUnapprove = canUnapprovePengajuan(viewer, item);
 
   return (
     <div className="mx-auto max-w-3xl space-y-5">
@@ -77,7 +73,7 @@ export default async function PengajuanDetailPage({
         }
         def={{ label: def.label, fields: def.fields, photos: def.photos }}
         canReview={canReview}
-        canComplete={canComplete}
+        canUnapprove={canUnapprove}
       />
     </div>
   );

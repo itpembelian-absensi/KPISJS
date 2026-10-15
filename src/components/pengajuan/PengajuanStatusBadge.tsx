@@ -5,7 +5,7 @@ const statusClass: Record<PengajuanStatus, string> = {
   submitted: "bg-warn-soft text-warn",
   approved: "bg-info-soft text-info",
   rejected: "bg-danger-soft text-danger",
-  done: "bg-ok-soft text-ok",
+  done: "bg-info-soft text-info",
 };
 
 export function PengajuanStatusBadge({ status }: { status: PengajuanStatus }) {

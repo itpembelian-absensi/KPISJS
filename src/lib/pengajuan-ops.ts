@@ -1,11 +1,19 @@
 import { randomUUID } from "crypto";
 import {
   applyCustomerChange,
+  revertCustomerChange,
   syncCustomerFromSubmission,
 } from "./customer-ops";
 import { getDb } from "./db";
+import {
+  decidePengajuanApproval,
+  overlayApprovalChains,
+  snapshotApprovalChain,
+  undoPengajuanApproval,
+} from "./pengajuan-approval";
+import { fallbackApproval } from "./pengajuan-approval-view";
 import { pengajuanMenuHrefs } from "./pengajuan";
-import type { Pengajuan, PengajuanStatus, PengajuanType } from "./types";
+import type { Pengajuan, PengajuanStatus, PengajuanType, UserRole } from "./types";
 
 type PengajuanRow = {
   id: string;
@@ -79,6 +87,15 @@ function mapPengajuan(row: PengajuanRow): Pengajuan {
     completedAt: row.completed_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    approval: fallbackApproval({
+      status: row.status,
+      reviewerName: row.reviewer_name,
+      reviewerNote: row.reviewer_note,
+      reviewedAt: row.reviewed_at,
+      completedBy: row.completed_by,
+      completedAt: row.completed_at,
+      completionNote: row.completion_note,
+    }),
   };
 }
 
@@ -107,14 +124,15 @@ export function listPengajuan(type?: PengajuanType): Pengajuan[] {
           .prepare(`SELECT * FROM submissions ORDER BY created_at DESC`)
           .all()
   ) as PengajuanRow[];
-  return rows.map(mapPengajuan);
+  return overlayApprovalChains(rows.map(mapPengajuan));
 }
 
 export function getPengajuan(id: string): Pengajuan | null {
   const row = getDb()
     .prepare(`SELECT * FROM submissions WHERE id = ? OR code = ?`)
     .get(id, id) as PengajuanRow | undefined;
-  return row ? mapPengajuan(row) : null;
+  if (!row) return null;
+  return overlayApprovalChains([mapPengajuan(row)])[0] ?? null;
 }
 
 export function createPengajuan(input: {
@@ -152,6 +170,12 @@ export function createPengajuan(input: {
       now,
       now,
     );
+  try {
+    snapshotApprovalChain(id);
+  } catch (error) {
+    getDb().prepare(`DELETE FROM submissions WHERE id = ?`).run(id);
+    throw error;
+  }
   const created = getPengajuan(id);
   if (!created) throw new Error("Pengajuan gagal disimpan");
   try {
@@ -165,21 +189,15 @@ export function createPengajuan(input: {
 
 export function reviewPengajuan(input: {
   id: string;
-  action: "approve" | "reject" | "done";
+  action: "approve" | "reject";
+  actorUserId: string;
   actorName: string;
+  actorRole: UserRole;
   actorStaffId: string | null;
-  allowSelfReview: boolean;
   note: string;
 }): { error: string } | { pengajuan: Pengajuan } {
   const current = getPengajuan(input.id);
   if (!current) return { error: "Pengajuan tidak ditemukan" };
-
-  const isOwn = Boolean(
-    input.actorStaffId && current.requesterStaffId === input.actorStaffId,
-  );
-  if (isOwn && !input.allowSelfReview && input.action !== "done") {
-    return { error: "Anda tidak dapat menyetujui pengajuan sendiri" };
-  }
 
   const note = input.note.trim();
   if (input.action === "reject" && !note) {
@@ -187,46 +205,45 @@ export function reviewPengajuan(input: {
   }
   if (note.length > 2000) return { error: "Catatan terlalu panjang" };
 
-  const now = new Date().toISOString();
-  const db = getDb();
-
-  if (input.action === "approve" || input.action === "reject") {
-    if (current.status !== "submitted") {
-      return { error: "Pengajuan ini sudah tidak menunggu persetujuan" };
-    }
-    const status = input.action === "approve" ? "approved" : "rejected";
-    const result = db
-      .prepare(
-        `UPDATE submissions
-         SET status = ?, reviewer_name = ?, reviewer_note = ?, reviewed_at = ?, updated_at = ?
-         WHERE id = ? AND status = 'submitted'`,
-      )
-      .run(status, input.actorName, note, now, now, current.id);
-    if (result.changes !== 1) {
-      return { error: "Status pengajuan sudah berubah" };
-    }
-  } else {
-    if (current.status !== "approved") {
-      return {
-        error: "Hanya pengajuan yang sudah disetujui yang bisa diselesaikan",
-      };
-    }
-    const result = db
-      .prepare(
-        `UPDATE submissions
-         SET status = 'done', completed_by = ?, completion_note = ?, completed_at = ?, updated_at = ?
-         WHERE id = ? AND status = 'approved'`,
-      )
-      .run(input.actorName, note, now, now, current.id);
-    if (result.changes !== 1) {
-      return { error: "Status pengajuan sudah berubah" };
-    }
-  }
+  const decision = decidePengajuanApproval({
+    submissionId: current.id,
+    action: input.action,
+    actorUserId: input.actorUserId,
+    actorName: input.actorName,
+    actorRole: input.actorRole,
+    actorStaffId: input.actorStaffId,
+    note,
+  });
+  if ("error" in decision) return decision;
 
   const updated = getPengajuan(current.id);
   if (!updated) return { error: "Pengajuan tidak ditemukan" };
   syncCustomerFromSubmission(updated);
   applyCustomerChange(updated);
+  return { pengajuan: updated };
+}
+
+export function unapprovePengajuan(input: {
+  id: string;
+  actorUserId: string;
+  actorRole: UserRole;
+  actorStaffId: string | null;
+}): { error: string } | { pengajuan: Pengajuan } {
+  const current = getPengajuan(input.id);
+  if (!current) return { error: "Pengajuan tidak ditemukan" };
+
+  const decision = undoPengajuanApproval({
+    submissionId: current.id,
+    actorUserId: input.actorUserId,
+    actorRole: input.actorRole,
+    actorStaffId: input.actorStaffId,
+  });
+  if ("error" in decision) return decision;
+
+  const updated = getPengajuan(current.id);
+  if (!updated) return { error: "Pengajuan tidak ditemukan" };
+  syncCustomerFromSubmission(updated);
+  if (decision.reopened) revertCustomerChange(current);
   return { pengajuan: updated };
 }
 

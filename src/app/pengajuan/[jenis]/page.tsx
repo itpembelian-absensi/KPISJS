@@ -4,7 +4,7 @@ import { CustomerCodeStartForm } from "@/components/pengajuan/CustomerCodeStartF
 import { CustomerSheets } from "@/components/pengajuan/CustomerSheets";
 import { PengajuanExportActions } from "@/components/pengajuan/PengajuanExportActions";
 import { PengajuanList } from "@/components/pengajuan/PengajuanList";
-import { canSeePengajuan } from "@/lib/auth";
+import { canSeePengajuanItem } from "@/lib/pengajuan-approval-view";
 import {
   customerCodesBySubmission,
   getCustomerCodeStart,
@@ -41,7 +41,7 @@ export default async function PengajuanTypePage({
 
   const user = await requireMenu(def.href);
   const items = listPengajuan(viewDef.type).filter((item) =>
-    canSeePengajuan(user, item),
+    canSeePengajuanItem(user, item),
   );
 
   return (
@@ -86,9 +86,7 @@ export default async function PengajuanTypePage({
         customerCodes={
           customerSheet === "tambah" ? customerCodesBySubmission() : undefined
         }
-        canApprove={user.role === "admin" || user.role === "manager"}
-        approverStaffId={user.staffId}
-        allowSelfApprove={user.role === "admin"}
+        viewer={{ id: user.id, role: user.role, staffId: user.staffId }}
       />
     </div>
   );
