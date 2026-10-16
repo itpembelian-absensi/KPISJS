@@ -13,6 +13,42 @@ export function sessionCookieOptions() {
   };
 }
 
+/**
+ * Memastikan redirect URL aman (relative path di aplikasi, bukan open redirect ke external domain).
+ */
+export function getSafeRedirect(
+  next: string | null | undefined,
+  fallback = "/",
+): string {
+  if (!next || typeof next !== "string") return fallback;
+  const trimmed = next.trim();
+  // Harus diawali satu slash '/' dan bukan '//' atau '/\' atau '\\'
+  if (
+    !trimmed.startsWith("/") ||
+    trimmed.startsWith("//") ||
+    trimmed.startsWith("/\\") ||
+    trimmed.startsWith("\\")
+  ) {
+    return fallback;
+  }
+
+  try {
+    const dummyUrl = new URL(trimmed, "http://localhost");
+    // Cegah redirect loop ke login atau endpoint internal api
+    if (
+      dummyUrl.pathname === "/login" ||
+      dummyUrl.pathname.startsWith("/login/") ||
+      dummyUrl.pathname.startsWith("/api/")
+    ) {
+      return fallback;
+    }
+    return `${dummyUrl.pathname}${dummyUrl.search}${dummyUrl.hash}`;
+  } catch {
+    return fallback;
+  }
+}
+
+
 export function canManageMaster(role: UserRole): boolean {
   return role === "admin" || role === "it_staff";
 }

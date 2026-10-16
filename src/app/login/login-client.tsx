@@ -2,6 +2,30 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useState } from "react";
+import { getSafeRedirect } from "@/lib/auth";
+
+function resolveDestination(params: ReturnType<typeof useSearchParams>): string {
+  const rawNext = params.get("next");
+  let target = getSafeRedirect(rawNext, "/");
+
+  // Jika URL saat ini di /login punya query parameter tambahan di luar 'next'
+  // (misalnya efek redirect lama yang menyisakan /login?tab=lapor_wa&next=/kpi/departments)
+  // dan target belum memiliki query string, gabungkan param-param tersebut ke target.
+  if (target !== "/" && !target.includes("?")) {
+    const extra = new URLSearchParams();
+    params.forEach((value, key) => {
+      if (key !== "next") {
+        extra.set(key, value);
+      }
+    });
+    const extraQuery = extra.toString();
+    if (extraQuery) {
+      target = `${target}?${extraQuery}`;
+    }
+  }
+
+  return target;
+}
 
 function LoginForm({
   logoUrl,
@@ -36,7 +60,8 @@ function LoginForm({
       setError(data.error || "Login gagal");
       return;
     }
-    router.push(params.get("next") || "/");
+    const destination = resolveDestination(params);
+    router.push(destination);
     router.refresh();
   }
 
@@ -103,7 +128,11 @@ function LoginForm({
 
           <p className="text-center text-sm">
             <a
-              href="/login/forgot-password"
+              href={
+                params.get("next")
+                  ? `/login/forgot-password?next=${encodeURIComponent(params.get("next")!)}`
+                  : "/login/forgot-password"
+              }
               className="font-medium text-brand hover:underline"
             >
               Lupa password?

@@ -30,14 +30,26 @@ export function middleware(req: NextRequest) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const target = `${pathname}${req.nextUrl.search}`;
     const url = req.nextUrl.clone();
     url.pathname = "/login";
-    url.searchParams.set("next", pathname);
+    url.search = "";
+    if (target !== "/" && target !== "/login") {
+      url.searchParams.set("next", target);
+    }
     return NextResponse.redirect(url);
   }
 
+  const requestHeaders = new Headers(req.headers);
+  const target = `${pathname}${req.nextUrl.search}`;
+  requestHeaders.set("x-target", target);
 
-  return NextResponse.next();
+  return NextResponse.next({
+    request: {
+      headers: requestHeaders,
+    },
+  });
+
 }
 
 export const config = {

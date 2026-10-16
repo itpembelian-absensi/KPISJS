@@ -1,9 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { FormEvent, Suspense, useState } from "react";
 
-export default function ForgotPasswordPage() {
+function ForgotPasswordForm() {
+  const searchParams = useSearchParams();
+  const nextParam = searchParams.get("next");
+  const loginHref = nextParam
+    ? `/login?next=${encodeURIComponent(nextParam)}`
+    : "/login";
+
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -76,7 +83,7 @@ export default function ForgotPasswordPage() {
         </form>
 
         <p className="mt-4 text-center text-sm text-ink-muted">
-          <Link href="/login" className="font-medium text-brand hover:underline">
+          <Link href={loginHref} className="font-medium text-brand hover:underline">
             Kembali ke login
           </Link>
         </p>
@@ -92,3 +99,18 @@ export default function ForgotPasswordPage() {
     </div>
   );
 }
+
+export default function ForgotPasswordPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center text-sm text-ink-muted">
+          Memuat...
+        </div>
+      }
+    >
+      <ForgotPasswordForm />
+    </Suspense>
+  );
+}
+

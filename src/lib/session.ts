@@ -1,9 +1,10 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import {
   canAccessMenu,
   canAccessSop,
   canManageMaster,
+  getSafeRedirect,
   SESSION_COOKIE,
 } from "./auth";
 import { getUserBySessionToken } from "./store";
@@ -19,7 +20,15 @@ export async function requireUser(
   allowed?: UserRole[],
 ): Promise<SessionUser> {
   const user = await getSessionUser();
-  if (!user) redirect("/login");
+  if (!user) {
+    const headerList = await headers();
+    const target = headerList.get("x-target");
+    const safeTarget = getSafeRedirect(target, "/");
+    if (safeTarget !== "/") {
+      redirect(`/login?next=${encodeURIComponent(safeTarget)}`);
+    }
+    redirect("/login");
+  }
   if (allowed && !allowed.includes(user.role)) redirect("/");
   return user;
 }
