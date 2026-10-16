@@ -5,7 +5,7 @@ import {
   currentReportMonth,
 } from "@/lib/report-period";
 import { requireMenu } from "@/lib/session";
-import { listDepartments } from "@/lib/store";
+import { listDepartments, listManagementContacts } from "@/lib/store";
 import { listKpiWaReports } from "@/lib/wa-report-ops";
 import { redirect } from "next/navigation";
 
@@ -43,6 +43,7 @@ export default async function WaReportSummaryPage() {
     deptScope !== "all" && departments.length === 1
       ? departments[0].id
       : null;
+  const managementContacts = listManagementContacts();
 
   return (
     <div className="space-y-5">
@@ -68,6 +69,7 @@ export default async function WaReportSummaryPage() {
         periodsFromData={periodsFromData}
         departments={departments}
         lockedDepartmentId={lockedDepartmentId}
+        managementContacts={managementContacts}
       />
     </div>
   );

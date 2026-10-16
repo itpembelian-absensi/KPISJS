@@ -1434,6 +1434,32 @@ export function listStaff(activeOnly = false): StaffMember[] {
   return rows.map(mapStaff);
 }
 
+/** Nomor telepon staf yang akunnya Manager dan masih aktif. */
+export function listManagementContacts(): Array<{
+  name: string;
+  phone: string;
+  departmentId: string;
+}> {
+  ensureDb();
+  const rows = getDb()
+    .prepare(
+      `SELECT s.name, s.phone, s.department_id
+       FROM users u
+       INNER JOIN staff s ON s.id = u.staff_id
+       WHERE u.role = 'manager'
+         AND u.active = 1
+         AND s.active = 1
+         AND trim(COALESCE(s.phone, '')) != ''
+       ORDER BY s.name`,
+    )
+    .all() as Array<{ name: string; phone: string; department_id: string }>;
+  return rows.map((row) => ({
+    name: row.name,
+    phone: row.phone.trim(),
+    departmentId: row.department_id,
+  }));
+}
+
 export function listItTeam(activeOnly = false): ItMember[] {
   ensureDb();
   const rows = getDb()
@@ -2227,6 +2253,84 @@ export function upsertUser(input: {
     );
   const { passwordHash: _, ...rest } = user;
   return rest;
+}
+
+/** Pendaftaran akun sendiri. Role hanya staf atau manager. */
+export function createAccountByUser(input: {
+  name: string;
+  username: string;
+  password: string;
+  role: "staff" | "manager";
+  departmentId: string;
+  position: string;
+}): { username: string; name: string; role: "staff" | "manager" } | { error: string } {
+  ensureDb();
+  const name = input.name.trim();
+  const username = input.username.trim().toLowerCase();
+  if (!name) return { error: "Nama wajib diisi" };
+  if (!username) return { error: "Username wajib diisi" };
+  if (!/^[a-z0-9._-]+$/.test(username)) {
+    return {
+      error: "Username hanya boleh huruf, angka, titik, garis bawah, atau strip",
+    };
+  }
+  if (input.role !== "staff" && input.role !== "manager") {
+    return { error: "Role hanya boleh Staf atau Manager" };
+  }
+  if (!input.password || input.password.length < 6) {
+    return { error: "Password minimal 6 karakter" };
+  }
+  const position = input.position.trim();
+  if (!position) return { error: "Jabatan wajib diisi" };
+  if (position.length > 80) return { error: "Jabatan terlalu panjang" };
+
+  const db = getDb();
+  const dept = db
+    .prepare("SELECT id FROM departments WHERE id = ? AND active = 1")
+    .get(input.departmentId) as { id: string } | undefined;
+  if (!dept) return { error: "Departemen tidak valid" };
+
+  const userDup = db
+    .prepare("SELECT id FROM users WHERE lower(username) = ?")
+    .get(username) as { id: string } | undefined;
+  if (userDup) return { error: "Username sudah dipakai" };
+
+  const staffDup = db
+    .prepare("SELECT id FROM staff WHERE lower(employee_code) = lower(?)")
+    .get(username) as { id: string } | undefined;
+  if (staffDup) return { error: "Kode karyawan untuk username ini sudah ada" };
+
+  const tx = db.transaction(() => {
+    const staff = upsertStaff({
+      employeeCode: username,
+      name,
+      departmentId: input.departmentId,
+      position,
+      active: true,
+    });
+    const created = upsertUser({
+      username,
+      password: input.password,
+      role: input.role,
+      staffId: staff.id,
+      active: true,
+      allowedMenus: null,
+      departmentScope: [input.departmentId],
+      assessmentStaffIds: null,
+    });
+    if ("error" in created) {
+      throw new Error(created.error);
+    }
+    return created;
+  });
+
+  try {
+    tx();
+    return { username, name, role: input.role };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Gagal membuat user";
+    return { error: message };
+  }
 }
 
 export function deleteUser(

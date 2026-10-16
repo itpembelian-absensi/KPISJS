@@ -6,6 +6,7 @@ const PUBLIC = [
   "/api/auth/login",
   "/api/auth/logout",
   "/api/auth/forgot-password",
+  "/api/auth/signup",
 ];
 
 export function middleware(req: NextRequest) {

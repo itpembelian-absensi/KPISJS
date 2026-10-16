@@ -74,12 +74,19 @@ interface WaReportStats {
   uniqueDays: number;
 }
 
+interface ManagementContact {
+  name: string;
+  phone: string;
+  departmentId: string;
+}
+
 interface WaReportSummaryClientProps {
   initialFrom: string;
   initialTo: string;
   periodsFromData: string[];
   departments: Department[];
   lockedDepartmentId?: string | null;
+  managementContacts: ManagementContact[];
 }
 
 function formatDateIndo(dateStr: string): string {
@@ -131,12 +138,22 @@ function formatDateShort(dateStr: string): string {
   }
 }
 
+function toWhatsAppNumber(raw: string): string | null {
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length < 9) return null;
+  if (digits.startsWith("0")) return `62${digits.slice(1)}`;
+  if (digits.startsWith("62")) return digits;
+  if (digits.startsWith("8")) return `62${digits}`;
+  return digits;
+}
+
 export function WaReportSummaryClient({
   initialFrom,
   initialTo,
   periodsFromData,
   departments,
   lockedDepartmentId,
+  managementContacts,
 }: WaReportSummaryClientProps) {
   const [fromPeriod, setFromPeriod] = useState(initialFrom);
   const [toPeriod, setToPeriod] = useState(initialTo);
@@ -157,6 +174,11 @@ export function WaReportSummaryClient({
   const [stats, setStats] = useState<WaReportStats | null>(null);
   const [dailyStats, setDailyStats] = useState<WaReportStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sendingWa, setSendingWa] = useState(false);
+  const [sendNote, setSendNote] = useState<{
+    message: string;
+    links: Array<{ name: string; href: string }>;
+  } | null>(null);
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
   const [expandedUser, setExpandedUser] = useState<string | null>(null);
   const [photoModal, setPhotoModal] = useState<{
@@ -285,6 +307,98 @@ export function WaReportSummaryClient({
     if (departmentId !== "all") params.set("departmentId", departmentId);
     return `/api/kpi/wa-report-summary?${params.toString()}`;
   };
+
+  const managementTargets = useMemo(() => {
+    return managementContacts.flatMap((contact) => {
+      const phone = toWhatsAppNumber(contact.phone);
+      return phone ? [{ ...contact, wa: phone }] : [];
+    });
+  }, [managementContacts]);
+
+  async function sendDailyPdfToManagement() {
+    setSendNote(null);
+    if (managementTargets.length === 0) {
+      setSendNote({
+        message:
+          "Nomor telepon manajemen belum ada. Isi nomor HP pada data staf user yang rolenya Manager.",
+        links: [],
+      });
+      return;
+    }
+    setSendingWa(true);
+    try {
+      const params = new URLSearchParams({ format: "pdf", report: "daily" });
+      params.set("from", fromPeriod);
+      params.set("to", toPeriod);
+      params.set("dateFrom", dateFrom);
+      params.set("dateTo", dateTo);
+      if (departmentId !== "all") params.set("departmentId", departmentId);
+      const res = await fetch(`/api/kpi/wa-report-summary?${params.toString()}`);
+      if (!res.ok) {
+        setSendNote({
+          message: "Gagal menyiapkan PDF ringkasan per tanggal.",
+          links: [],
+        });
+        return;
+      }
+      const blob = await res.blob();
+      const filename = `laporan-bukti-wa-tanggal-${dateFrom}-sd-${dateTo}.pdf`;
+      const file = new File([blob], filename, { type: "application/pdf" });
+      const names = managementTargets
+        .map((c) => `${c.name} (${c.phone})`)
+        .join(", ");
+      const text = [
+        reportTitle,
+        `Dari tanggal: ${formatDateLong(dateFrom)}`,
+        `Sampai tanggal: ${formatDateLong(dateTo)}`,
+        `Departemen: ${departmentLabel}`,
+        `Dikirim ke: ${names}`,
+      ].join("\n");
+
+      const nav = navigator as Navigator & {
+        canShare?: (data: ShareData) => boolean;
+      };
+      if (nav.canShare?.({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: reportTitle, text });
+          setSendNote({
+            message: `PDF ringkasan per tanggal siap dikirim ke ${names}.`,
+            links: [],
+          });
+          return;
+        } catch (err) {
+          if (err instanceof DOMException && err.name === "AbortError") return;
+        }
+      }
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      const caption = `${text}\n\nLampirkan file PDF yang baru diunduh: ${filename}`;
+      const links = managementTargets.map((contact) => ({
+        name: `${contact.name} (${contact.phone})`,
+        href: `https://wa.me/${contact.wa}?text=${encodeURIComponent(caption)}`,
+      }));
+      window.open(links[0].href, "_blank", "noopener,noreferrer");
+      setSendNote({
+        message:
+          managementTargets.length === 1
+            ? `PDF diunduh. Chat WhatsApp ${managementTargets[0].name} dibuka — lampirkan file tersebut.`
+            : `PDF diunduh. Chat WhatsApp ${managementTargets[0].name} dibuka. Buka chat nomor manajemen lain di bawah, lalu lampirkan file yang sama.`,
+        links,
+      });
+    } catch {
+      setSendNote({
+        message: "Pengiriman dibatalkan atau gagal. Coba lagi.",
+        links: [],
+      });
+    } finally {
+      setSendingWa(false);
+    }
+  }
 
   const changeFrom = (value: string) => {
     setFromPeriod(value);
@@ -454,8 +568,38 @@ export function WaReportSummaryClient({
           >
             PDF
           </a>
+          {view === "daily" ? (
+            <button
+              type="button"
+              onClick={() => void sendDailyPdfToManagement()}
+              disabled={sendingWa}
+              className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+            >
+              {sendingWa ? "Menyiapkan PDF..." : "Kirim ke Manajemen"}
+            </button>
+          ) : null}
         </div>
       </div>
+      {sendNote ? (
+        <div className="space-y-2 print:hidden">
+          <p className="text-sm text-ink-muted">{sendNote.message}</p>
+          {sendNote.links.length > 1 ? (
+            <div className="flex flex-wrap gap-2">
+              {sendNote.links.map((link) => (
+                <a
+                  key={link.href}
+                  href={link.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-lg border border-line bg-bg-elevated px-3 py-1.5 text-sm font-medium"
+                >
+                  WhatsApp {link.name}
+                </a>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* Stats */}
       {activeStats && (

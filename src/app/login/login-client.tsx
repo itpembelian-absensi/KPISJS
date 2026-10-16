@@ -86,7 +86,7 @@ function LoginForm({
           {appTitle}
         </h1>
         <p className="mt-2 text-sm text-ink-muted">
-          Masuk dengan akun yang diberikan Administrator.
+          Masuk dengan akun Anda, atau daftar jika belum punya username.
         </p>
 
         <form onSubmit={onSubmit} className="mt-6 space-y-4">
@@ -136,6 +136,13 @@ function LoginForm({
               className="font-medium text-brand hover:underline"
             >
               Lupa password?
+            </a>
+            <span className="mx-2 text-ink-muted">·</span>
+            <a
+              href="/login/signup"
+              className="font-medium text-brand hover:underline"
+            >
+              Daftar
             </a>
           </p>
         </form>

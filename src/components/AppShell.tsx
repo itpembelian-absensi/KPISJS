@@ -294,7 +294,8 @@ export function AppShell({
   appTagline?: string;
 }) {
   const pathname = usePathname();
-  const isLogin = pathname === "/login";
+  const isLogin =
+    pathname === "/login" || pathname.startsWith("/login/");
 
   const nav = user ? navForUser(user) : [];
   const flat = flattenNav(nav);
