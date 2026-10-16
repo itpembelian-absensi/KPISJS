@@ -238,6 +238,10 @@ export interface KpiWaReport {
   departmentId: string;
   userId: string;
   userName: string;
+  username?: string;
+  creatorRole?: string;
+  creatorDepartmentId?: string | null;
+  creatorStaffId?: string | null;
   activityId: string | null;
   projectId: string | null;
   title: string;

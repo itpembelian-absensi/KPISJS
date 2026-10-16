@@ -12,6 +12,7 @@ import {
   type NavItem,
 } from "@/lib/auth";
 import { CompanyLogo } from "@/components/CompanyLogo";
+import { ChangePasswordModal } from "@/components/ChangePasswordModal";
 import { DEFAULT_APP_TITLE, DEFAULT_APP_TAGLINE } from "@/lib/branding-types";
 import { ROLE_LABEL, type SessionUser } from "@/lib/types";
 
@@ -301,6 +302,7 @@ export function AppShell({
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -396,11 +398,25 @@ export function AppShell({
         </div>
 
         <div className="mb-4 rounded-xl bg-brand-soft px-3 py-2.5">
-          <p className="text-sm font-medium text-ink md:text-[15px]">{user.name}</p>
-          <p className="text-xs text-ink-muted md:text-[13px]">
+          <p className="text-sm font-medium text-ink md:text-[15px] truncate">{user.name}</p>
+          <p className="text-xs text-ink-muted md:text-[13px] truncate">
             {ROLE_LABEL[user.role]}
             {user.departmentName ? ` · ${user.departmentName}` : ""}
           </p>
+          <div className="mt-2.5 flex items-center justify-between border-t border-brand/20 pt-2 text-xs">
+            <span className="mono text-[11px] text-ink-muted">@{user.username}</span>
+            <button
+              type="button"
+              onClick={() => setChangePasswordOpen(true)}
+              className="inline-flex items-center gap-1 font-semibold text-brand-deep hover:underline cursor-pointer"
+              title="Ganti password akun Anda"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+              </svg>
+              Ganti Password
+            </button>
+          </div>
         </div>
 
         <SidebarNav
@@ -411,13 +427,26 @@ export function AppShell({
           toggleGroup={toggleGroup}
         />
 
-        <button
-          type="button"
-          onClick={logout}
-          className="mt-4 shrink-0 rounded-xl border border-line px-3 py-2 text-sm text-ink-muted hover:bg-bg"
-        >
-          Keluar
-        </button>
+        <div className="mt-4 flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => setChangePasswordOpen(true)}
+            className="flex-1 rounded-xl border border-line px-3 py-2 text-xs font-semibold text-ink-muted hover:bg-bg hover:text-ink flex items-center justify-center gap-1.5 cursor-pointer"
+            title="Ganti password akun Anda"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+            </svg>
+            Password
+          </button>
+          <button
+            type="button"
+            onClick={logout}
+            className="flex-1 rounded-xl border border-line px-3 py-2 text-xs font-semibold text-ink-muted hover:bg-bg hover:text-ink cursor-pointer"
+          >
+            Keluar
+          </button>
+        </div>
       </aside>
 
       {/* Mobile drawer */}
@@ -449,11 +478,28 @@ export function AppShell({
             </div>
 
             <div className="mb-4 rounded-xl bg-brand-soft px-3 py-2.5">
-              <p className="text-sm font-medium text-ink">{user.name}</p>
-              <p className="text-xs text-ink-muted">
+              <p className="text-sm font-medium text-ink truncate">{user.name}</p>
+              <p className="text-xs text-ink-muted truncate">
                 {ROLE_LABEL[user.role]}
                 {user.departmentName ? ` · ${user.departmentName}` : ""}
               </p>
+              <div className="mt-2.5 flex items-center justify-between border-t border-brand/20 pt-2 text-xs">
+                <span className="mono text-[11px] text-ink-muted">@{user.username}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setChangePasswordOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1 font-semibold text-brand-deep hover:underline cursor-pointer"
+                  title="Ganti password akun Anda"
+                >
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                  </svg>
+                  Ganti Password
+                </button>
+              </div>
             </div>
 
             <SidebarNav
@@ -465,13 +511,28 @@ export function AppShell({
               onNavigate={() => setMenuOpen(false)}
             />
 
-            <button
-              type="button"
-              onClick={logout}
-              className="mt-4 shrink-0 rounded-xl border border-line px-3 py-2.5 text-sm text-ink-muted"
-            >
-              Keluar
-            </button>
+            <div className="mt-4 flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setChangePasswordOpen(true);
+                }}
+                className="flex-1 rounded-xl border border-line px-3 py-2 text-xs font-semibold text-ink-muted flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                </svg>
+                Password
+              </button>
+              <button
+                type="button"
+                onClick={logout}
+                className="flex-1 rounded-xl border border-line px-3 py-2.5 text-xs font-semibold text-ink-muted cursor-pointer"
+              >
+                Keluar
+              </button>
+            </div>
           </aside>
         </div>
       ) : null}
@@ -508,8 +569,19 @@ export function AppShell({
             ) : null}
             <button
               type="button"
+              onClick={() => setChangePasswordOpen(true)}
+              className="shrink-0 rounded-lg border border-line p-2 text-xs text-ink-muted hover:text-ink cursor-pointer"
+              title="Ganti Password"
+              aria-label="Ganti Password"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+              </svg>
+            </button>
+            <button
+              type="button"
               onClick={logout}
-              className="shrink-0 rounded-lg border border-line px-3 py-2 text-xs text-ink-muted"
+              className="shrink-0 rounded-lg border border-line px-3 py-2 text-xs text-ink-muted cursor-pointer"
             >
               Keluar
             </button>
@@ -518,6 +590,12 @@ export function AppShell({
 
         <main className="min-w-0 flex-1 pb-8">{children}</main>
       </div>
+
+      <ChangePasswordModal
+        isOpen={changePasswordOpen}
+        onClose={() => setChangePasswordOpen(false)}
+        user={user}
+      />
     </div>
   );
 }

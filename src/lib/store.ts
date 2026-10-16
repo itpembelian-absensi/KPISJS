@@ -1620,6 +1620,48 @@ export function rejectPasswordResetRequest(
   return { ok: true };
 }
 
+export function changeUserPassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string,
+): { ok: true } | { error: string } {
+  ensureDb();
+  if (!userId) return { error: "User tidak valid" };
+  if (!currentPassword) return { error: "Password saat ini wajib diisi" };
+  if (!newPassword) return { error: "Password baru wajib diisi" };
+  if (newPassword.length < 6) {
+    return { error: "Password baru minimal 6 karakter" };
+  }
+  if (currentPassword === newPassword) {
+    return { error: "Password baru tidak boleh sama dengan password saat ini" };
+  }
+
+  const row = getDb()
+    .prepare("SELECT * FROM users WHERE id = ?")
+    .get(userId) as UserRow | undefined;
+  if (!row) return { error: "User tidak ditemukan" };
+  if (!intToBool(row.active)) return { error: "Akun user tidak aktif" };
+
+  if (!verifyPassword(currentPassword, row.password_hash)) {
+    return { error: "Password saat ini salah" };
+  }
+
+  const newHash = hashPassword(newPassword);
+  const now = new Date().toISOString();
+
+  getDb()
+    .prepare(
+      `UPDATE users
+       SET password_hash = ?, updated_at = ?
+       WHERE id = ?`,
+    )
+    .run(newHash, now, userId);
+
+  completePendingPasswordResets(userId, userId);
+
+  return { ok: true };
+}
+
 export function logout(token: string | undefined) {
   if (!token) return;
   ensureDb();

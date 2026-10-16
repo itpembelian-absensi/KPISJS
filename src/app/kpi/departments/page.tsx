@@ -105,7 +105,7 @@ export default async function DepartmentKpiPage() {
             staffLimited ? listKpiActivities(deptId) : listKpiActivities()
           }
           initialWaReports={
-            staffLimited ? listKpiWaReports(deptId) : listKpiWaReports()
+            listKpiWaReports(staffLimited ? deptId : undefined, undefined, user)
           }
           assessments={staffLimited ? [] : listKpiAssessments()}
           disciplineSummaries={
@@ -121,10 +121,13 @@ export default async function DepartmentKpiPage() {
           assessorName={user.name}
           sessionUser={{
             id: user.id,
+            username: user.username,
             name: user.name,
             role: user.role,
             departmentId: user.departmentId,
             staffId: user.staffId,
+            departmentScope: user.departmentScope,
+            assessmentStaffIds: user.assessmentStaffIds,
           }}
           staffLimited={staffLimited}
           managerStaffIds={managerStaffIds}

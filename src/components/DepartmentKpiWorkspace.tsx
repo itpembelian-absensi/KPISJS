@@ -259,10 +259,13 @@ export function DepartmentKpiWorkspace({
   assessorName: string;
   sessionUser?: {
     id: string;
+    username?: string;
     name: string;
     role: string;
     departmentId: string | null;
     staffId?: string | null;
+    departmentScope?: string[] | null;
+    assessmentStaffIds?: string[] | null;
   };
   /** Staf: hanya project & kegiatan, dept terkunci */
   staffLimited?: boolean;

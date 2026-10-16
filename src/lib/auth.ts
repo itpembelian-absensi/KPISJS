@@ -394,6 +394,12 @@ export const NAV_ENTRIES: NavEntry[] = [
           hint: "Rumus & fungsi KPI per departemen",
           roles: ["admin", "manager", "staff", "it_staff", "assessor"],
         },
+        {
+          href: "/kpi/wa-report-summary",
+          label: "Laporan Bukti WA",
+          hint: "Detail bukti lapor WhatsApp per hari per user",
+          roles: ["admin", "manager", "it_staff"],
+        },
       ],
     },
   },
@@ -630,6 +636,9 @@ export function navForUser(user: SessionUser): NavEntry[] {
 }
 
 export function canAccessMenu(user: SessionUser, href: string): boolean {
+  if (href === "/change-password" || href.startsWith("/change-password/")) {
+    return true;
+  }
   const allow = effectiveMenuHrefs(user);
   return allow.some(
     (h) => href === h || (h !== "/" && href.startsWith(`${h}/`)),
@@ -669,4 +678,86 @@ export function canAccessDepartment(
 
 export function publicUser(user: SessionUser) {
   return user;
+}
+
+/**
+ * Hak akses melihat bukti laporan WhatsApp:
+ * - Admin & IT Staff: bisa melihat semua bukti laporan WhatsApp dari seluruh staf dan departemen.
+ * - Manager: HANYA bisa melihat bawahannya saja (staf di departemennya atau staf di assessmentStaffIds) serta laporan miliknya sendiri.
+ * - Staf: hanya bisa melihat bukti laporan yang dibuat oleh dirinya sendiri.
+ */
+export function canUserSeeWaReport(
+  user: {
+    id: string;
+    username?: string;
+    role: string;
+    departmentId?: string | null;
+    departmentScope?: string[] | null;
+    assessmentStaffIds?: string[] | null;
+  },
+  report: {
+    userId: string;
+    username?: string;
+    departmentId: string;
+    creatorRole?: string;
+    creatorDepartmentId?: string | null;
+    creatorStaffId?: string | null;
+  },
+): boolean {
+  // Laporan milik sendiri selalu boleh dilihat
+  if (
+    (user.id && report.userId === user.id) ||
+    (user.username &&
+      report.username &&
+      user.username.trim().toLowerCase() === report.username.trim().toLowerCase())
+  ) {
+    return true;
+  }
+
+  // Admin & IT Staff: bisa melihat SEMUA bukti laporan WhatsApp
+  if (user.role === "admin" || user.role === "it_staff") {
+    return true;
+  }
+
+  // Manager: HANYA bisa melihat bawahannya saja
+  if (user.role === "manager") {
+    // Admin, IT Staff, dan Manager lain BUKAN bawahan
+    if (
+      report.creatorRole === "admin" ||
+      report.creatorRole === "it_staff" ||
+      report.creatorRole === "manager"
+    ) {
+      return false;
+    }
+
+    // Jika pembuat laporan terdaftar di assessmentStaffIds (staf lintas departemen yang dinilai/dibawahi)
+    if (
+      report.creatorStaffId &&
+      (user.assessmentStaffIds ?? []).includes(report.creatorStaffId)
+    ) {
+      return true;
+    }
+
+    // Cek scope departemen manager
+    let scope: "all" | string[] = "all";
+    if (user.departmentScope != null) {
+      scope = user.departmentScope.includes("*") ? "all" : user.departmentScope;
+    } else if (user.departmentId) {
+      scope = [user.departmentId];
+    } else {
+      scope = "all";
+    }
+
+    if (scope === "all") {
+      // Jika General Manager (scope all): membawahi semua staf biasa
+      return true;
+    }
+
+    // Manager departemen: membawahi staf di departemennya
+    const targetDeptId = report.creatorDepartmentId || report.departmentId;
+    return scope.includes(targetDeptId);
+  }
+
+  // Staf biasa: hanya melihat laporan miliknya sendiri
+  return false;
 }

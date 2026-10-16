@@ -4,13 +4,18 @@ import {
   deleteWaReportPhotoFiles,
   deleteWaReportUploadFolder,
 } from "./wa-report-photos";
-import type { KpiWaReport } from "./types";
+import type { KpiWaReport, SessionUser } from "./types";
+import { canUserSeeWaReport } from "./auth";
 
 type WaReportRow = {
   id: string;
   department_id: string;
   user_id: string;
   user_name: string;
+  username?: string | null;
+  creator_role?: string | null;
+  creator_staff_id?: string | null;
+  creator_department_id?: string | null;
   activity_id: string | null;
   project_id: string | null;
   title: string;
@@ -37,6 +42,10 @@ function mapWaReport(row: WaReportRow): KpiWaReport {
     departmentId: row.department_id,
     userId: row.user_id,
     userName: row.user_name || "",
+    username: row.username || "",
+    creatorRole: row.creator_role || undefined,
+    creatorDepartmentId: row.creator_department_id || null,
+    creatorStaffId: row.creator_staff_id || null,
     activityId: row.activity_id ?? null,
     projectId: row.project_id ?? null,
     title: row.title,
@@ -55,29 +64,65 @@ function mapWaReport(row: WaReportRow): KpiWaReport {
 export function listKpiWaReports(
   departmentId?: string,
   activityId?: string,
+  user?: SessionUser,
 ): KpiWaReport[] {
   const db = getDb();
-  let sql = "SELECT * FROM kpi_wa_reports WHERE 1=1";
+  let sql = `
+    SELECT
+      r.*,
+      u.role as creator_role,
+      u.staff_id as creator_staff_id,
+      s.department_id as creator_department_id
+    FROM kpi_wa_reports r
+    LEFT JOIN users u ON r.user_id = u.id
+    LEFT JOIN staff s ON u.staff_id = s.id
+    WHERE 1=1
+  `;
   const params: unknown[] = [];
 
   if (departmentId) {
-    sql += " AND department_id = ?";
+    sql += " AND r.department_id = ?";
     params.push(departmentId);
   }
   if (activityId) {
-    sql += " AND activity_id = ?";
+    sql += " AND r.activity_id = ?";
     params.push(activityId);
   }
 
-  sql += " ORDER BY report_date DESC, created_at DESC";
+  sql += " ORDER BY r.report_date DESC, r.created_at DESC";
   const rows = db.prepare(sql).all(...params) as WaReportRow[];
-  return rows.map(mapWaReport);
+  let reports = rows.map(mapWaReport);
+
+  if (user) {
+    reports = reports.filter((r) =>
+      canUserSeeWaReport(user, {
+        userId: r.userId,
+        username: r.username,
+        departmentId: r.departmentId,
+        creatorRole: r.creatorRole,
+        creatorDepartmentId: r.creatorDepartmentId,
+        creatorStaffId: r.creatorStaffId,
+      }),
+    );
+  }
+
+  return reports;
 }
 
 export function getKpiWaReport(id: string): KpiWaReport | null {
   const db = getDb();
   const row = db
-    .prepare("SELECT * FROM kpi_wa_reports WHERE id = ?")
+    .prepare(`
+      SELECT
+        r.*,
+        u.role as creator_role,
+        u.staff_id as creator_staff_id,
+        s.department_id as creator_department_id
+      FROM kpi_wa_reports r
+      LEFT JOIN users u ON r.user_id = u.id
+      LEFT JOIN staff s ON u.staff_id = s.id
+      WHERE r.id = ?
+    `)
     .get(id) as WaReportRow | undefined;
   return row ? mapWaReport(row) : null;
 }
@@ -87,6 +132,7 @@ export function upsertKpiWaReport(input: {
   departmentId: string;
   userId: string;
   userName?: string;
+  username?: string;
   activityId?: string | null;
   projectId?: string | null;
   title: string;
@@ -99,8 +145,7 @@ export function upsertKpiWaReport(input: {
   const db = getDb();
   const title = (input.title || "").trim();
   if (!title) return { error: "Perihal / judul laporan wajib diisi" };
-  const leaderName = (input.leaderName || "").trim();
-  if (!leaderName) return { error: "Nama pimpinan penerima laporan wajib diisi" };
+  const leaderName = (input.leaderName || "").trim() || "Adytirta Widjaja";
   if (!input.departmentId) return { error: "Departemen wajib dipilih" };
 
   const now = new Date().toISOString();
@@ -131,6 +176,7 @@ export function upsertKpiWaReport(input: {
         notes = ?,
         photo_urls_json = ?,
         status = ?,
+        username = ?,
         updated_at = ?
       WHERE id = ?`,
     ).run(
@@ -143,6 +189,7 @@ export function upsertKpiWaReport(input: {
       input.notes !== undefined ? input.notes : existing.notes,
       photoUrls,
       input.status || existing.status || "reported",
+      input.username !== undefined ? input.username : (existing.username || ""),
       now,
       existing.id,
     );
@@ -160,15 +207,16 @@ export function upsertKpiWaReport(input: {
 
   db.prepare(
     `INSERT INTO kpi_wa_reports (
-      id, department_id, user_id, user_name, activity_id, project_id,
+      id, department_id, user_id, user_name, username, activity_id, project_id,
       title, leader_name, report_date, notes, photo_urls_json, status,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     input.departmentId,
     input.userId,
     input.userName || "",
+    input.username || "",
     input.activityId ?? null,
     input.projectId ?? null,
     title,

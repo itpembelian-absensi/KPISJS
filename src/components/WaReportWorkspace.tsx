@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Department, KpiActivity, KpiProject, KpiWaReport, StaffMember } from "@/lib/types";
+import { canUserSeeWaReport } from "@/lib/auth";
 
 interface WaReportWorkspaceProps {
   departmentId: string;
@@ -13,10 +14,13 @@ interface WaReportWorkspaceProps {
   managerStaffIds?: string[];
   sessionUser?: {
     id: string;
+    username?: string;
     name: string;
     role: string;
     departmentId: string | null;
     staffId?: string | null;
+    departmentScope?: string[] | null;
+    assessmentStaffIds?: string[] | null;
   };
   reports: KpiWaReport[];
   onReportsChange: (reports: KpiWaReport[]) => void;
@@ -75,13 +79,22 @@ export function WaReportWorkspace({
 
   // Form Fields
   const [title, setTitle] = useState("");
-  const [leaderName, setLeaderName] = useState("");
+  const [leaderName, setLeaderName] = useState("Adytirta Widjaja");
   const [reportDate, setReportDate] = useState(getLocalDatetimeNow());
+  const defaultUsername = sessionUser?.username || sessionUser?.name || "";
+  const [reporterUsername, setReporterUsername] = useState(defaultUsername);
   const [notes, setNotes] = useState("");
   const [activityId, setActivityId] = useState<string>("");
   const [projectId, setProjectId] = useState<string>("");
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
+
+  // Sync username saat sessionUser berubah
+  useEffect(() => {
+    if (!editingReport && sessionUser?.username) {
+      setReporterUsername(sessionUser.username);
+    }
+  }, [sessionUser?.username, editingReport]);
 
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState("");
@@ -109,20 +122,17 @@ export function WaReportWorkspace({
     [projects, departmentId],
   );
 
-  // Suggestion names for leader (managers in the department or manager roles)
+  // Suggestion names for leader (Pimpinan utama: Adytirta Widjaja, diikuti managers)
   const suggestedLeaders = useMemo(() => {
-    const list: string[] = [];
+    const list: string[] = ["Adytirta Widjaja"];
     // 1. Staff who are managers
     staff
       .filter((s) => managerStaffIds.includes(s.id) || s.departmentId === departmentId)
       .forEach((s) => {
-        if (!list.includes(s.name)) list.push(s.name);
+        const cleanName = s.name.includes("Adytirta") ? "Adytirta Widjaja" : s.name;
+        if (!list.includes(cleanName)) list.push(cleanName);
       });
-    // Add common generic fallbacks if not present
-    if (list.length === 0) {
-      list.push("Manager IT", "Direktur Operasional", "General Manager");
-    }
-    return list.slice(0, 5);
+    return list.slice(0, 6);
   }, [staff, managerStaffIds, departmentId]);
 
   // Handle preselectedActivityId
@@ -142,7 +152,8 @@ export function WaReportWorkspace({
   // Open Form for New Report
   const openNewForm = () => {
     setEditingReport(null);
-    const defaultLeader = suggestedLeaders[0] || "Pimpinan";
+    setReporterUsername(sessionUser?.username || sessionUser?.name || "");
+    const defaultLeader = "Adytirta Widjaja";
     setLeaderName(defaultLeader);
     setTitle("Laporan WhatsApp ke Pimpinan");
     setReportDate(getLocalDatetimeNow());
@@ -158,6 +169,7 @@ export function WaReportWorkspace({
   // Open Form for Edit Report
   const openEditForm = (report: KpiWaReport) => {
     setEditingReport(report);
+    setReporterUsername(report.username || report.userName || sessionUser?.username || "");
     setTitle(report.title);
     setLeaderName(report.leaderName);
     try {
@@ -262,7 +274,7 @@ export function WaReportWorkspace({
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
-    const finalLeader = leaderName.trim() || suggestedLeaders[0] || "Pimpinan";
+    const finalLeader = leaderName.trim() || "Adytirta Widjaja";
     const finalTitle =
       title.trim() ||
       (activityId
@@ -296,6 +308,9 @@ export function WaReportWorkspace({
       formData.append("title", finalTitle);
       formData.append("leaderName", finalLeader);
       formData.append("reportDate", reportDate);
+      if (reporterUsername) {
+        formData.append("username", reporterUsername);
+      }
       formData.append("notes", notes.trim());
       if (activityId) formData.append("activityId", activityId);
       if (projectId) formData.append("projectId", projectId);
@@ -409,10 +424,17 @@ export function WaReportWorkspace({
     }
   };
 
-  // Filtered reports
+  // Filtered reports: Admin melihat semua, Manager HANYA melihat bawahannya & laporannya sendiri
   const deptReports = useMemo(
-    () => reports.filter((r) => r.departmentId === departmentId),
-    [reports, departmentId],
+    () =>
+      reports.filter((r) => {
+        if (r.departmentId !== departmentId) return false;
+        if (sessionUser) {
+          return canUserSeeWaReport(sessionUser, r);
+        }
+        return true;
+      }),
+    [reports, departmentId, sessionUser],
   );
 
   const filteredReports = useMemo(() => {
@@ -473,22 +495,37 @@ export function WaReportWorkspace({
       <div className="relative overflow-hidden rounded-2xl border border-emerald-600/25 bg-gradient-to-br from-emerald-500/10 via-emerald-600/5 to-teal-500/10 p-5 shadow-sm dark:border-emerald-500/20">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-1">
-            <div className="inline-flex items-center gap-2 rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-600/30 dark:bg-emerald-500/20 dark:text-emerald-300">
-              {/* WhatsApp Icon */}
-              <svg
-                className="h-3.5 w-3.5 fill-current"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
-              </svg>
-              Pelaporan Resmi ke Pimpinan
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex items-center gap-2 rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-600/30 dark:bg-emerald-500/20 dark:text-emerald-300">
+                {/* WhatsApp Icon */}
+                <svg
+                  className="h-3.5 w-3.5 fill-current"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+                </svg>
+                Pelaporan Resmi ke Pimpinan
+              </div>
+              {sessionUser?.role === "admin" || sessionUser?.role === "it_staff" ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/15 px-2.5 py-1 text-[11px] font-semibold text-blue-700 ring-1 ring-blue-600/30 dark:text-blue-300">
+                  Mode Admin: Semua Laporan
+                </span>
+              ) : sessionUser?.role === "manager" ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-1 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-600/30 dark:text-amber-300">
+                  Mode Manager: Laporan Staf Bawahan
+                </span>
+              ) : null}
             </div>
             <h2 className="text-xl font-bold tracking-tight text-ink sm:text-2xl">
               Bukti Lapor WhatsApp — {currentDept?.code || "Departemen"}
             </h2>
             <p className="max-w-2xl text-xs text-ink-muted sm:text-sm">
-              Upload foto screenshot chat WhatsApp sebagai verifikasi dan arsip bahwa pekerjaan/kegiatan operasional telah dilaporkan kepada pimpinan/atasan.
+              {sessionUser?.role === "admin" || sessionUser?.role === "it_staff"
+                ? "Menampilkan semua bukti laporan WhatsApp dari seluruh staf dan departemen."
+                : sessionUser?.role === "manager"
+                ? "Menampilkan bukti laporan dari staf bawahan Anda di departemen ini serta laporan Anda sendiri."
+                : "Upload foto screenshot chat WhatsApp sebagai verifikasi dan arsip bahwa pekerjaan/kegiatan operasional telah dilaporkan kepada pimpinan/atasan."}
             </p>
           </div>
 
@@ -701,7 +738,21 @@ export function WaReportWorkspace({
                       </svg>
                       {formatDateTimeIndo(report.reportDate)}
                     </span>
-                    <span>oleh {report.userName || "Staf"}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate">
+                        oleh {report.userName || report.username || "Staf"}
+                        {report.username && report.username !== report.userName ? ` (@${report.username})` : ""}
+                      </span>
+                      {sessionUser && (report.userId === sessionUser.id || report.username === sessionUser.username) ? (
+                        <span className="rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700 dark:text-emerald-300 shrink-0">
+                          Saya
+                        </span>
+                      ) : sessionUser?.role === "manager" && report.creatorRole === "staff" ? (
+                        <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700 dark:text-amber-300 shrink-0">
+                          Bawahan
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
 
                   <h4 className="mt-2 text-sm font-semibold text-ink line-clamp-2">
@@ -893,7 +944,7 @@ export function WaReportWorkspace({
                     />
                   </div>
 
-                  {/* Nama Pimpinan & Tanggal Lapor */}
+                  {/* Nama Pimpinan & Tanggal Lapor & Username Pelapor */}
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div>
                       <label className="block text-xs font-semibold text-ink">
@@ -901,7 +952,7 @@ export function WaReportWorkspace({
                       </label>
                       <input
                         type="text"
-                        placeholder="Nama atasan / pimpinan"
+                        placeholder="Contoh: Adytirta Widjaja"
                         value={leaderName}
                         onChange={(e) => setLeaderName(e.target.value)}
                         className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2 text-xs sm:text-sm focus:border-emerald-500 focus:outline-hidden"
@@ -923,16 +974,42 @@ export function WaReportWorkspace({
                       ) : null}
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-semibold text-ink">
-                        Tanggal & Waktu Lapor
-                      </label>
-                      <input
-                        type="datetime-local"
-                        value={reportDate}
-                        onChange={(e) => setReportDate(e.target.value)}
-                        className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2 text-xs sm:text-sm focus:border-emerald-500 focus:outline-hidden"
-                      />
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-ink">
+                          Tanggal & Waktu Lapor
+                        </label>
+                        <input
+                          type="datetime-local"
+                          value={reportDate}
+                          onChange={(e) => setReportDate(e.target.value)}
+                          className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2 text-xs sm:text-sm focus:border-emerald-500 focus:outline-hidden"
+                        />
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <label className="block text-xs font-semibold text-ink">
+                            Username Pelapor
+                          </label>
+                          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                            </svg>
+                            User Login
+                          </span>
+                        </div>
+                        <input
+                          type="text"
+                          value={reporterUsername}
+                          readOnly
+                          className="mt-1 w-full rounded-xl border border-line bg-bg-elevated/60 px-3 py-2 text-xs sm:text-sm text-ink-muted cursor-not-allowed select-none focus:outline-hidden"
+                          title="Username akun yang sedang login (terisi otomatis)"
+                        />
+                        <p className="mt-0.5 text-[10px] text-ink-muted">
+                          Otomatis terisi dari username akun yang sedang login.
+                        </p>
+                      </div>
                     </div>
                   </div>
 

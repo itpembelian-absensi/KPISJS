@@ -824,6 +824,27 @@ function createSchema(db: Database.Database) {
       PRIMARY KEY (jenis_code, period)
     );
   `);
+
+  // Migrasi: tambah kolom username ke tabel kpi_wa_reports
+  const waCols = db
+    .prepare("PRAGMA table_info(kpi_wa_reports)")
+    .all() as Array<{ name: string }>;
+  const waNames = new Set(waCols.map((col) => col.name));
+  if (!waNames.has("username")) {
+    db.exec("ALTER TABLE kpi_wa_reports ADD COLUMN username TEXT NOT NULL DEFAULT ''");
+    try {
+      db.exec(`
+        UPDATE kpi_wa_reports
+        SET username = COALESCE(
+          (SELECT username FROM users WHERE users.id = kpi_wa_reports.user_id),
+          ''
+        )
+        WHERE username = '' OR username IS NULL
+      `);
+    } catch {
+      /* ignore backfill error */
+    }
+  }
 }
 
 export function getDb(): Database.Database {

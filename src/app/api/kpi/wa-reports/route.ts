@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import {
   canAccessDepartment,
+  canUserSeeWaReport,
   canViewDepartmentKpi,
   getEffectiveDepartmentScope,
   isStaffDeptKpiLimited,
@@ -69,7 +70,7 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json({
-    reports: listKpiWaReports(departmentId, activityId),
+    reports: listKpiWaReports(departmentId, activityId, gate.user),
   });
 }
 
@@ -103,7 +104,7 @@ export async function POST(req: NextRequest) {
       }
 
       if (!leaderName) {
-        leaderName = "Pimpinan";
+        leaderName = "Adytirta Widjaja";
       }
 
       if (!title) {
@@ -138,9 +139,10 @@ export async function POST(req: NextRequest) {
       }
 
       // If updating, merge with existing photo urls
+      let existing: ReturnType<typeof getKpiWaReport> = null;
       let finalPhotoUrls: string[] | undefined = undefined;
       if (id) {
-        const existing = getKpiWaReport(id);
+        existing = getKpiWaReport(id);
         if (!existing) {
           deleteWaReportPhotoFiles(uploadedUrls);
           return NextResponse.json(
@@ -148,16 +150,26 @@ export async function POST(req: NextRequest) {
             { status: 404 },
           );
         }
+        if (!canUserSeeWaReport(gate.user, existing)) {
+          deleteWaReportPhotoFiles(uploadedUrls);
+          return NextResponse.json(
+            { error: "Tidak memiliki hak akses untuk mengubah laporan ini" },
+            { status: 403 },
+          );
+        }
         finalPhotoUrls = [...existing.photoUrls, ...uploadedUrls];
       } else {
         finalPhotoUrls = uploadedUrls;
       }
 
+      const formUsername = String(form.get("username") || "").trim();
+
       const result = upsertKpiWaReport({
         id: targetId,
         departmentId,
-        userId: gate.user.id,
-        userName: gate.user.name,
+        userId: existing ? existing.userId : gate.user.id,
+        userName: existing ? existing.userName : gate.user.name,
+        username: existing ? (existing.username || formUsername || gate.user.username) : (formUsername || gate.user.username),
         activityId,
         projectId,
         title,
@@ -189,6 +201,13 @@ export async function POST(req: NextRequest) {
       const denied = assertDeptAccess(gate.user, existing.departmentId);
       if (denied) return denied;
 
+      if (!canUserSeeWaReport(gate.user, existing)) {
+        return NextResponse.json(
+          { error: "Tidak memiliki hak akses untuk menghapus laporan ini" },
+          { status: 403 },
+        );
+      }
+
       const result = deleteKpiWaReport(existing.id);
       if ("error" in result) {
         return NextResponse.json({ error: result.error }, { status: 400 });
@@ -207,11 +226,15 @@ export async function POST(req: NextRequest) {
     const denied = assertDeptAccess(gate.user, departmentId);
     if (denied) return denied;
 
+    const existing = body.id ? getKpiWaReport(String(body.id)) : null;
+    const bodyUsername = String(body.username || "").trim();
+
     const result = upsertKpiWaReport({
       id: body.id,
       departmentId,
-      userId: gate.user.id,
-      userName: gate.user.name,
+      userId: existing ? existing.userId : gate.user.id,
+      userName: existing ? existing.userName : gate.user.name,
+      username: existing ? (existing.username || bodyUsername || gate.user.username) : (bodyUsername || gate.user.username),
       activityId: body.activityId || null,
       projectId: body.projectId || null,
       title: String(body.title),
