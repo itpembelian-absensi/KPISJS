@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import type { Department, KpiActivity, KpiProject, KpiWaReport, StaffMember } from "@/lib/types";
 import { canUserSeeWaReport } from "@/lib/auth";
@@ -89,6 +90,28 @@ export function WaReportWorkspace({
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
 
+  // Lightbox Modal
+  const [activeLightbox, setActiveLightbox] = useState<{
+    report: KpiWaReport;
+    photoIndex: number;
+  } | null>(null);
+
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Lock body scroll saat modal form atau lightbox terbuka (terutama di smartphone)
+  useEffect(() => {
+    if (showFormModal || activeLightbox) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
+    }
+  }, [showFormModal, activeLightbox]);
+
   // Sync username saat sessionUser berubah
   useEffect(() => {
     if (!editingReport && sessionUser?.username) {
@@ -100,12 +123,6 @@ export function WaReportWorkspace({
   const [searchQuery, setSearchQuery] = useState("");
   const [filterActivity, setFilterActivity] = useState<string>("all");
   const [filterPeriod, setFilterPeriod] = useState<"all" | "today" | "this_month">("all");
-
-  // Lightbox Modal
-  const [activeLightbox, setActiveLightbox] = useState<{
-    report: KpiWaReport;
-    photoIndex: number;
-  } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const formModalRef = useRef<HTMLDivElement>(null);
@@ -835,49 +852,48 @@ export function WaReportWorkspace({
       )}
 
       {/* Form Modal (Create / Edit) */}
-      {showFormModal ? (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          {/* Backdrop (Dark overlay with blur) */}
-          <div
-            className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
-            onClick={() => !isSubmitting && setShowFormModal(false)}
-          />
+      {showFormModal && mounted && typeof document !== "undefined"
+        ? createPortal(
+            <div className="fixed inset-0 z-[9999] flex flex-col sm:items-center sm:justify-center sm:p-4 overflow-hidden">
+              {/* Backdrop (Dark overlay with blur) */}
+              <div
+                className="fixed inset-0 bg-black/70 backdrop-blur-xs transition-opacity"
+                onClick={() => !isSubmitting && setShowFormModal(false)}
+              />
 
-          {/* Centering shell (handles desktop centering, small-screen safety, full scrollability) */}
-          <div className="flex min-h-full items-center justify-center p-3 sm:p-5 pointer-events-none">
-            <div
-              ref={formModalRef}
-              className="pointer-events-auto relative z-10 flex flex-col w-full max-w-xl my-auto rounded-2xl border border-line bg-surface shadow-2xl transition overflow-hidden"
-              style={{ maxHeight: "calc(100vh - 2.5rem)", height: "auto" }}
-            >
-              {/* Modal Header (Sticky Top) */}
-              <div className="flex items-center justify-between border-b border-line px-5 py-3.5 shrink-0 bg-surface">
-                <div className="flex items-center gap-2.5">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-                    <svg className="h-5 w-5 fill-current" viewBox="0 0 24 24">
-                      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+              {/* Modal Shell: Fullscreen on mobile (<sm), centered rounded modal on sm+ */}
+              <div
+                ref={formModalRef}
+                className="relative z-10 flex flex-col w-full h-[100dvh] sm:h-auto sm:max-h-[calc(100dvh-2.5rem)] sm:max-w-xl bg-surface border-0 sm:border sm:border-line sm:rounded-2xl shadow-2xl overflow-hidden"
+              >
+                {/* Modal Header (Sticky Top) */}
+                <div className="flex items-center justify-between border-b border-line px-4 py-3 sm:px-5 sm:py-3.5 shrink-0 bg-surface">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                      <svg className="h-5 w-5 fill-current" viewBox="0 0 24 24">
+                        <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+                      </svg>
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="text-sm sm:text-base font-bold text-ink truncate">
+                        {editingReport ? "Edit Bukti Lapor WA" : "Upload Bukti Lapor WhatsApp"}
+                      </h3>
+                      <p className="text-[11px] sm:text-xs text-ink-muted truncate">
+                        Lampirkan screenshot WhatsApp bukti laporan ke pimpinan
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => !isSubmitting && setShowFormModal(false)}
+                    className="rounded-lg p-1.5 text-ink-muted hover:bg-bg-elevated hover:text-ink shrink-0 ml-2 cursor-pointer"
+                    title="Tutup (Esc)"
+                  >
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
                     </svg>
-                  </div>
-                  <div>
-                    <h3 className="text-base font-bold text-ink">
-                      {editingReport ? "Edit Bukti Lapor WA" : "Upload Bukti Lapor WhatsApp"}
-                    </h3>
-                    <p className="text-xs text-ink-muted">
-                      Lampirkan screenshot WhatsApp bukti laporan ke pimpinan
-                    </p>
-                  </div>
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => !isSubmitting && setShowFormModal(false)}
-                  className="rounded-lg p-1.5 text-ink-muted hover:bg-bg-elevated hover:text-ink"
-                  title="Tutup (Esc)"
-                >
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
 
               {/* Form wrapping scrollable content and sticky actions */}
               <form
@@ -1113,16 +1129,16 @@ export function WaReportWorkspace({
                   </div>
                 </div>
 
-                {/* Sticky Action Footer (Always pinned to bottom) */}
-                <div className="flex items-center justify-between gap-3 border-t border-line bg-bg-elevated px-5 py-3 shrink-0">
-                  <div className="min-w-0 flex-1">
+                {/* Modal Footer (Sticky Bottom) */}
+                <div className="flex items-center justify-between border-t border-line px-4 py-3 sm:px-5 sm:py-3.5 shrink-0 bg-bg-elevated/95 backdrop-blur-xs">
+                  <div className="min-w-0 flex-1 mr-2">
                     {formError ? (
                       <p className="text-xs font-semibold text-danger truncate" title={formError}>
                         ⚠️ {formError}
                       </p>
                     ) : photoFiles.length > 0 ? (
                       <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400 truncate">
-                        ✓ {photoFiles.length} foto screenshot siap diunggah
+                        ✓ {photoFiles.length} foto screenshot siap
                       </p>
                     ) : (
                       <p className="text-xs text-ink-muted truncate">
@@ -1135,14 +1151,14 @@ export function WaReportWorkspace({
                       type="button"
                       disabled={isSubmitting}
                       onClick={() => setShowFormModal(false)}
-                      className="rounded-xl border border-line px-4 py-2 text-xs font-semibold text-ink-muted hover:bg-bg-elevated hover:text-ink disabled:opacity-50"
+                      className="rounded-xl border border-line px-3.5 py-2 text-xs font-semibold text-ink-muted hover:bg-bg-elevated hover:text-ink disabled:opacity-50 cursor-pointer"
                     >
                       Batal
                     </button>
                     <button
                       type="submit"
                       disabled={isSubmitting}
-                      className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50 transition active:scale-[0.98]"
+                      className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 sm:px-5 sm:py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50 transition active:scale-[0.98] cursor-pointer"
                     >
                       {isSubmitting ? (
                         <>
@@ -1153,7 +1169,7 @@ export function WaReportWorkspace({
                           Menyimpan...
                         </>
                       ) : editingReport ? (
-                        "Simpan Perubahan"
+                        "Simpan"
                       ) : (
                         "Simpan & Unggah Bukti"
                       )}
@@ -1162,121 +1178,125 @@ export function WaReportWorkspace({
                 </div>
               </form>
             </div>
-          </div>
-        </div>
-      ) : null}
+          </div>,
+          document.body
+        )
+      : null}
 
       {/* Lightbox Modal (Full-Screen Image View) */}
-      {activeLightbox ? (
-        <div
-          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90 p-4 backdrop-blur-md"
-          onClick={() => setActiveLightbox(null)}
-        >
-          {/* Top Bar */}
-          <div
-            className="absolute top-4 right-4 left-4 flex items-center justify-between text-white"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center gap-2">
-              <span className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold text-white">
-                ✓ Lapor WA Pimpinan
-              </span>
-              <p className="font-semibold text-sm drop-shadow-md">
-                {activeLightbox.report.title}
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {activeLightbox.report.photoUrls[activeLightbox.photoIndex] ? (
-                <a
-                  href={activeLightbox.report.photoUrls[activeLightbox.photoIndex]}
-                  download={`screenshot-wa-${activeLightbox.report.id}.jpg`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-1 rounded-xl bg-white/20 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-xs transition hover:bg-white/30"
-                >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
-                  Unduh Gambar
-                </a>
-              ) : null}
-
-              <button
-                type="button"
-                onClick={() => setActiveLightbox(null)}
-                className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/20 text-white backdrop-blur-xs hover:bg-white/30"
+      {activeLightbox && mounted && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[10000] flex flex-col items-center justify-center bg-black/90 p-4 backdrop-blur-md"
+              onClick={() => setActiveLightbox(null)}
+            >
+              {/* Top Bar */}
+              <div
+                className="absolute top-4 right-4 left-4 flex items-center justify-between text-white"
+                onClick={(e) => e.stopPropagation()}
               >
-                ✕
-              </button>
-            </div>
-          </div>
+                <div className="flex items-center gap-2">
+                  <span className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold text-white">
+                    ✓ Lapor WA Pimpinan
+                  </span>
+                  <p className="font-semibold text-sm drop-shadow-md">
+                    {activeLightbox.report.title}
+                  </p>
+                </div>
 
-          {/* Image View */}
-          <div
-            className="relative flex max-h-[78vh] max-w-[90vw] items-center justify-center"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <img
-              src={activeLightbox.report.photoUrls[activeLightbox.photoIndex]}
-              alt={activeLightbox.report.title}
-              className="max-h-[78vh] max-w-[90vw] rounded-xl object-contain shadow-2xl"
-            />
+                <div className="flex items-center gap-2">
+                  {activeLightbox.report.photoUrls[activeLightbox.photoIndex] ? (
+                    <a
+                      href={activeLightbox.report.photoUrls[activeLightbox.photoIndex]}
+                      download={`screenshot-wa-${activeLightbox.report.id}.jpg`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center gap-1 rounded-xl bg-white/20 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-xs transition hover:bg-white/30"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                      Unduh Gambar
+                    </a>
+                  ) : null}
 
-            {/* Prev / Next Buttons */}
-            {activeLightbox.report.photoUrls.length > 1 ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setActiveLightbox({
-                      ...activeLightbox,
-                      photoIndex:
-                        (activeLightbox.photoIndex - 1 + activeLightbox.report.photoUrls.length) %
-                        activeLightbox.report.photoUrls.length,
-                    })
-                  }
-                  className="absolute left-2 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-xs hover:bg-black/80"
-                >
-                  ‹
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setActiveLightbox({
-                      ...activeLightbox,
-                      photoIndex:
-                        (activeLightbox.photoIndex + 1) % activeLightbox.report.photoUrls.length,
-                    })
-                  }
-                  className="absolute right-2 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-xs hover:bg-black/80"
-                >
-                  ›
-                </button>
-              </>
-            ) : null}
-          </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveLightbox(null)}
+                    className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/20 text-white backdrop-blur-xs hover:bg-white/30 cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
 
-          {/* Bottom Info Bar */}
-          <div
-            className="absolute bottom-4 max-w-2xl rounded-xl bg-black/70 px-4 py-2.5 text-center text-xs text-white backdrop-blur-xs"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p className="font-medium">
-              Kepada: <strong>{activeLightbox.report.leaderName}</strong> · Dilaporkan pada:{" "}
-              {formatDateTimeIndo(activeLightbox.report.reportDate)}
-            </p>
-            {activeLightbox.report.notes ? (
-              <p className="mt-1 text-white/80 italic">&ldquo;{activeLightbox.report.notes}&rdquo;</p>
-            ) : null}
-            {activeLightbox.report.photoUrls.length > 1 ? (
-              <p className="mt-1 text-[11px] text-white/60">
-                Foto {activeLightbox.photoIndex + 1} dari {activeLightbox.report.photoUrls.length}
-              </p>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
+              {/* Image View */}
+              <div
+                className="relative flex max-h-[78vh] max-w-[90vw] items-center justify-center"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <img
+                  src={activeLightbox.report.photoUrls[activeLightbox.photoIndex]}
+                  alt={activeLightbox.report.title}
+                  className="max-h-[78vh] max-w-[90vw] rounded-xl object-contain shadow-2xl"
+                />
+
+                {/* Prev / Next Buttons */}
+                {activeLightbox.report.photoUrls.length > 1 ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveLightbox({
+                          ...activeLightbox,
+                          photoIndex:
+                            (activeLightbox.photoIndex - 1 + activeLightbox.report.photoUrls.length) %
+                            activeLightbox.report.photoUrls.length,
+                        })
+                      }
+                      className="absolute left-2 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-xs hover:bg-black/80 cursor-pointer"
+                    >
+                      ‹
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveLightbox({
+                          ...activeLightbox,
+                          photoIndex:
+                            (activeLightbox.photoIndex + 1) % activeLightbox.report.photoUrls.length,
+                        })
+                      }
+                      className="absolute right-2 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-xs hover:bg-black/80 cursor-pointer"
+                    >
+                      ›
+                    </button>
+                  </>
+                ) : null}
+              </div>
+
+              {/* Bottom Info Bar */}
+              <div
+                className="absolute bottom-4 max-w-2xl rounded-xl bg-black/70 px-4 py-2.5 text-center text-xs text-white backdrop-blur-xs"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <p className="font-medium">
+                  Kepada: <strong>{activeLightbox.report.leaderName}</strong> · Dilaporkan pada:{" "}
+                  {formatDateTimeIndo(activeLightbox.report.reportDate)}
+                </p>
+                {activeLightbox.report.notes ? (
+                  <p className="mt-1 text-white/80 italic">&ldquo;{activeLightbox.report.notes}&rdquo;</p>
+                ) : null}
+                {activeLightbox.report.photoUrls.length > 1 ? (
+                  <p className="mt-1 text-[11px] text-white/60">
+                    Foto {activeLightbox.photoIndex + 1} dari {activeLightbox.report.photoUrls.length}
+                  </p>
+                ) : null}
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
     </div>
   );
 }
