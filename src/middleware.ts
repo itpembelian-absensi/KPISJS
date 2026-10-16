@@ -26,6 +26,23 @@ export function middleware(req: NextRequest) {
   );
   const token = req.cookies.get(SESSION_COOKIE)?.value;
 
+  // Shortlink: /laporwa atau /lapor-wa -> /kpi/departments?tab=lapor_wa
+  const normalizedPath = pathname.replace(/\/+$/, "").toLowerCase();
+  if (normalizedPath === "/laporwa" || normalizedPath === "/lapor-wa") {
+    const destination = "/kpi/departments?tab=lapor_wa";
+    if (!token) {
+      const url = req.nextUrl.clone();
+      url.pathname = "/login";
+      url.search = "";
+      url.searchParams.set("next", destination);
+      return NextResponse.redirect(url);
+    }
+    const url = req.nextUrl.clone();
+    url.pathname = "/kpi/departments";
+    url.search = "?tab=lapor_wa";
+    return NextResponse.redirect(url);
+  }
+
   if (!token && !isPublic) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

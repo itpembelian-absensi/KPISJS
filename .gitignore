@@ -42,6 +42,11 @@ next-env.d.ts
 
 # local helpdesk database & runtime data
 /data/
+/backups/
+/scratch/
+/bakdb/
+data_karyawan_dan_user_kpisjs.xlsx
+public/data_karyawan_dan_user_kpisjs.xlsx
 
 # sync & backup archives
 *.rar
