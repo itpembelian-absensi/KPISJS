@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { StatCard } from "@/components/StatCard";
 import {
   buildReportPeriodOptions,
+  currentReportDate,
   formatReportMonth,
+  monthStartDate,
 } from "@/lib/report-period";
 import type { Department } from "@/lib/types";
 
@@ -30,6 +32,40 @@ interface WaReportRow {
   }>;
 }
 
+interface WaMonthCell {
+  period: string;
+  count: number;
+  photoCount: number;
+  days: number;
+}
+
+interface WaUserMonthSummary {
+  userId: string;
+  userName: string;
+  username: string;
+  department: string;
+  months: WaMonthCell[];
+  totalCount: number;
+  totalPhotos: number;
+  totalDays: number;
+}
+
+interface WaDateCount {
+  count: number;
+  photoCount: number;
+}
+
+interface WaUserDateSummary {
+  userId: string;
+  userName: string;
+  username: string;
+  department: string;
+  byDate: Record<string, WaDateCount>;
+  totalCount: number;
+  totalPhotos: number;
+  totalDays: number;
+}
+
 interface WaReportStats {
   totalReports: number;
   totalWithPhoto: number;
@@ -39,7 +75,8 @@ interface WaReportStats {
 }
 
 interface WaReportSummaryClientProps {
-  initialPeriod: string;
+  initialFrom: string;
+  initialTo: string;
   periodsFromData: string[];
   departments: Department[];
   lockedDepartmentId?: string | null;
@@ -51,6 +88,26 @@ function formatDateIndo(dateStr: string): string {
     if (isNaN(d.getTime())) return dateStr;
     return d.toLocaleDateString("id-ID", {
       weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+  } catch {
+    return dateStr;
+  }
+}
+
+function isWeekend(isoDate: string): boolean {
+  const d = new Date(isoDate + "T00:00:00");
+  const day = d.getDay();
+  return day === 0 || day === 6;
+}
+
+function formatDateLong(dateStr: string): string {
+  try {
+    const d = new Date(dateStr + "T00:00:00");
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleDateString("id-ID", {
       day: "numeric",
       month: "long",
       year: "numeric",
@@ -75,17 +132,30 @@ function formatDateShort(dateStr: string): string {
 }
 
 export function WaReportSummaryClient({
-  initialPeriod,
+  initialFrom,
+  initialTo,
   periodsFromData,
   departments,
   lockedDepartmentId,
 }: WaReportSummaryClientProps) {
-  const [period, setPeriod] = useState(initialPeriod);
+  const [fromPeriod, setFromPeriod] = useState(initialFrom);
+  const [toPeriod, setToPeriod] = useState(initialTo);
+  const [dateFrom, setDateFrom] = useState(() => monthStartDate(initialTo));
+  const [dateTo, setDateTo] = useState(() => currentReportDate());
   const [departmentId, setDepartmentId] = useState(
     lockedDepartmentId || "all",
   );
+  const [view, setView] = useState<"summary" | "daily" | "detail">("summary");
   const [rows, setRows] = useState<WaReportRow[]>([]);
+  const [months, setMonths] = useState<string[]>([]);
+  const [monthlySummary, setMonthlySummary] = useState<WaUserMonthSummary[]>(
+    [],
+  );
+  const [dates, setDates] = useState<string[]>([]);
+  const [dailySummary, setDailySummary] = useState<WaUserDateSummary[]>([]);
+  const dailyScrollRef = useRef<HTMLDivElement>(null);
   const [stats, setStats] = useState<WaReportStats | null>(null);
+  const [dailyStats, setDailyStats] = useState<WaReportStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
   const [expandedUser, setExpandedUser] = useState<string | null>(null);
@@ -95,29 +165,86 @@ export function WaReportSummaryClient({
   } | null>(null);
 
   const periodOptions = useMemo(
-    () => ["all", ...buildReportPeriodOptions(periodsFromData)],
+    () => buildReportPeriodOptions(periodsFromData),
     [periodsFromData],
   );
+
+  const monthTotals = useMemo(() => {
+    return months.map((period) => {
+      let count = 0;
+      let photoCount = 0;
+      for (const user of monthlySummary) {
+        const cell = user.months.find((m) => m.period === period);
+        count += cell?.count || 0;
+        photoCount += cell?.photoCount || 0;
+      }
+      return { period, count, photoCount };
+    });
+  }, [months, monthlySummary]);
+
+  const dateTotals = useMemo(() => {
+    return dates.map((date) => {
+      let count = 0;
+      for (const user of dailySummary) count += user.byDate[date]?.count || 0;
+      return { date, count };
+    });
+  }, [dates, dailySummary]);
+
+  const dateMonthGroups = useMemo(() => {
+    const groups: Array<{ period: string; label: string; span: number }> = [];
+    for (const date of dates) {
+      const period = date.slice(0, 7);
+      const last = groups[groups.length - 1];
+      if (last && last.period === period) last.span += 1;
+      else groups.push({ period, label: formatReportMonth(period), span: 1 });
+    }
+    return groups;
+  }, [dates]);
 
   // Fetch data
   useEffect(() => {
     setLoading(true);
     const params = new URLSearchParams();
-    if (period !== "all") params.set("period", period);
+    params.set("from", fromPeriod);
+    params.set("to", toPeriod);
+    params.set("dateFrom", dateFrom);
+    params.set("dateTo", dateTo);
     if (departmentId !== "all") params.set("departmentId", departmentId);
 
     fetch(`/api/kpi/wa-report-summary?${params.toString()}`)
       .then((r) => r.json())
       .then((data) => {
         setRows(data.rows || []);
+        setMonths(data.months || []);
+        setMonthlySummary(data.monthlySummary || []);
+        setDates(data.dates || []);
+        setDailySummary(data.dailySummary || []);
         setStats(data.stats || null);
+        setDailyStats(data.dailyStats || null);
       })
       .catch(() => {
         setRows([]);
+        setMonths([]);
+        setMonthlySummary([]);
+        setDates([]);
+        setDailySummary([]);
         setStats(null);
+        setDailyStats(null);
       })
       .finally(() => setLoading(false));
-  }, [period, departmentId]);
+  }, [fromPeriod, toPeriod, dateFrom, dateTo, departmentId]);
+
+  useEffect(() => {
+    if (view !== "daily" || !dailyScrollRef.current) return;
+    const firstHit = dates.find((date) =>
+      dailySummary.some((user) => (user.byDate[date]?.count || 0) > 0),
+    );
+    if (!firstHit) return;
+    const cell = dailyScrollRef.current.querySelector(
+      `[data-date="${firstHit}"]`,
+    );
+    cell?.scrollIntoView({ inline: "center", block: "nearest" });
+  }, [view, dates, dailySummary]);
 
   // Group rows by date for accordion view
   const groupedByDate = useMemo(() => {
@@ -129,13 +256,59 @@ export function WaReportSummaryClient({
     return [...map.entries()];
   }, [rows]);
 
-  // Export URL
-  const exportUrl = useMemo(() => {
-    const params = new URLSearchParams({ format: "xlsx" });
-    if (period !== "all") params.set("period", period);
+  const reportKind = view === "daily" ? "daily" : view === "detail" ? "detail" : "month";
+  const reportTitle =
+    reportKind === "daily"
+      ? "Laporan Bukti WhatsApp — Ringkasan per Tanggal"
+      : reportKind === "detail"
+        ? "Laporan Bukti WhatsApp — Detail per Hari"
+        : "Laporan Bukti WhatsApp — Ringkasan per Bulan";
+  const departmentLabel =
+    departmentId === "all"
+      ? "Semua departemen"
+      : departments.find((d) => d.id === departmentId)?.name || "Departemen";
+  const printedAt = useMemo(
+    () =>
+      new Date().toLocaleString("id-ID", {
+        dateStyle: "long",
+        timeStyle: "short",
+      }),
+    [],
+  );
+
+  const exportHref = (format: "xlsx" | "pdf") => {
+    const params = new URLSearchParams({ format, report: reportKind });
+    params.set("from", fromPeriod);
+    params.set("to", toPeriod);
+    params.set("dateFrom", dateFrom);
+    params.set("dateTo", dateTo);
     if (departmentId !== "all") params.set("departmentId", departmentId);
     return `/api/kpi/wa-report-summary?${params.toString()}`;
-  }, [period, departmentId]);
+  };
+
+  const changeFrom = (value: string) => {
+    setFromPeriod(value);
+    if (value > toPeriod) setToPeriod(value);
+  };
+
+  const changeTo = (value: string) => {
+    setToPeriod(value);
+    if (value < fromPeriod) setFromPeriod(value);
+  };
+
+  const changeDateFrom = (value: string) => {
+    if (!value) return;
+    setDateFrom(value);
+    if (value > dateTo) setDateTo(value);
+  };
+
+  const changeDateTo = (value: string) => {
+    if (!value) return;
+    setDateTo(value);
+    if (value < dateFrom) setDateFrom(value);
+  };
+
+  const activeStats = view === "daily" ? dailyStats : stats;
 
   const toggleDate = (date: string) => {
     setExpandedDate((prev) => (prev === date ? null : date));
@@ -148,25 +321,98 @@ export function WaReportSummaryClient({
 
   return (
     <div className="space-y-5">
+      <style>{`
+        @media print {
+          @page { size: ${view === "detail" ? "A4 portrait" : "A4 landscape"}; margin: 10mm; }
+          .wa-report-print,
+          .wa-report-print table { overflow: visible !important; max-height: none !important; }
+          .wa-report-print .sticky { position: static !important; }
+        }
+      `}</style>
+      <div className="rounded-xl border border-line bg-bg-elevated/70 px-4 py-3">
+        <h2 className="text-lg font-semibold">{reportTitle}</h2>
+        <dl className="mt-2 space-y-0.5 text-sm text-ink-muted">
+          {view === "daily" ? (
+            <>
+              <div>Dari tanggal: {formatDateLong(dateFrom)}</div>
+              <div>Sampai tanggal: {formatDateLong(dateTo)}</div>
+            </>
+          ) : (
+            <>
+              <div>Dari periode: {formatReportMonth(fromPeriod)}</div>
+              <div>Sampai periode: {formatReportMonth(toPeriod)}</div>
+            </>
+          )}
+          <div>Departemen: {departmentLabel}</div>
+          <div className="hidden print:block">Dicetak: {printedAt}</div>
+        </dl>
+      </div>
       {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-ink-muted">Periode</label>
-          <select
-            className="rounded-lg border border-line bg-bg-elevated px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-            value={period}
-            onChange={(e) => setPeriod(e.target.value)}
-          >
-            <option value="all">Semua Periode</option>
-            {periodOptions
-              .filter((p) => p !== "all")
-              .map((p) => (
-                <option key={p} value={p}>
-                  {formatReportMonth(p)}
-                </option>
-              ))}
-          </select>
-        </div>
+      <div className="flex flex-wrap gap-3 print:hidden">
+        {view === "daily" ? (
+          <>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-ink-muted">
+                Dari tanggal
+              </label>
+              <input
+                type="date"
+                className="rounded-lg border border-line bg-bg-elevated px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                value={dateFrom}
+                max={dateTo}
+                onChange={(e) => changeDateFrom(e.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-ink-muted">
+                Sampai tanggal
+              </label>
+              <input
+                type="date"
+                className="rounded-lg border border-line bg-bg-elevated px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                value={dateTo}
+                min={dateFrom}
+                onChange={(e) => changeDateTo(e.target.value)}
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-ink-muted">
+                Dari periode
+              </label>
+              <select
+                className="rounded-lg border border-line bg-bg-elevated px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                value={fromPeriod}
+                onChange={(e) => changeFrom(e.target.value)}
+              >
+                {periodOptions.map((p) => (
+                  <option key={`from-${p}`} value={p}>
+                    {formatReportMonth(p)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-ink-muted">
+                Sampai periode
+              </label>
+              <select
+                className="rounded-lg border border-line bg-bg-elevated px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                value={toPeriod}
+                onChange={(e) => changeTo(e.target.value)}
+              >
+                {periodOptions.map((p) => (
+                  <option key={`to-${p}`} value={p}>
+                    {formatReportMonth(p)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </>
+        )}
 
         {!lockedDepartmentId && (
           <div className="flex flex-col gap-1">
@@ -188,51 +434,51 @@ export function WaReportSummaryClient({
           </div>
         )}
 
-        <div className="flex items-end">
+        <div className="flex flex-wrap items-end gap-2">
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="rounded-lg border border-line bg-bg-elevated px-4 py-2 text-sm font-medium"
+          >
+            Cetak
+          </button>
           <a
-            href={exportUrl}
+            href={exportHref("xlsx")}
             className="inline-flex items-center gap-2 rounded-lg bg-ok/10 px-4 py-2 text-sm font-medium text-ok transition-colors hover:bg-ok/20"
           >
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-              />
-            </svg>
-            Export Excel
+            Excel
+          </a>
+          <a
+            href={exportHref("pdf")}
+            className="rounded-lg border border-line bg-bg-elevated px-4 py-2 text-sm font-medium"
+          >
+            PDF
           </a>
         </div>
       </div>
 
       {/* Stats */}
-      {stats && (
+      {activeStats && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <StatCard
             label="Total Laporan"
-            value={String(stats.totalReports)}
+            value={String(activeStats.totalReports)}
           />
           <StatCard
             label="Dengan Bukti Foto"
-            value={String(stats.totalWithPhoto)}
+            value={String(activeStats.totalWithPhoto)}
           />
           <StatCard
             label="Total Foto"
-            value={String(stats.totalPhotos)}
+            value={String(activeStats.totalPhotos)}
           />
           <StatCard
             label="User Aktif"
-            value={String(stats.uniqueUsers)}
+            value={String(activeStats.uniqueUsers)}
           />
           <StatCard
             label="Hari Aktif"
-            value={String(stats.uniqueDays)}
+            value={String(activeStats.uniqueDays)}
           />
         </div>
       )}
@@ -246,7 +492,7 @@ export function WaReportSummaryClient({
       )}
 
       {/* Empty state */}
-      {!loading && rows.length === 0 && (
+      {!loading && view !== "daily" && rows.length === 0 && (
         <div className="rounded-xl border border-line bg-bg-elevated/50 py-16 text-center">
           <svg
             className="mx-auto h-12 w-12 text-ink-muted/50"
@@ -267,9 +513,357 @@ export function WaReportSummaryClient({
         </div>
       )}
 
+      {!loading && (
+        <div
+          className="flex gap-1 rounded-xl border border-line bg-bg-elevated/60 p-1 print:hidden"
+          role="tablist"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === "summary"}
+            onClick={() => setView("summary")}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+              view === "summary"
+                ? "bg-brand text-white"
+                : "text-ink-muted hover:bg-brand-soft hover:text-ink"
+            }`}
+          >
+            Ringkasan per bulan
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === "daily"}
+            onClick={() => setView("daily")}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+              view === "daily"
+                ? "bg-brand text-white"
+                : "text-ink-muted hover:bg-brand-soft hover:text-ink"
+            }`}
+          >
+            Ringkasan per tanggal
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === "detail"}
+            onClick={() => setView("detail")}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+              view === "detail"
+                ? "bg-brand text-white"
+                : "text-ink-muted hover:bg-brand-soft hover:text-ink"
+            }`}
+          >
+            Detail harian
+          </button>
+        </div>
+      )}
+
+      {!loading && view === "summary" && monthlySummary.length > 0 && (
+        <div className="overflow-hidden rounded-xl border border-line">
+          <div className="border-b border-line bg-bg-elevated/70 px-4 py-3">
+            <h3 className="font-semibold">{reportTitle}</h3>
+            <p className="text-xs text-ink-muted">
+              Dari periode {formatReportMonth(fromPeriod)} sampai{" "}
+              {formatReportMonth(toPeriod)} · Departemen {departmentLabel}
+            </p>
+          </div>
+          <div className="wa-report-print overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-line text-xs text-ink-muted uppercase">
+                  <th className="sticky left-0 z-10 bg-bg-elevated px-3 py-2.5 font-medium">
+                    Nama User
+                  </th>
+                  <th className="px-3 py-2.5 font-medium">Departemen</th>
+                  {months.map((period) => (
+                    <th
+                      key={period}
+                      className="px-3 py-2.5 text-center font-medium whitespace-nowrap"
+                    >
+                      {formatReportMonth(period)}
+                    </th>
+                  ))}
+                  <th className="px-3 py-2.5 text-center font-medium whitespace-nowrap">
+                    Total Laporan
+                  </th>
+                  <th className="px-3 py-2.5 text-center font-medium">Foto</th>
+                  <th className="px-3 py-2.5 text-center font-medium whitespace-nowrap">
+                    Hari Aktif
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {monthlySummary.map((user) => (
+                  <tr
+                    key={user.userId}
+                    className="border-b border-line last:border-0 transition-colors hover:bg-bg-elevated/30"
+                  >
+                    <td className="sticky left-0 z-10 bg-bg-elevated px-3 py-2.5">
+                      <p className="font-medium">{user.userName}</p>
+                      <p className="text-xs text-ink-muted">
+                        {user.username ? `@${user.username}` : ""}
+                      </p>
+                    </td>
+                    <td className="px-3 py-2.5 text-xs text-ink-muted">
+                      {user.department}
+                    </td>
+                    {user.months.map((cell) => (
+                      <td
+                        key={`${user.userId}-${cell.period}`}
+                        className="px-3 py-2.5 text-center"
+                        title={
+                          cell.count > 0
+                            ? `${cell.count} laporan, ${cell.photoCount} foto, ${cell.days} hari`
+                            : "Tidak ada laporan"
+                        }
+                      >
+                        {cell.count > 0 ? (
+                          <span className="rounded-md bg-brand/10 px-2 py-0.5 text-xs font-medium text-brand">
+                            {cell.count}
+                          </span>
+                        ) : (
+                          <span className="text-ink-muted/40">—</span>
+                        )}
+                      </td>
+                    ))}
+                    <td className="px-3 py-2.5 text-center font-semibold">
+                      {user.totalCount}
+                    </td>
+                    <td className="px-3 py-2.5 text-center">
+                      {user.totalPhotos > 0 ? (
+                        <span className="rounded-md bg-ok/10 px-2 py-0.5 text-xs font-medium text-ok">
+                          {user.totalPhotos}
+                        </span>
+                      ) : (
+                        <span className="rounded-md bg-danger/10 px-2 py-0.5 text-xs font-medium text-danger">
+                          0
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 text-center text-xs">
+                      {user.totalDays}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-line bg-bg-elevated/50 text-sm font-semibold">
+                  <td className="sticky left-0 z-10 bg-bg-elevated px-3 py-2.5">
+                    Total
+                  </td>
+                  <td className="px-3 py-2.5" />
+                  {monthTotals.map((cell) => (
+                    <td
+                      key={`total-${cell.period}`}
+                      className="px-3 py-2.5 text-center"
+                    >
+                      {cell.count}
+                    </td>
+                  ))}
+                  <td className="px-3 py-2.5 text-center">
+                    {monthlySummary.reduce((sum, u) => sum + u.totalCount, 0)}
+                  </td>
+                  <td className="px-3 py-2.5 text-center">
+                    {monthlySummary.reduce((sum, u) => sum + u.totalPhotos, 0)}
+                  </td>
+                  <td className="px-3 py-2.5 text-center">
+                    {stats?.uniqueDays ?? ""}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {!loading && view === "daily" && dailySummary.length === 0 && (
+        <div className="rounded-xl border border-line bg-bg-elevated/50 py-16 text-center">
+          <p className="text-sm text-ink-muted">
+            Tidak ada data bukti lapor WhatsApp untuk tanggal{" "}
+            {formatDateShort(dateFrom)} sampai {formatDateShort(dateTo)}.
+          </p>
+        </div>
+      )}
+
+      {!loading && view === "daily" && dailySummary.length > 0 && (
+        <div className="overflow-hidden rounded-xl border border-line">
+          <div className="border-b border-line bg-bg-elevated/70 px-4 py-3">
+            <h3 className="font-semibold">{reportTitle}</h3>
+            <p className="text-xs text-ink-muted">
+              Dari tanggal {formatDateLong(dateFrom)} sampai{" "}
+              {formatDateLong(dateTo)} · Departemen {departmentLabel}
+            </p>
+          </div>
+          <div
+            ref={dailyScrollRef}
+            className="wa-report-print max-h-[70vh] overflow-auto print:max-h-none print:overflow-visible"
+          >
+            <table className="w-max border-separate border-spacing-0 text-left text-sm">
+              <colgroup>
+                <col className="w-44" />
+                <col className="w-36" />
+                {dates.map((date) => (
+                  <col key={`col-${date}`} className="w-10" />
+                ))}
+                <col className="w-14" />
+                <col className="w-14" />
+                <col className="w-14" />
+              </colgroup>
+              <thead className="sticky top-0 z-20">
+                <tr className="text-xs text-ink-muted uppercase">
+                  <th
+                    rowSpan={2}
+                    className="sticky left-0 z-30 border-b border-line bg-bg-elevated px-3 py-2.5 font-medium"
+                  >
+                    Nama User
+                  </th>
+                  <th
+                    rowSpan={2}
+                    className="border-b border-line bg-bg-elevated px-3 py-2.5 font-medium"
+                  >
+                    Departemen
+                  </th>
+                  {dateMonthGroups.map((group) => (
+                    <th
+                      key={group.period}
+                      colSpan={group.span}
+                      className="border-b border-l border-line bg-bg-elevated px-2 py-2 text-center font-medium whitespace-nowrap"
+                    >
+                      {group.label}
+                    </th>
+                  ))}
+                  <th
+                    rowSpan={2}
+                    className="w-14 border-b border-l border-line bg-bg-elevated px-1 py-2.5 text-center font-medium"
+                  >
+                    Total
+                  </th>
+                  <th
+                    rowSpan={2}
+                    className="w-14 border-b border-line bg-bg-elevated px-1 py-2.5 text-center font-medium"
+                  >
+                    Foto
+                  </th>
+                  <th
+                    rowSpan={2}
+                    className="w-14 border-b border-line bg-bg-elevated px-1 py-2.5 text-center font-medium"
+                  >
+                    Hari
+                  </th>
+                </tr>
+                <tr className="text-[11px] text-ink-muted">
+                  {dates.map((date) => (
+                    <th
+                      key={date}
+                      data-date={date}
+                      title={formatDateIndo(date)}
+                      className={`w-10 min-w-10 border-b border-line px-0 py-1 text-center font-medium ${
+                        isWeekend(date)
+                          ? "bg-bg text-ink-muted/70"
+                          : "bg-bg-elevated"
+                      }`}
+                    >
+                      {Number(date.slice(8, 10))}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {dailySummary.map((user) => (
+                  <tr key={user.userId} className="hover:bg-bg-elevated/30">
+                    <td className="sticky left-0 z-10 border-b border-line bg-bg-elevated px-3 py-2">
+                      <p className="font-medium whitespace-nowrap">
+                        {user.userName}
+                      </p>
+                      <p className="text-xs text-ink-muted">
+                        {user.username ? `@${user.username}` : ""}
+                      </p>
+                    </td>
+                    <td className="border-b border-line px-3 py-2 text-xs text-ink-muted whitespace-nowrap">
+                      {user.department}
+                    </td>
+                    {dates.map((date) => {
+                      const count = user.byDate[date]?.count || 0;
+                      const photos = user.byDate[date]?.photoCount || 0;
+                      return (
+                        <td
+                          key={`${user.userId}-${date}`}
+                          title={
+                            count > 0
+                              ? `${formatDateIndo(date)}: ${count} laporan, ${photos} foto`
+                              : `${formatDateIndo(date)}: tidak ada laporan`
+                          }
+                          className={`w-10 min-w-10 border-b border-line px-0 py-2 text-center ${
+                            isWeekend(date) ? "bg-bg/60" : ""
+                          }`}
+                        >
+                          {count > 0 ? (
+                            <span className="inline-flex min-w-5 justify-center rounded bg-brand/10 px-1 text-xs font-medium text-brand">
+                              {count}
+                            </span>
+                          ) : (
+                            <span className="text-ink-muted/30">·</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                    <td className="w-14 border-b border-l border-line px-1 py-2 text-center font-semibold">
+                      {user.totalCount}
+                    </td>
+                    <td className="w-14 border-b border-line px-1 py-2 text-center">
+                      {user.totalPhotos > 0 ? (
+                        <span className="rounded-md bg-ok/10 px-2 py-0.5 text-xs font-medium text-ok">
+                          {user.totalPhotos}
+                        </span>
+                      ) : (
+                        <span className="rounded-md bg-danger/10 px-2 py-0.5 text-xs font-medium text-danger">
+                          0
+                        </span>
+                      )}
+                    </td>
+                    <td className="w-14 border-b border-line px-1 py-2 text-center text-xs">
+                      {user.totalDays}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot className="sticky bottom-0 z-20">
+                <tr className="text-sm font-semibold">
+                  <td className="sticky left-0 z-30 border-t border-line bg-bg-elevated px-3 py-2">
+                    Total
+                  </td>
+                  <td className="border-t border-line bg-bg-elevated px-3 py-2" />
+                  {dateTotals.map((cell) => (
+                    <td
+                      key={`total-${cell.date}`}
+                      className={`w-10 min-w-10 border-t border-line bg-bg-elevated px-0 py-2 text-center text-xs ${
+                        isWeekend(cell.date) ? "text-ink-muted" : ""
+                      }`}
+                    >
+                      {cell.count > 0 ? cell.count : ""}
+                    </td>
+                  ))}
+                  <td className="w-14 border-t border-l border-line bg-bg-elevated px-1 py-2 text-center">
+                    {dailySummary.reduce((sum, u) => sum + u.totalCount, 0)}
+                  </td>
+                  <td className="w-14 border-t border-line bg-bg-elevated px-1 py-2 text-center">
+                    {dailySummary.reduce((sum, u) => sum + u.totalPhotos, 0)}
+                  </td>
+                  <td className="w-14 border-t border-line bg-bg-elevated px-1 py-2 text-center">
+                    {dailyStats?.uniqueDays ?? ""}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Report Accordion */}
-      {!loading && groupedByDate.length > 0 && (
-        <div className="space-y-3">
+      {!loading && view === "detail" && groupedByDate.length > 0 && (
+        <div className="space-y-3 print:hidden">
           {groupedByDate.map(([date, dateRows]) => {
             const isDateExpanded = expandedDate === date;
             const totalReportsDay = dateRows.reduce(
@@ -494,15 +1088,16 @@ export function WaReportSummaryClient({
       )}
 
       {/* Summary table view */}
-      {!loading && rows.length > 0 && (
+      {!loading && view === "detail" && rows.length > 0 && (
         <div className="overflow-hidden rounded-xl border border-line">
           <div className="border-b border-line bg-bg-elevated/70 px-4 py-3">
-            <h3 className="font-semibold">Ringkasan Tabel</h3>
+            <h3 className="font-semibold">{reportTitle}</h3>
             <p className="text-xs text-ink-muted">
-              Daftar lengkap bukti lapor per hari per user
+              Dari periode {formatReportMonth(fromPeriod)} sampai{" "}
+              {formatReportMonth(toPeriod)} · Departemen {departmentLabel}
             </p>
           </div>
-          <div className="overflow-x-auto">
+          <div className="wa-report-print overflow-x-auto">
             <table className="w-full min-w-[700px] text-left text-sm">
               <thead>
                 <tr className="border-b border-line text-xs text-ink-muted uppercase">

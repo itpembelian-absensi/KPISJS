@@ -35,8 +35,10 @@ export default async function WaReportSummaryPage() {
     ),
   ];
 
-  const periodOptions = ["all", ...buildReportPeriodOptions(periodsFromData)];
-  const initialPeriod = currentReportMonth();
+  const periodOptions = buildReportPeriodOptions(periodsFromData);
+  const initialTo = currentReportMonth();
+  const yearStart = `${initialTo.slice(0, 4)}-01`;
+  const initialFrom = periodOptions.includes(yearStart) ? yearStart : initialTo;
   const lockedDepartmentId =
     deptScope !== "all" && departments.length === 1
       ? departments[0].id
@@ -44,7 +46,7 @@ export default async function WaReportSummaryPage() {
 
   return (
     <div className="space-y-5">
-      <div>
+      <div className="print:hidden">
         <p
           className="text-sm text-brand"
           style={{ fontFamily: "var(--font-accent), serif" }}
@@ -55,15 +57,14 @@ export default async function WaReportSummaryPage() {
           Laporan Bukti Lapor WhatsApp
         </h1>
         <p className="mt-2 max-w-3xl text-sm text-ink-muted">
-          Detail bukti laporan WhatsApp per hari per user. Dapat dilihat
-          dalam format accordion atau tabel, dan di-export ke Excel.
+          Ringkasan bukti laporan WhatsApp per user. Setiap tampilan bisa
+          dicetak, diekspor ke Excel, atau diekspor ke PDF.
         </p>
       </div>
 
       <WaReportSummaryClient
-        initialPeriod={
-          periodOptions.includes(initialPeriod) ? initialPeriod : "all"
-        }
+        initialFrom={initialFrom}
+        initialTo={periodOptions.includes(initialTo) ? initialTo : initialFrom}
         periodsFromData={periodsFromData}
         departments={departments}
         lockedDepartmentId={lockedDepartmentId}

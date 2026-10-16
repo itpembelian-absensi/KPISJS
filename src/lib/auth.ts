@@ -433,7 +433,7 @@ export const NAV_ENTRIES: NavEntry[] = [
         {
           href: "/kpi/wa-report-summary",
           label: "Laporan Bukti WA",
-          hint: "Detail bukti lapor WhatsApp per hari per user",
+          hint: "Ringkasan bukti lapor WhatsApp per user per bulan",
           roles: ["admin", "manager", "it_staff"],
         },
       ],

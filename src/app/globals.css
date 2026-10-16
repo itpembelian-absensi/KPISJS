@@ -209,4 +209,8 @@ html[data-theme="orchid"] {
     break-inside: avoid;
     page-break-inside: avoid;
   }
+  .wa-report-print {
+    overflow: visible !important;
+    max-height: none !important;
+  }
 }
