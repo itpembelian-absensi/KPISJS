@@ -19,6 +19,9 @@ type UserRow = Omit<UserAccount, "passwordHash">;
 
 const MENU_CATALOG = listMenuCatalog();
 
+/** Jumlah user per halaman di daftar kanan */
+const LIST_PAGE_SIZE = 8;
+
 export function UserMaster({
   initial,
   staff,
@@ -49,6 +52,7 @@ export function UserMaster({
   const [selectedDepts, setSelectedDepts] = useState<string[]>([]);
   const [linkedStaffId, setLinkedStaffId] = useState("");
   const [assessStaffIds, setAssessStaffIds] = useState<string[]>([]);
+  const [listPage, setListPage] = useState(1);
 
   function staffName(id: string | null) {
     if (!id) return "—";
@@ -207,6 +211,7 @@ export function UserMaster({
         setError(data.error || "Gagal menyimpan");
         return;
       }
+      const isNew = !items.some((x) => x.id === data.user.id);
       setItems((prev) => {
         const exists = prev.some((x) => x.id === data.user.id);
         if (exists) {
@@ -214,6 +219,9 @@ export function UserMaster({
         }
         return [...prev, data.user];
       });
+      if (isNew) {
+        setListPage(Math.max(1, Math.ceil((items.length + 1) / LIST_PAGE_SIZE)));
+      }
       if (password) {
         setPendingResets((prev) =>
           prev.filter((r) => r.userId !== data.user.id),
@@ -257,6 +265,13 @@ export function UserMaster({
   }, [staff, homeDeptId]);
   const deptName = (id: string) =>
     departments.find((d) => d.id === id)?.code ?? "?";
+
+  const totalListPages = Math.max(1, Math.ceil(items.length / LIST_PAGE_SIZE));
+  const currentListPage = Math.min(listPage, totalListPages);
+  const pagedItems = useMemo(() => {
+    const start = (currentListPage - 1) * LIST_PAGE_SIZE;
+    return items.slice(start, start + LIST_PAGE_SIZE);
+  }, [items, currentListPage]);
 
   return (
     <div className="space-y-4">
@@ -602,7 +617,7 @@ export function UserMaster({
               Role + menu khusus + batasan departemen
             </p>
           </div>
-          {items.map((u) => (
+          {pagedItems.map((u) => (
             <div
               key={u.id}
               className="flex items-center justify-between gap-3 border-b border-line px-4 py-3"
@@ -658,6 +673,61 @@ export function UserMaster({
               </div>
             </div>
           ))}
+          {totalListPages > 1 ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+              <p className="text-xs text-ink-muted">
+                Halaman {currentListPage} dari {totalListPages}
+                {" · "}
+                {(currentListPage - 1) * LIST_PAGE_SIZE + 1}–
+                {Math.min(currentListPage * LIST_PAGE_SIZE, items.length)} dari{" "}
+                {items.length}
+              </p>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={currentListPage <= 1}
+                  onClick={() => setListPage(1)}
+                  className="rounded-lg border border-line px-2.5 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="Halaman awal"
+                  title="Halaman awal"
+                >
+                  «
+                </button>
+                <button
+                  type="button"
+                  disabled={currentListPage <= 1}
+                  onClick={() => setListPage(Math.max(1, currentListPage - 1))}
+                  className="rounded-lg border border-line px-2.5 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="Halaman sebelumnya"
+                  title="Halaman sebelumnya"
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  disabled={currentListPage >= totalListPages}
+                  onClick={() =>
+                    setListPage(Math.min(totalListPages, currentListPage + 1))
+                  }
+                  className="rounded-lg border border-line px-2.5 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="Halaman berikutnya"
+                  title="Halaman berikutnya"
+                >
+                  ›
+                </button>
+                <button
+                  type="button"
+                  disabled={currentListPage >= totalListPages}
+                  onClick={() => setListPage(totalListPages)}
+                  className="rounded-lg border border-line px-2.5 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="Halaman akhir"
+                  title="Halaman akhir"
+                >
+                  »
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
