@@ -34,7 +34,7 @@ export default async function MeetingsPage() {
           Weekly meeting
         </p>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
-          Notulen Meeting
+          Meeting & Notulen
         </h1>
         <p className="mt-2 max-w-3xl text-sm text-ink-muted">
           Semua notulen rapat dikumpulkan di sini. Bahasan bisa dilacak mana
