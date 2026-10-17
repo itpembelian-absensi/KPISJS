@@ -471,6 +471,99 @@ export function importAttendanceFromExcel(
   return importRows(rows, sourceFile, assessedByName);
 }
 
+function tallyDisciplineRecords(rows: RecordRow[]) {
+  let workDays = 0;
+  let presentDays = 0;
+  let absentDays = 0;
+  let lateCount = 0;
+  let totalLateMinutes = 0;
+  let totalOvertimeMinutes = 0;
+
+  for (const r of rows) {
+    if (r.status === "holiday") continue;
+    workDays += 1;
+    if (r.status === "present") {
+      presentDays += 1;
+    } else if (r.status === "absent") {
+      absentDays += 1;
+    }
+    if ((Number(r.late_minutes) || 0) > 0) {
+      lateCount += 1;
+      totalLateMinutes += Number(r.late_minutes) || 0;
+    }
+    totalOvertimeMinutes += Number(r.overtime_minutes) || 0;
+  }
+
+  return {
+    workDays,
+    presentDays,
+    absentDays,
+    lateCount,
+    totalLateMinutes,
+    totalOvertimeMinutes,
+  };
+}
+
+/** Skor kedisiplinan per staf untuk rentang tanggal bebas (tidak mengubah periode baku 21–20). */
+export function summarizeDisciplineByRange(filters: {
+  from: string;
+  to: string;
+  departmentId?: string;
+}): Array<AttendancePeriodSummary & { staff: StaffMember | null }> {
+  const from = filters.from.slice(0, 10);
+  const to = filters.to.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+    return [];
+  }
+  if (from > to) return [];
+
+  listStaff();
+  const staffMap = new Map(listStaff().map((s) => [s.id, s]));
+  const rows = getDb()
+    .prepare(
+      `SELECT * FROM attendance_records
+       WHERE work_date >= ? AND work_date <= ?
+       ORDER BY work_date`,
+    )
+    .all(from, to) as RecordRow[];
+
+  const byStaff = new Map<string, RecordRow[]>();
+  for (const row of rows) {
+    const staff = staffMap.get(row.staff_id);
+    if (!staff) continue;
+    if (filters.departmentId && staff.departmentId !== filters.departmentId) {
+      continue;
+    }
+    const list = byStaff.get(row.staff_id) ?? [];
+    list.push(row);
+    byStaff.set(row.staff_id, list);
+  }
+
+  const now = new Date().toISOString();
+  const result: Array<AttendancePeriodSummary & { staff: StaffMember | null }> =
+    [];
+  for (const [staffId, list] of byStaff) {
+    const tally = tallyDisciplineRecords(list);
+    if (tally.workDays === 0) continue;
+    const disciplineScore = computeDisciplineScore(tally);
+    result.push({
+      id: `${staffId}:${from}:${to}`,
+      staffId,
+      periodLabel: `${from}..${to}`,
+      ...tally,
+      disciplineScore,
+      notes: "",
+      updatedAt: now,
+      staff: staffMap.get(staffId) ?? null,
+    });
+  }
+
+  result.sort((a, b) =>
+    (a.staff?.name ?? "").localeCompare(b.staff?.name ?? "", "id"),
+  );
+  return result;
+}
+
 export function listAttendanceSummaries(filters?: {
   departmentId?: string;
   periodLabel?: string;

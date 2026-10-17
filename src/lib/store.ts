@@ -3,6 +3,7 @@ import { SESSION_DAYS } from "./auth";
 import { seedAssetCategoriesIfEmpty, seedAssetCategoryMenuIfMissing } from "./asset-category-ops";
 import { seedJenisDataIfEmpty, seedJenisDataMenuIfMissing } from "./jenis-data-ops";
 import { backfillCustomersFromSubmissions } from "./customer-ops";
+import { seedMeetingMenuIfMissing } from "./meeting-ops";
 import { seedPengajuanMenusIfMissing } from "./pengajuan-ops";
 import { boolToInt, getDb, getMeta, intToBool, setMeta } from "./db";
 import {
@@ -1165,6 +1166,7 @@ function ensureDb() {
   migrateOrphanKpiFunctions();
   seedKpiFunctionsIfEmpty();
   seedSopMenuIfMissing();
+  seedMeetingMenuIfMissing();
   seedBrandingMenuIfMissing();
   seedBackupMenuIfMissing();
   seedApprovalChainMenuIfMissing();

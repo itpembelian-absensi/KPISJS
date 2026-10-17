@@ -856,10 +856,7 @@ export function WaReportWorkspace({
         ? createPortal(
             <div className="fixed inset-0 z-[9999] flex flex-col sm:items-center sm:justify-center sm:p-4 overflow-hidden">
               {/* Backdrop (Dark overlay with blur) */}
-              <div
-                className="fixed inset-0 bg-black/70 backdrop-blur-xs transition-opacity"
-                onClick={() => !isSubmitting && setShowFormModal(false)}
-              />
+              <div className="fixed inset-0 bg-black/70 backdrop-blur-xs transition-opacity" />
 
               {/* Modal Shell: Fullscreen on mobile (<sm), centered rounded modal on sm+ */}
               <div
@@ -883,16 +880,6 @@ export function WaReportWorkspace({
                       </p>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => !isSubmitting && setShowFormModal(false)}
-                    className="rounded-lg p-1.5 text-ink-muted hover:bg-bg-elevated hover:text-ink shrink-0 ml-2 cursor-pointer"
-                    title="Tutup (Esc)"
-                  >
-                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
                 </div>
 
               {/* Form wrapping scrollable content and sticky actions */}

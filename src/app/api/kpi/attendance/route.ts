@@ -4,6 +4,7 @@ import {
   listAttendancePeriods,
   listAttendanceRecords,
   listAttendanceSummaries,
+  summarizeDisciplineByRange,
 } from "@/lib/attendance-ops";
 import { getUserBySessionToken } from "@/lib/store";
 
@@ -24,6 +25,23 @@ export async function GET(req: NextRequest) {
     req.nextUrl.searchParams.get("periodLabel") || undefined;
   const staffId = req.nextUrl.searchParams.get("staffId") || undefined;
   const detail = req.nextUrl.searchParams.get("detail") === "1";
+  const from = req.nextUrl.searchParams.get("from") || "";
+  const to = req.nextUrl.searchParams.get("to") || "";
+
+  if (from && to) {
+    if (from > to) {
+      return NextResponse.json(
+        { error: "Tanggal awal tidak boleh setelah tanggal akhir." },
+        { status: 400 },
+      );
+    }
+    return NextResponse.json({
+      periods: listAttendancePeriods(),
+      summaries: summarizeDisciplineByRange({ departmentId, from, to }),
+      records: [],
+      range: { from: from.slice(0, 10), to: to.slice(0, 10) },
+    });
+  }
 
   return NextResponse.json({
     periods: listAttendancePeriods(),

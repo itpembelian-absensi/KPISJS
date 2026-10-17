@@ -17,7 +17,12 @@ import {
   activityInScorePeriod,
   isActivitySourcedIndicator,
 } from "@/lib/activity-score-metrics";
-import { formatDisciplinePeriodLabel, buildDisciplinePeriodOptions, disciplinePeriodFromDate } from "@/lib/discipline-period";
+import {
+  buildDisciplinePeriodOptions,
+  disciplinePeriodFromDate,
+  disciplinePeriodRange,
+  formatDisciplinePeriodLabel,
+} from "@/lib/discipline-period";
 import { computeFunctionScoreFromIndicators } from "@/lib/kpi-score-compute";
 import {
   METRIC_TYPE_LABEL,
@@ -218,6 +223,23 @@ function parseProgressFilter(raw: string | null): ProgressFilter {
   return "all";
 }
 
+function formatIsoDateId(iso: string) {
+  const dt = new Date(`${iso.slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(dt.getTime())) return iso;
+  return dt.toLocaleDateString("id-ID", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+/** Periode baku berjalan: tanggal 21 s/d 20 bulan berikutnya. */
+function defaultDisciplineDates() {
+  const now = new Date();
+  const iso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  return disciplinePeriodRange(disciplinePeriodFromDate(iso));
+}
+
 export function DepartmentKpiWorkspace({
   departments,
   functions: initialFunctions,
@@ -309,6 +331,18 @@ export function DepartmentKpiWorkspace({
   const [targetWaActivityId, setTargetWaActivityId] = useState<string | null>(null);
   const [assessments, setAssessments] = useState(initialAssessments);
   const [discipline, setDiscipline] = useState(initialDiscipline);
+  const initialDisciplineRange = defaultDisciplineDates();
+  const [disciplineFrom, setDisciplineFrom] = useState(
+    initialDisciplineRange.start,
+  );
+  const [disciplineTo, setDisciplineTo] = useState(initialDisciplineRange.end);
+  const [disciplineRangeRows, setDisciplineRangeRows] = useState<
+    DisciplineRow[] | null
+  >(null);
+  const [disciplineRangeLoading, setDisciplineRangeLoading] = useState(true);
+  const [disciplineRangeError, setDisciplineRangeError] = useState<
+    string | null
+  >(null);
   const [scoreIndicators, setScoreIndicators] = useState(initialIndicators);
   const [indicatorActuals, setIndicatorActuals] = useState(initialActuals);
   /** Draft capaian: indicatorId → string input */
@@ -539,6 +573,74 @@ export function DepartmentKpiWorkspace({
       ),
     [discipline, deptId, adminStaffSet],
   );
+  const hasDisciplineDates = Boolean(disciplineFrom && disciplineTo);
+  const disciplineRangeActive =
+    hasDisciplineDates && disciplineFrom <= disciplineTo;
+  const shownDiscipline = useMemo(() => {
+    if (hasDisciplineDates) {
+      if (!disciplineRangeActive) return [];
+      return (disciplineRangeRows ?? []).filter(
+        (d) => !adminStaffSet.has(d.staffId),
+      );
+    }
+    return deptDiscipline;
+  }, [
+    hasDisciplineDates,
+    disciplineRangeActive,
+    disciplineRangeRows,
+    deptDiscipline,
+    adminStaffSet,
+  ]);
+
+  useEffect(() => {
+    if (tab !== "kedisiplinan") return;
+    if (!disciplineFrom || !disciplineTo) {
+      setDisciplineRangeRows(null);
+      setDisciplineRangeError(null);
+      setDisciplineRangeLoading(false);
+      return;
+    }
+    if (disciplineFrom > disciplineTo) {
+      setDisciplineRangeRows(null);
+      setDisciplineRangeError(
+        "Tanggal awal tidak boleh setelah tanggal akhir.",
+      );
+      setDisciplineRangeLoading(false);
+      return;
+    }
+
+    const ac = new AbortController();
+    setDisciplineRangeRows([]);
+    setDisciplineRangeLoading(true);
+    setDisciplineRangeError(null);
+    const q = new URLSearchParams({
+      departmentId: deptId,
+      from: disciplineFrom,
+      to: disciplineTo,
+    });
+    fetch(`/api/kpi/attendance?${q.toString()}`, { signal: ac.signal })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.error || "Gagal memuat skor kedisiplinan");
+        }
+        setDisciplineRangeRows(
+          (data.summaries || []) as DisciplineRow[],
+        );
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        setDisciplineRangeRows([]);
+        setDisciplineRangeError(
+          err instanceof Error ? err.message : "Gagal memuat skor kedisiplinan",
+        );
+      })
+      .finally(() => {
+        if (!ac.signal.aborted) setDisciplineRangeLoading(false);
+      });
+
+    return () => ac.abort();
+  }, [tab, deptId, disciplineFrom, disciplineTo]);
   const weightTotal = functions.reduce((s, f) => s + f.weightPercent, 0);
 
   const deptIndicators = useMemo(
@@ -3396,18 +3498,60 @@ export function DepartmentKpiWorkspace({
         {tab === "kedisiplinan" ? (
           <div className="space-y-4 p-4">
             <p className="text-sm text-ink-muted">
-              Skor dari absensi, keterlambatan, dan lembur. Periode dihitung{" "}
+              Skor dari absensi, keterlambatan, dan lembur pada rentang tanggal
+              yang dipilih. Default mengikuti periode baku{" "}
               <strong>tanggal 21 s/d 20 bulan berikutnya</strong>. Impor Excel
-              dilakukan di Master data → Absensi &amp; Kedisiplinan. Otomatis
-              masuk penilaian fungsi{" "}
-              <strong>Kedisiplinan &amp; Kehadiran</strong>.
+              dilakukan di Master data → Absensi &amp; Kedisiplinan. Penilaian
+              fungsi <strong>Kedisiplinan &amp; Kehadiran</strong> tetap memakai
+              periode baku.
             </p>
 
-            {deptDiscipline.length === 0 ? (
+            <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+              <label className="text-sm">
+                <span className="text-xs text-ink-muted">Dari tanggal</span>
+                <input
+                  type="date"
+                  value={disciplineFrom}
+                  onChange={(e) => setDisciplineFrom(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
+                />
+              </label>
+              <label className="text-sm">
+                <span className="text-xs text-ink-muted">Sampai tanggal</span>
+                <input
+                  type="date"
+                  value={disciplineTo}
+                  min={disciplineFrom || undefined}
+                  onChange={(e) => setDisciplineTo(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  const range = defaultDisciplineDates();
+                  setDisciplineFrom(range.start);
+                  setDisciplineTo(range.end);
+                }}
+                className="rounded-xl border border-line px-3 py-2 text-sm hover:bg-bg-elevated"
+              >
+                Periode baku
+              </button>
+            </div>
+            {disciplineRangeError ? (
+              <p className="text-sm text-danger">{disciplineRangeError}</p>
+            ) : null}
+            {disciplineRangeLoading ? (
+              <p className="text-xs text-ink-muted">Menghitung skor...</p>
+            ) : null}
+
+            {shownDiscipline.length === 0 && !disciplineRangeLoading ? (
               <p className="py-6 text-center text-sm text-ink-muted">
-                Belum ada data kedisiplinan untuk departemen ini.
+                {disciplineFrom && disciplineTo
+                  ? "Tidak ada data absensi pada rentang tanggal ini."
+                  : "Belum ada data kedisiplinan untuk departemen ini."}
               </p>
-            ) : (
+            ) : shownDiscipline.length === 0 ? null : (
               <div className="overflow-x-auto rounded-xl border border-line">
                 <table className="w-full min-w-[560px] text-left text-sm">
                   <thead>
@@ -3422,13 +3566,15 @@ export function DepartmentKpiWorkspace({
                     </tr>
                   </thead>
                   <tbody>
-                    {deptDiscipline.map((d) => (
+                    {shownDiscipline.map((d) => (
                       <tr key={d.id} className="border-b border-line">
                         <td className="px-3 py-2.5 font-medium">
                           {d.staff?.name ?? "—"}
                         </td>
                         <td className="px-3 py-2.5 text-xs leading-snug">
-                          {formatDisciplinePeriodLabel(d.periodLabel)}
+                          {disciplineRangeRows
+                            ? `${formatIsoDateId(disciplineFrom)} – ${formatIsoDateId(disciplineTo)}`
+                            : formatDisciplinePeriodLabel(d.periodLabel)}
                         </td>
                         <td className="px-3 py-2.5">
                           {d.presentDays}/{d.workDays}

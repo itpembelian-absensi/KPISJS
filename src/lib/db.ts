@@ -415,7 +415,121 @@ function createSchema(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_kpi_wa_reports_dept ON kpi_wa_reports(department_id);
     CREATE INDEX IF NOT EXISTS idx_kpi_wa_reports_date ON kpi_wa_reports(report_date);
     CREATE INDEX IF NOT EXISTS idx_kpi_wa_reports_act ON kpi_wa_reports(activity_id);
+
+    CREATE TABLE IF NOT EXISTS meeting_notes (
+      id TEXT PRIMARY KEY,
+      department_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      meeting_date TEXT NOT NULL,
+      meeting_time TEXT NOT NULL DEFAULT '',
+      attendees TEXT NOT NULL DEFAULT '',
+      summary TEXT NOT NULL DEFAULT '',
+      created_by_user_id TEXT NOT NULL DEFAULT '',
+      created_by_name TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_meeting_notes_date ON meeting_notes(meeting_date);
+    CREATE INDEX IF NOT EXISTS idx_meeting_notes_dept ON meeting_notes(department_id);
+
+    CREATE TABLE IF NOT EXISTS meeting_items (
+      id TEXT PRIMARY KEY,
+      meeting_id TEXT NOT NULL,
+      topic TEXT NOT NULL,
+      detail TEXT NOT NULL DEFAULT '',
+      owner_name TEXT NOT NULL DEFAULT '',
+      due_date TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'in_progress', 'done')),
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_meeting_items_meeting ON meeting_items(meeting_id);
+    CREATE INDEX IF NOT EXISTS idx_meeting_items_status ON meeting_items(status);
   `);
+
+  const meetingCols = db
+    .prepare("PRAGMA table_info(meeting_notes)")
+    .all() as Array<{ name: string }>;
+  if (meetingCols.length > 0) {
+    const meetingNames = new Set(meetingCols.map((c) => c.name));
+    if (!meetingNames.has("department_ids_json")) {
+      db.exec(
+        "ALTER TABLE meeting_notes ADD COLUMN department_ids_json TEXT NOT NULL DEFAULT '[]'",
+      );
+    }
+    if (!meetingNames.has("attendee_staff_ids_json")) {
+      db.exec(
+        "ALTER TABLE meeting_notes ADD COLUMN attendee_staff_ids_json TEXT NOT NULL DEFAULT '[]'",
+      );
+    }
+    if (!meetingNames.has("external_attendees")) {
+      db.exec(
+        "ALTER TABLE meeting_notes ADD COLUMN external_attendees TEXT NOT NULL DEFAULT ''",
+      );
+    }
+    const legacy = db
+      .prepare(
+        `SELECT id, department_id FROM meeting_notes
+         WHERE department_ids_json IS NULL
+            OR trim(department_ids_json) = ''
+            OR department_ids_json = '[]'`,
+      )
+      .all() as Array<{ id: string; department_id: string }>;
+    const fillDept = db.prepare(
+      "UPDATE meeting_notes SET department_ids_json = ? WHERE id = ?",
+    );
+    for (const row of legacy) {
+      if (!row.department_id) continue;
+      fillDept.run(JSON.stringify([row.department_id]), row.id);
+    }
+  }
+
+  const meetingItemCols = db
+    .prepare("PRAGMA table_info(meeting_items)")
+    .all() as Array<{ name: string }>;
+  if (meetingItemCols.length > 0) {
+    const itemNames = new Set(meetingItemCols.map((c) => c.name));
+    if (!itemNames.has("start_date")) {
+      db.exec(
+        "ALTER TABLE meeting_items ADD COLUMN start_date TEXT NOT NULL DEFAULT ''",
+      );
+    }
+    if (!itemNames.has("problem_detail")) {
+      db.exec(
+        "ALTER TABLE meeting_items ADD COLUMN problem_detail TEXT NOT NULL DEFAULT ''",
+      );
+    }
+    if (!itemNames.has("owner_staff_id")) {
+      db.exec(
+        "ALTER TABLE meeting_items ADD COLUMN owner_staff_id TEXT NOT NULL DEFAULT ''",
+      );
+    }
+    if (!itemNames.has("owner_staff_ids_json")) {
+      db.exec(
+        "ALTER TABLE meeting_items ADD COLUMN owner_staff_ids_json TEXT NOT NULL DEFAULT '[]'",
+      );
+    }
+    const legacyOwners = db
+      .prepare(
+        `SELECT id, owner_staff_id FROM meeting_items
+         WHERE owner_staff_id != ''
+           AND (
+             owner_staff_ids_json IS NULL
+             OR trim(owner_staff_ids_json) = ''
+             OR owner_staff_ids_json = '[]'
+           )`,
+      )
+      .all() as Array<{ id: string; owner_staff_id: string }>;
+    const fillOwners = db.prepare(
+      "UPDATE meeting_items SET owner_staff_ids_json = ? WHERE id = ?",
+    );
+    for (const row of legacyOwners) {
+      fillOwners.run(JSON.stringify([row.owner_staff_id]), row.id);
+    }
+  }
 
   // Migrasi kolom SOP formal (aman jika tabel lama tanpa kolom baru)
   const sopCols = db

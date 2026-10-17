@@ -384,6 +384,12 @@ export const NAV_ENTRIES: NavEntry[] = [
           roles: ["admin", "manager", "staff", "it_staff", "assessor"],
         },
         {
+          href: "/kpi/meetings",
+          label: "Notulen Meeting",
+          hint: "Weekly, on progress, overdue & bahasan berulang",
+          roles: ["admin", "manager", "staff", "it_staff", "assessor"],
+        },
+        {
           href: "/master/sops",
           label: "SOP",
           hint: "Prosedur kerja per departemen",

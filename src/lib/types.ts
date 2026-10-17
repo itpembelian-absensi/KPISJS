@@ -254,6 +254,53 @@ export interface KpiWaReport {
   updatedAt: string;
 }
 
+export type MeetingItemStatus = "open" | "in_progress" | "done";
+
+/** Notulen rapat mingguan */
+export interface MeetingNote {
+  id: string;
+  /** Departemen pertama, atau "*" jika semua departemen. */
+  departmentId: string;
+  /** Satu atau lebih id departemen. "*" = semua departemen. */
+  departmentIds: string[];
+  departmentName: string;
+  departmentCode: string;
+  title: string;
+  meetingDate: string;
+  meetingTime: string;
+  attendees: string;
+  attendeeStaffIds: string[];
+  externalAttendees: string;
+  summary: string;
+  createdByUserId: string;
+  createdByName: string;
+  createdAt: string;
+  updatedAt: string;
+  items: MeetingItem[];
+}
+
+/** Bahasan / tindak lanjut di dalam notulen */
+export interface MeetingItem {
+  id: string;
+  meetingId: string;
+  topic: string;
+  /** Uraian masalah yang dibahas */
+  problemDetail: string;
+  detail: string;
+  /** Penanggung jawab pertama, ikut ownerStaffIds. */
+  ownerStaffId: string;
+  ownerStaffIds: string[];
+  ownerName: string;
+  /** Tanggal awal pembahasan */
+  startDate: string;
+  /** Jadwal / Target selesai pekerjaan */
+  dueDate: string;
+  status: MeetingItemStatus;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** Penilaian skor per fungsi KPI (periode) */
 export interface KpiAssessment {
   id: string;
