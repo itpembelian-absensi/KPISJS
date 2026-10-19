@@ -4,7 +4,7 @@ import {
   listAttendanceSummaries,
 } from "@/lib/attendance-ops";
 import { requireMasterAccess } from "@/lib/session";
-import { listDepartments } from "@/lib/store";
+import { listDepartments, listStaff } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +30,7 @@ export default async function AttendancePage() {
       </div>
       <AttendanceMaster
         departments={listDepartments(true)}
+        staff={listStaff()}
         initialSummaries={listAttendanceSummaries()}
         periods={listAttendancePeriods()}
       />

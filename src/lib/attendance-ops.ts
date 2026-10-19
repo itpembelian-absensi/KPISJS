@@ -11,7 +11,10 @@ import {
   buildDisciplinePeriodOptions,
   disciplinePeriodFromDate,
   disciplinePeriodRange,
+  disciplinePeriodsOverlapping,
   formatDisciplinePeriodLabel,
+  resolveDisciplineDeleteRange,
+  type DisciplineDeleteUnit,
 } from "./discipline-period";
 import { upsertKpiAssessment } from "./kpi-ops";
 import {
@@ -30,7 +33,9 @@ export {
   disciplinePeriodFromDate,
   disciplinePeriodRange,
   formatDisciplinePeriodLabel,
+  resolveDisciplineDeleteRange,
 } from "./discipline-period";
+export type { DisciplineDeleteUnit } from "./discipline-period";
 
 const DISCIPLINE_FN_NAME = "Kedisiplinan & Kehadiran";
 
@@ -192,9 +197,10 @@ function rebuildPeriodSummaries(
         totalOvertimeMinutes += Number(r.overtime_minutes) || 0;
       }
 
-      // Lewati periode tanpa hari kerja (hanya libur / kosong)
-      if (workDays === 0 && rows.length === 0) continue;
-      if (workDays === 0) continue;
+      if (workDays === 0) {
+        clearDisciplinePeriod(staff, period);
+        continue;
+      }
 
       const disciplineScore = computeDisciplineScore({
         workDays,
@@ -280,8 +286,212 @@ function rebuildPeriodSummaries(
           assessedByName,
         });
       }
+      syncAttendanceIndicatorActuals(staffId, period, disciplineScore);
     }
   }
+}
+
+function clearDisciplinePeriodByStaffId(staffId: string, period: string) {
+  const db = getDb();
+  db.prepare(
+    `DELETE FROM attendance_period_summaries
+     WHERE staff_id = ? AND period_label = ?`,
+  ).run(staffId, period);
+  db.prepare(
+    `DELETE FROM kpi_assessments
+     WHERE staff_id = ? AND period_label = ?
+       AND kpi_function_id IN (
+         SELECT id FROM kpi_functions WHERE lower(name) = lower(?)
+       )`,
+  ).run(staffId, period, DISCIPLINE_FN_NAME);
+  syncAttendanceIndicatorActuals(staffId, period, null);
+}
+
+function clearDisciplinePeriod(staff: StaffMember, period: string) {
+  clearDisciplinePeriodByStaffId(staff.id, period);
+}
+
+/** Selaraskan capaian indikator absensi yang sudah tersimpan dengan skor baru. */
+function syncAttendanceIndicatorActuals(
+  staffId: string,
+  period: string,
+  score: number | null,
+) {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT a.id
+       FROM kpi_indicator_actuals a
+       INNER JOIN kpi_score_indicators i ON i.id = a.indicator_id
+       WHERE a.staff_id = ? AND a.period_label = ? AND i.metric_type = 'attendance'`,
+    )
+    .all(staffId, period) as Array<{ id: string }>;
+  if (rows.length === 0) return;
+
+  if (score == null) {
+    const del = db.prepare("DELETE FROM kpi_indicator_actuals WHERE id = ?");
+    for (const row of rows) del.run(row.id);
+    return;
+  }
+
+  const rounded = Math.max(0, Math.min(100, Math.round(score * 10) / 10));
+  const now = new Date().toISOString();
+  const upd = db.prepare(
+    `UPDATE kpi_indicator_actuals
+     SET actual_value = ?, computed_score = ?, updated_at = ?
+     WHERE id = ?`,
+  );
+  for (const row of rows) upd.run(score, rounded, now, row.id);
+}
+
+export function deleteDisciplineData(input: {
+  scope: "staff" | "all";
+  staffId?: string;
+  unit: DisciplineDeleteUnit;
+  anchor: string;
+  assessedByName?: string;
+}):
+  | {
+      deletedRecords: number;
+      deletedSummaries: number;
+      from: string;
+      to: string;
+      label: string;
+      staffCount: number;
+    }
+  | { error: string } {
+  const range = resolveDisciplineDeleteRange(input.unit, input.anchor);
+  if ("error" in range) return range;
+
+  const db = getDb();
+  const staffIdFilter = input.staffId?.trim() || "";
+  if (input.scope === "staff") {
+    if (!staffIdFilter) return { error: "Pilih staf yang datanya akan dihapus." };
+  } else if (input.scope !== "all") {
+    return { error: "Cakupan hapus tidak dikenal." };
+  }
+
+  const targetPeriods =
+    input.unit === "period"
+      ? [input.anchor.trim()]
+      : disciplinePeriodsOverlapping(range.from, range.to);
+
+  const params: string[] = [range.from, range.to];
+  let selectSql = `SELECT staff_id, work_date FROM attendance_records
+     WHERE work_date >= ? AND work_date <= ?`;
+  if (input.scope === "staff") {
+    selectSql += " AND staff_id = ?";
+    params.push(staffIdFilter);
+  }
+  const hits = db.prepare(selectSql).all(...params) as Array<{
+    staff_id: string;
+    work_date: string;
+  }>;
+
+  const periodsByStaff = new Map<string, Set<string>>();
+  const addPair = (id: string, period: string) => {
+    const periods = periodsByStaff.get(id) ?? new Set<string>();
+    periods.add(period);
+    periodsByStaff.set(id, periods);
+  };
+  for (const hit of hits) {
+    addPair(hit.staff_id, disciplinePeriodFromDate(hit.work_date));
+  }
+
+  // Ringkasan tanpa baris absensi (staf sudah dihapus) tidak ketemu lewat attendance_records.
+  if (targetPeriods.length) {
+    const placeholders = targetPeriods.map(() => "?").join(", ");
+    const sumParams: string[] = [...targetPeriods];
+    let sumSql = `SELECT staff_id, period_label FROM attendance_period_summaries
+      WHERE period_label IN (${placeholders})`;
+    if (input.scope === "staff") {
+      sumSql += " AND staff_id = ?";
+      sumParams.push(staffIdFilter);
+    }
+    const summaryRows = db.prepare(sumSql).all(...sumParams) as Array<{
+      staff_id: string;
+      period_label: string;
+    }>;
+    const knownStaff = new Set(listStaff().map((s) => s.id));
+    const countInPeriod = db.prepare(
+      `SELECT COUNT(*) AS n FROM attendance_records
+       WHERE staff_id = ? AND work_date >= ? AND work_date <= ?`,
+    );
+    for (const row of summaryRows) {
+      const { start, end } = disciplinePeriodRange(row.period_label);
+      const remaining = countInPeriod.get(row.staff_id, start, end) as {
+        n: number;
+      };
+      const periodFullyCovered = range.from <= start && range.to >= end;
+      if (
+        !knownStaff.has(row.staff_id) ||
+        (remaining?.n || 0) === 0 ||
+        periodFullyCovered
+      ) {
+        addPair(row.staff_id, row.period_label);
+      }
+    }
+  }
+
+  if (hits.length === 0 && periodsByStaff.size === 0) {
+    return {
+      deletedRecords: 0,
+      deletedSummaries: 0,
+      from: range.from,
+      to: range.to,
+      label: range.label,
+      staffCount: 0,
+    };
+  }
+
+  const assessedByName = input.assessedByName || "Hapus data kedisiplinan";
+  const staffMap = new Map(listStaff().map((s) => [s.id, s]));
+  let deletedSummaries = 0;
+  const tx = db.transaction(() => {
+    if (hits.length > 0) {
+      const delParams: string[] = [range.from, range.to];
+      let delSql = `DELETE FROM attendance_records WHERE work_date >= ? AND work_date <= ?`;
+      if (input.scope === "staff") {
+        delSql += " AND staff_id = ?";
+        delParams.push(staffIdFilter);
+      }
+      db.prepare(delSql).run(...delParams);
+    }
+
+    const countInPeriod = db.prepare(
+      `SELECT COUNT(*) AS n FROM attendance_records
+       WHERE staff_id = ? AND work_date >= ? AND work_date <= ?`,
+    );
+    const summaryExists = db.prepare(
+      `SELECT id FROM attendance_period_summaries
+       WHERE staff_id = ? AND period_label = ?`,
+    );
+    for (const [staffId, periods] of periodsByStaff) {
+      const staff = staffMap.get(staffId);
+      for (const period of periods) {
+        const { start, end } = disciplinePeriodRange(period);
+        const remaining = countInPeriod.get(staffId, start, end) as {
+          n: number;
+        };
+        if (!staff || (remaining?.n || 0) === 0) {
+          if (summaryExists.get(staffId, period)) deletedSummaries += 1;
+          clearDisciplinePeriodByStaffId(staffId, period);
+          continue;
+        }
+        rebuildPeriodSummaries([staffId], [period], assessedByName);
+      }
+    }
+  });
+  tx();
+
+  return {
+    deletedRecords: hits.length,
+    deletedSummaries,
+    from: range.from,
+    to: range.to,
+    label: range.label,
+    staffCount: periodsByStaff.size,
+  };
 }
 
 /** Hitung ulang semua ringkasan dengan periode 21–20 */
