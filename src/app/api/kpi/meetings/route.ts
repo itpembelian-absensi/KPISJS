@@ -77,7 +77,9 @@ export async function POST(req: NextRequest) {
     : body.departmentId
       ? [String(body.departmentId)]
       : [];
-  const departmentIds = [...new Set(rawIds.map((id: string) => id.trim()).filter(Boolean))];
+  const departmentIds: string[] = Array.from(
+    new Set(rawIds.map((id: string) => id.trim()).filter(Boolean)),
+  );
   const scope = getEffectiveDepartmentScope(user);
   const current = body.id ? getMeetingNote(String(body.id)) : null;
   if (body.id && !current) {
