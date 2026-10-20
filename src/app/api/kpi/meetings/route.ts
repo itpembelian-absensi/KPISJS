@@ -107,6 +107,39 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Departemen di luar akses Anda" }, { status: 403 });
   }
 
+  const rawItems = Array.isArray(body.items) ? body.items : [];
+  for (const item of rawItems) {
+    if (!item || typeof item !== "object") continue;
+    const itemDeptIds = Array.isArray(item.departmentIds)
+      ? [
+          ...new Set(
+            item.departmentIds
+              .map((id: unknown) => String(id).trim())
+              .filter(Boolean),
+          ),
+        ]
+      : [];
+    if (itemDeptIds.includes("*")) {
+      if (scope !== "all") {
+        return NextResponse.json(
+          {
+            error:
+              "Semua departemen pada bahasan hanya bisa dipilih akun dengan akses seluruh departemen",
+          },
+          { status: 403 },
+        );
+      }
+    } else if (
+      scope !== "all" &&
+      itemDeptIds.some((id) => !canAccessDepartment(user, id))
+    ) {
+      return NextResponse.json(
+        { error: "Departemen bahasan di luar akses Anda" },
+        { status: 403 },
+      );
+    }
+  }
+
   const result = saveMeetingNote(
     {
       id: body.id ? String(body.id) : undefined,

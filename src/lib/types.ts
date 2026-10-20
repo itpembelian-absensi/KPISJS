@@ -287,6 +287,8 @@ export interface MeetingItem {
   /** Uraian masalah yang dibahas */
   problemDetail: string;
   detail: string;
+  /** Satu atau lebih id departemen. "*" = semua departemen. */
+  departmentIds: string[];
   /** Penanggung jawab pertama, ikut ownerStaffIds. */
   ownerStaffId: string;
   ownerStaffIds: string[];

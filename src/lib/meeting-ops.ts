@@ -31,6 +31,7 @@ type ItemRow = {
   detail: string;
   owner_staff_id?: string | null;
   owner_staff_ids_json?: string | null;
+  department_ids_json?: string | null;
   owner_name: string;
   start_date?: string | null;
   due_date: string;
@@ -54,6 +55,7 @@ function mapItem(row: ItemRow): MeetingItem {
     topic: row.topic,
     problemDetail: row.problem_detail || "",
     detail: row.detail || "",
+    departmentIds: parseDepartmentIds(row.department_ids_json, ""),
     ownerStaffIds,
     ownerStaffId: ownerStaffIds[0] || "",
     ownerName: row.owner_name || "",
@@ -64,6 +66,13 @@ function mapItem(row: ItemRow): MeetingItem {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function normalizeItemDepartmentIds(raw: unknown): string[] {
+  const list = Array.isArray(raw) ? raw : [];
+  const ids = [...new Set(list.map((id) => String(id).trim()).filter(Boolean))];
+  if (ids.includes("*")) return ["*"];
+  return ids;
 }
 
 function parseDepartmentIds(raw: string | null | undefined, fallback: string): string[] {
@@ -113,6 +122,7 @@ export type MeetingItemInput = {
   topic: string;
   problemDetail?: string;
   detail?: string;
+  departmentIds?: string[];
   ownerStaffId?: string;
   ownerStaffIds?: string[];
   ownerName?: string;
@@ -200,6 +210,7 @@ function cleanItems(items: MeetingItemInput[] | undefined) {
     topic: string;
     problemDetail: string;
     detail: string;
+    departmentIds: string[];
     ownerStaffIds: string[];
     ownerName: string;
     startDate: string;
@@ -219,6 +230,7 @@ function cleanItems(items: MeetingItemInput[] | undefined) {
       topic,
       problemDetail: String(raw.problemDetail || "").trim(),
       detail: String(raw.detail || "").trim(),
+      departmentIds: normalizeItemDepartmentIds(raw.departmentIds),
       ownerStaffIds: [
         ...new Set(
           [
@@ -300,6 +312,21 @@ export function saveMeetingNote(
     .join(", ");
 
   const draftItems = cleanItems(input.items);
+  const itemDepartmentIds = [
+    ...new Set(
+      draftItems.flatMap((item) => item.departmentIds).filter((id) => id !== "*"),
+    ),
+  ];
+  if (itemDepartmentIds.length > 0) {
+    const knownItemDepts = getDb()
+      .prepare(
+        `SELECT id FROM departments WHERE id IN (${itemDepartmentIds.map(() => "?").join(", ")})`,
+      )
+      .all(...itemDepartmentIds) as Array<{ id: string }>;
+    if (knownItemDepts.length !== itemDepartmentIds.length) {
+      return { error: "Ada departemen pada bahasan yang tidak ditemukan" };
+    }
+  }
   const invalidSchedule = draftItems.find(
     (item) => item.startDate && item.dueDate && item.startDate > item.dueDate,
   );
@@ -388,9 +415,9 @@ export function saveMeetingNote(
     const upsert = db.prepare(
       `INSERT INTO meeting_items (
         id, meeting_id, topic, problem_detail, detail, owner_staff_id,
-        owner_staff_ids_json, owner_name,
+        owner_staff_ids_json, department_ids_json, owner_name,
         start_date, due_date, status, sort_order, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         meeting_id = excluded.meeting_id,
         topic = excluded.topic,
@@ -398,6 +425,7 @@ export function saveMeetingNote(
         detail = excluded.detail,
         owner_staff_id = excluded.owner_staff_id,
         owner_staff_ids_json = excluded.owner_staff_ids_json,
+        department_ids_json = excluded.department_ids_json,
         owner_name = excluded.owner_name,
         start_date = excluded.start_date,
         due_date = excluded.due_date,
@@ -432,6 +460,7 @@ export function saveMeetingNote(
         item.detail,
         ownerStaffIds[0] || "",
         JSON.stringify(ownerStaffIds),
+        JSON.stringify(item.departmentIds),
         ownerName,
         item.startDate,
         item.dueDate,

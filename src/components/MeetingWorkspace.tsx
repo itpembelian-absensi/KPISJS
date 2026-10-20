@@ -13,6 +13,7 @@ import {
   weekBounds,
   type MeetingTrack,
 } from "@/lib/meeting-track";
+import { MeetingReportPanel } from "@/components/MeetingReportPanel";
 import type {
   Department,
   MeetingItem,
@@ -28,6 +29,7 @@ type DraftItem = {
   topic: string;
   problemDetail: string;
   detail: string;
+  departmentIds: string[];
   ownerStaffIds: string[];
   ownerName: string;
   startDate: string;
@@ -35,7 +37,7 @@ type DraftItem = {
   status: MeetingItemStatus;
 };
 
-type View = "week" | "notes" | "follow";
+type View = "week" | "notes" | "follow" | "report";
 type TrackFilter = "all" | MeetingTrack | "repeated";
 
 type RepeatInfo = {
@@ -56,6 +58,7 @@ function emptyItem(): DraftItem {
     topic: "",
     problemDetail: "",
     detail: "",
+    departmentIds: [],
     ownerStaffIds: [],
     ownerName: "",
     startDate: "",
@@ -64,7 +67,36 @@ function emptyItem(): DraftItem {
   };
 }
 
-function draftFromItem(item: MeetingItem, people: StaffOption[]): DraftItem {
+function itemDepartmentLabel(
+  ids: string[] | undefined,
+  departments: Department[],
+): string {
+  if (!ids || ids.length === 0) return "";
+  if (ids.includes("*")) return "Semua departemen";
+  return ids
+    .map((id) => departments.find((dept) => dept.id === id)?.code)
+    .filter((code): code is string => Boolean(code))
+    .join(", ");
+}
+
+function draftDepartmentIds(
+  ids: string[] | undefined,
+  departments: Department[],
+  companyWide: boolean,
+): string[] {
+  const list = ids ?? [];
+  if (list.includes("*")) {
+    return companyWide ? ["*"] : departments.map((dept) => dept.id);
+  }
+  return list;
+}
+
+function draftFromItem(
+  item: MeetingItem,
+  people: StaffOption[],
+  departments: Department[],
+  companyWide: boolean,
+): DraftItem {
   const known = new Set(people.map((person) => person.id));
   let ownerStaffIds = (item.ownerStaffIds || []).filter((id) => known.has(id));
   if (ownerStaffIds.length === 0 && item.ownerStaffId && known.has(item.ownerStaffId)) {
@@ -92,6 +124,7 @@ function draftFromItem(item: MeetingItem, people: StaffOption[]): DraftItem {
     topic: item.topic,
     problemDetail: item.problemDetail || "",
     detail: item.detail,
+    departmentIds: draftDepartmentIds(item.departmentIds, departments, companyWide),
     ownerStaffIds,
     ownerName,
     startDate: item.startDate || "",
@@ -216,7 +249,7 @@ export function MeetingWorkspace({
       meeting.createdByName,
       ...meeting.items.map(
         (item) =>
-          `${item.topic} ${item.problemDetail} ${item.detail} ${item.ownerName}`,
+          `${item.topic} ${item.problemDetail} ${item.detail} ${item.ownerName} ${itemDepartmentLabel(item.departmentIds, departments)}`,
       ),
     ]
       .join("\n")
@@ -313,7 +346,9 @@ export function MeetingWorkspace({
     setSummary(meeting.summary);
     setItems(
       meeting.items.length > 0
-        ? meeting.items.map((item) => draftFromItem(item, staff))
+        ? meeting.items.map((item) =>
+            draftFromItem(item, staff, departments, companyWide),
+          )
         : [emptyItem()],
     );
     setError(null);
@@ -336,6 +371,11 @@ export function MeetingWorkspace({
         topic: row.item.topic,
         problemDetail: row.item.problemDetail || "",
         detail: row.item.detail,
+        departmentIds: draftDepartmentIds(
+          row.item.departmentIds,
+          departments,
+          companyWide,
+        ),
         ownerStaffIds: row.item.ownerStaffIds || [],
         ownerName: row.item.ownerName,
         startDate: row.item.startDate || "",
@@ -412,6 +452,7 @@ export function MeetingWorkspace({
               topic: item.topic,
               problemDetail: item.problemDetail,
               detail: item.detail,
+              departmentIds: item.departmentIds,
               ownerStaffIds: item.ownerStaffIds,
               ownerName: item.ownerName,
               startDate: item.startDate,
@@ -588,6 +629,7 @@ export function MeetingWorkspace({
             ["week", "Minggu ini"],
             ["follow", "Tindak lanjut"],
             ["notes", "Semua notulen"],
+            ["report", "Laporan"],
           ] as Array<[View, string]>
         ).map(([id, label]) => (
           <button
@@ -869,6 +911,18 @@ export function MeetingWorkspace({
                     className="mt-1 w-full rounded-lg border border-line bg-bg-elevated px-3 py-2 text-sm"
                   />
                 </label>
+                <DepartmentChecks
+                  departmentIds={item.departmentIds}
+                  departments={departments}
+                  companyWide={companyWide}
+                  onChange={(next) =>
+                    setItems((prev) =>
+                      prev.map((row) =>
+                        row.key === item.key ? { ...row, departmentIds: next } : row,
+                      ),
+                    )
+                  }
+                />
                 <div className="text-sm sm:col-span-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs text-ink-muted">Penanggung jawab</span>
@@ -890,6 +944,16 @@ export function MeetingWorkspace({
                   <div className="mt-2 max-h-36 space-y-1.5 overflow-y-auto rounded-lg border border-line bg-bg-elevated px-3 py-2">
                     {ownerOptions
                       .filter((person) => {
+                        const limited =
+                          item.departmentIds.length > 0 &&
+                          !item.departmentIds.includes("*");
+                        if (
+                          limited &&
+                          !item.departmentIds.includes(person.departmentId) &&
+                          !item.ownerStaffIds.includes(person.id)
+                        ) {
+                          return false;
+                        }
                         const needle = (ownerQueryByKey[item.key] || "")
                           .trim()
                           .toLowerCase();
@@ -946,6 +1010,9 @@ export function MeetingWorkspace({
                   </div>
                   <p className="mt-1 text-[11px] text-ink-muted">
                     Bisa pilih lebih dari satu karyawan.
+                    {item.departmentIds.length > 0
+                      ? " Daftar mengikuti departemen yang dipilih."
+                      : ""}
                     {item.ownerName ? ` Terpilih: ${item.ownerName}.` : ""}
                   </p>
                 </div>
@@ -1067,6 +1134,7 @@ export function MeetingWorkspace({
                   <FollowRow
                     key={row.item.id}
                     row={row}
+                    departments={departments}
                     onOpen={() => openEdit(row.meeting)}
                     onStatus={(status) => changeStatus(row.item.id, status)}
                   />
@@ -1190,6 +1258,7 @@ export function MeetingWorkspace({
                 <FollowRow
                   key={row.item.id}
                   row={row}
+                  departments={departments}
                   onOpen={() => openEdit(row.meeting)}
                   onStatus={(status) => changeStatus(row.item.id, status)}
                 />
@@ -1197,6 +1266,15 @@ export function MeetingWorkspace({
             </div>
           )}
         </div>
+      ) : null}
+
+      {view === "report" ? (
+        <MeetingReportPanel
+          meetings={meetings}
+          departments={departments}
+          query={search}
+          onOpen={openEdit}
+        />
       ) : null}
     </div>
   );
@@ -1229,6 +1307,80 @@ function StatCard({
       <p className={`mt-1 text-2xl font-semibold ${valueClass}`}>{value}</p>
       <p className="mt-1 text-[11px] text-ink-muted">{hint}</p>
     </button>
+  );
+}
+
+function DepartmentChecks({
+  departmentIds,
+  departments,
+  companyWide,
+  onChange,
+}: {
+  departmentIds: string[];
+  departments: Department[];
+  companyWide: boolean;
+  onChange: (next: string[]) => void;
+}) {
+  const allIds = departments.map((dept) => dept.id);
+  const allOn =
+    departmentIds.includes("*") ||
+    (allIds.length > 0 && allIds.every((id) => departmentIds.includes(id)));
+  const explicit = departmentIds.includes("*") ? allIds : departmentIds;
+  const selectedCount = departmentIds.includes("*")
+    ? allIds.length
+    : explicit.filter((id) => allIds.includes(id)).length;
+
+  function toggleAll(on: boolean) {
+    if (!on) {
+      onChange([]);
+      return;
+    }
+    onChange(companyWide ? ["*"] : allIds);
+  }
+
+  function toggleOne(id: string, on: boolean) {
+    const next = on
+      ? [...new Set([...explicit, id])]
+      : explicit.filter((row) => row !== id);
+    if (companyWide && allIds.length > 0 && next.length === allIds.length) {
+      onChange(["*"]);
+      return;
+    }
+    onChange(next);
+  }
+
+  return (
+    <div className="text-sm sm:col-span-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs text-ink-muted">Departemen</span>
+        <span className="text-[11px] text-ink-muted">
+          {allOn ? "Semua departemen" : `${selectedCount} departemen`}
+        </span>
+      </div>
+      <div className="mt-1 max-h-36 space-y-1.5 overflow-y-auto rounded-lg border border-line bg-bg-elevated px-3 py-2">
+        <label className="flex items-center gap-2 font-medium">
+          <input
+            type="checkbox"
+            checked={allOn}
+            onChange={(e) => toggleAll(e.target.checked)}
+          />
+          Semua departemen
+        </label>
+        {departments.map((dept) => (
+          <label key={dept.id} className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={allOn || departmentIds.includes(dept.id)}
+              onChange={(e) => toggleOne(dept.id, e.target.checked)}
+            />
+            {dept.code} — {dept.name}
+          </label>
+        ))}
+      </div>
+      <p className="mt-1 text-[11px] text-ink-muted">
+        Bisa pilih satu, dua, beberapa, atau semua departemen.
+      </p>
+    </div>
   );
 }
 
@@ -1315,6 +1467,9 @@ function MeetingCard({
                     <p className="text-xs text-ink-muted">{item.detail}</p>
                   ) : null}
                   <p className="mt-1 text-[11px] text-ink-muted">
+                    {itemDepartmentLabel(item.departmentIds, departments)
+                      ? `${itemDepartmentLabel(item.departmentIds, departments)} · `
+                      : ""}
                     {item.ownerName || "Tanpa PIC"}
                     {item.startDate
                       ? ` · mulai ${formatIsoDateId(item.startDate)}`
@@ -1360,6 +1515,7 @@ function MeetingCard({
 
 function FollowRow({
   row,
+  departments,
   onOpen,
   onStatus,
 }: {
@@ -1370,6 +1526,7 @@ function FollowRow({
     repeated: boolean;
     repeat?: RepeatInfo;
   };
+  departments: Department[];
   onOpen: () => void;
   onStatus: (status: MeetingItemStatus) => void;
 }) {
@@ -1388,6 +1545,9 @@ function FollowRow({
           {formatIsoDateId(row.meeting.meetingDate)} · {row.meeting.title}
         </button>
         <p className="text-[11px] text-ink-muted">
+          {itemDepartmentLabel(row.item.departmentIds, departments)
+            ? `${itemDepartmentLabel(row.item.departmentIds, departments)} · `
+            : ""}
           {row.item.ownerName || "Tanpa PIC"}
           {row.item.startDate
             ? ` · mulai ${formatIsoDateId(row.item.startDate)}`

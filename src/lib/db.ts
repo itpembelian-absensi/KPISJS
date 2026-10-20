@@ -512,6 +512,11 @@ function createSchema(db: Database.Database) {
         "ALTER TABLE meeting_items ADD COLUMN owner_staff_ids_json TEXT NOT NULL DEFAULT '[]'",
       );
     }
+    if (!itemNames.has("department_ids_json")) {
+      db.exec(
+        "ALTER TABLE meeting_items ADD COLUMN department_ids_json TEXT NOT NULL DEFAULT '[]'",
+      );
+    }
     const legacyOwners = db
       .prepare(
         `SELECT id, owner_staff_id FROM meeting_items
