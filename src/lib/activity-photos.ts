@@ -36,7 +36,7 @@ export function publicUrlForActivityPhoto(
 export function absolutePathFromPublicUrl(url: string): string | null {
   if (!url.startsWith("/uploads/activities/")) return null;
   const rel = url.replace(/^\//, "");
-  const abs = path.join(process.cwd(), "public", rel);
+  const abs = path.join(/*turbopackIgnore: true*/ process.cwd(), "public", rel);
   const normalized = path.normalize(abs);
   const root = path.normalize(UPLOAD_ROOT);
   if (!normalized.startsWith(root)) return null;

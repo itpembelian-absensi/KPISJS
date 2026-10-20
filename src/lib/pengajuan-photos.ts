@@ -30,7 +30,7 @@ function ensureDir(pengajuanId: string) {
 export function absolutePathFromPengajuanPhotoUrl(url: string): string | null {
   if (!url.startsWith("/uploads/pengajuan/")) return null;
   const rel = url.replace(/^\//, "");
-  const abs = path.normalize(path.join(process.cwd(), "public", rel));
+  const abs = path.normalize(path.join(/*turbopackIgnore: true*/ process.cwd(), "public", rel));
   const root = path.normalize(UPLOAD_ROOT);
   if (abs !== root && !abs.startsWith(root + path.sep)) return null;
   return abs;

@@ -110,14 +110,14 @@ export async function POST(req: NextRequest) {
   const rawItems = Array.isArray(body.items) ? body.items : [];
   for (const item of rawItems) {
     if (!item || typeof item !== "object") continue;
-    const itemDeptIds = Array.isArray(item.departmentIds)
-      ? [
-          ...new Set(
+    const itemDeptIds: string[] = Array.isArray(item.departmentIds)
+      ? Array.from(
+          new Set(
             item.departmentIds
               .map((id: unknown) => String(id).trim())
               .filter(Boolean),
           ),
-        ]
+        )
       : [];
     if (itemDeptIds.includes("*")) {
       if (scope !== "all") {
