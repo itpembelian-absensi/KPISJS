@@ -82,6 +82,12 @@ KPISJS/
 - `next.config.ts` has `output: "standalone"` for Docker optimization.
 - **NEVER** remove this setting — it's required for the Docker build.
 
+### 5. Mandatory Verification Before Commit/Push
+
+- **ALWAYS** run `npx tsc --noEmit` locally before making a commit or pushing to git.
+- **NEVER** push code with TypeScript errors or broken builds — it will break the production Docker build on GitHub Actions.
+- Ensure the git pre-commit hook in `.git/hooks/pre-commit` is active (`chmod +x .git/hooks/pre-commit`).
+
 ---
 
 ## Database Migration Guide
@@ -276,6 +282,28 @@ If you add a new npm package (`npm install xyz`):
 - Located in `src/app/api/`
 - Follow Next.js App Router conventions
 - Protected by middleware (cookie-based auth)
+
+### Request Body & Strict Typing
+
+- Data from `req.json()` has type `any`. **ALWAYS** type-cast or annotate extracted variables explicitly.
+- **NEVER** write untyped array deduplication like `[...new Set(anyArray.map(...))]` because in TypeScript strict mode it evaluates to `unknown[]`, causing type errors when passed to typed helper functions.
+- **ALWAYS** provide explicit types or use `Array.from()`:
+  ```typescript
+  // BAD: evaluates to unknown[]
+  const ids = [...new Set(item.departmentIds.map((id: unknown) => String(id)))];
+
+  // GOOD: explicitly typed as string[]
+  const ids: string[] = Array.from(
+    new Set(item.departmentIds.map((id: unknown) => String(id).trim()).filter(Boolean)),
+  );
+  ```
+
+### Dynamic File Path Tracing in Turbopack
+
+- When resolving dynamic upload file paths with `path.join(process.cwd(), "public", rel)`, always add the `/*turbopackIgnore: true*/` comment so Turbopack does not trace the entire project directory:
+  ```typescript
+  const abs = path.join(/*turbopackIgnore: true*/ process.cwd(), "public", rel);
+  ```
 
 ### Language
 
