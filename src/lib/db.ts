@@ -8,6 +8,21 @@ const DB_PATH = path.join(DATA_DIR, "itsupport.db");
 declare global {
   // eslint-disable-next-line no-var
   var __sjsSqlite: Database.Database | undefined;
+  // eslint-disable-next-line no-var
+  var __waScheduleBoot: boolean | undefined;
+}
+
+function bootWaScheduleRunner() {
+  if (global.__waScheduleBoot) return;
+  global.__waScheduleBoot = true;
+  queueMicrotask(() => {
+    void import("./wa-schedule-runner")
+      .then((mod) => mod.startWaScheduleRunner())
+      .catch((error) => {
+        global.__waScheduleBoot = false;
+        console.error("Jadwal WhatsApp tidak dapat dimulai", error);
+      });
+  });
 }
 
 function createSchema(db: Database.Database) {
@@ -977,6 +992,7 @@ export function getDb(): Database.Database {
   // Selalu jalankan schema agar tabel baru (mis. kpi_functions) terbuat
   // meski koneksi DB sudah di-cache hot reload.
   createSchema(global.__sjsSqlite);
+  bootWaScheduleRunner();
   return global.__sjsSqlite;
 }
 

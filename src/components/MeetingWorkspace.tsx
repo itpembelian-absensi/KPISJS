@@ -14,6 +14,14 @@ import {
   type MeetingTrack,
 } from "@/lib/meeting-track";
 import { MeetingReportPanel } from "@/components/MeetingReportPanel";
+import {
+  groupReminderTargets,
+  meetingReminderText,
+  whatsAppChatUrl,
+  type ReminderPerson,
+  type ReminderRow,
+  type WaReminderTarget,
+} from "@/lib/meeting-wa";
 import type {
   Department,
   MeetingItem,
@@ -149,11 +157,13 @@ export function MeetingWorkspace({
   departments,
   companyWide,
   staff,
+  phoneBook,
   initialMeetings,
 }: {
   departments: Department[];
   companyWide: boolean;
   staff: StaffOption[];
+  phoneBook: ReminderPerson[];
   initialMeetings: MeetingNote[];
 }) {
   const today = todayIso();
@@ -182,6 +192,8 @@ export function MeetingWorkspace({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [waTargets, setWaTargets] = useState<WaReminderTarget[] | null>(null);
+  const [waBusy, setWaBusy] = useState(false);
 
   const week = weekBounds(weekAnchor);
 
@@ -283,6 +295,20 @@ export function MeetingWorkspace({
       (row.meeting.meetingDate < week.start ||
         row.meeting.meetingDate > week.end),
   );
+  const reminderSource: ReminderRow[] =
+    view === "follow"
+      ? followRows.map((row) => ({ item: row.item, meeting: row.meeting }))
+      : view === "notes"
+        ? allMeetings.flatMap((meeting) =>
+            meeting.items.map((item) => ({ item, meeting })),
+          )
+        : [
+            ...weekMeetings.flatMap((meeting) =>
+              meeting.items.map((item) => ({ item, meeting })),
+            ),
+            ...carryOver.map((row) => ({ item: row.item, meeting: row.meeting })),
+          ];
+  const openReminderRows = reminderSource.filter((row) => row.item.status !== "done");
 
   function openNew() {
     setEditingId(null);
@@ -516,6 +542,77 @@ export function MeetingWorkspace({
     setView("follow");
   }
 
+  function openReminderChat(target: WaReminderTarget) {
+    const url = whatsAppChatUrl(
+      target.phone,
+      meetingReminderText(target.name, target.items, today),
+    );
+    if (!url) return;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
+  async function sendReminder(rows: ReminderRow[], fallback?: WaReminderTarget[]) {
+    const itemIds = [...new Set(rows.map((row) => row.item.id))];
+    if (itemIds.length === 0) return;
+    setWaBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/kpi/meetings/remind", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemIds }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "Gagal mengirim WhatsApp");
+        if (fallback) setWaTargets(fallback);
+        return;
+      }
+      const sent = Array.isArray(data.sent)
+        ? data.sent.map((row: { name?: string }) => row.name).filter(Boolean)
+        : [];
+      const failed = Array.isArray(data.failed)
+        ? data.failed.map((row: { name?: string; error?: string }) =>
+            `${row.name || "PIC"}: ${row.error || "gagal"}`,
+          )
+        : [];
+      const skipped = Array.isArray(data.skipped)
+        ? data.skipped.map((row: { name?: string; reason?: string }) =>
+            `${row.name || "PIC"} (${row.reason || "dilewati"})`,
+          )
+        : [];
+      const parts = [
+        sent.length ? `WhatsApp terkirim ke ${sent.join(", ")}.` : "",
+        failed.length ? `Gagal: ${failed.join("; ")}.` : "",
+        skipped.length ? `Dilewati: ${skipped.join("; ")}.` : "",
+      ].filter(Boolean);
+      const summary = parts.join(" ") || "Tidak ada PIC yang dikirimi.";
+      if (failed.length > 0) {
+        setError(summary);
+        if (fallback) setWaTargets(fallback);
+        return;
+      }
+      setMessage(summary);
+      setWaTargets(null);
+    } catch {
+      setError("Koneksi gagal. Coba lagi.");
+      if (fallback) setWaTargets(fallback);
+    } finally {
+      setWaBusy(false);
+    }
+  }
+
+  function remindRows(rows: ReminderRow[], direct: boolean) {
+    const targets = groupReminderTargets(rows, phoneBook);
+    const ready = targets.filter((target) => target.wa);
+    if (direct && ready.length > 0 && ready.length === targets.length) {
+      void sendReminder(rows, targets);
+      return;
+    }
+    setWaTargets(targets);
+  }
+
   const pickedDepartmentIds = allDepartments
     ? departments.map((dept) => dept.id)
     : departmentIds;
@@ -613,6 +710,14 @@ export function MeetingWorkspace({
             placeholder="Cari judul, bahasan, peserta..."
             className="w-full rounded-xl border border-line bg-bg-elevated px-3 py-2 text-sm sm:w-64"
           />
+          <button
+            type="button"
+            onClick={() => remindRows(openReminderRows, false)}
+            disabled={view === "report" || openReminderRows.length === 0 || waBusy}
+            className="rounded-xl border border-ok/30 bg-ok-soft px-4 py-2 text-sm font-medium text-ok disabled:opacity-50"
+          >
+            Ingatkan PIC
+          </button>
           <button
             type="button"
             onClick={openNew}
@@ -1137,6 +1242,10 @@ export function MeetingWorkspace({
                     departments={departments}
                     onOpen={() => openEdit(row.meeting)}
                     onStatus={(status) => changeStatus(row.item.id, status)}
+                    onRemind={() =>
+                      remindRows([{ item: row.item, meeting: row.meeting }], true)
+                    }
+                    busy={waBusy}
                   />
                 ))}
               </div>
@@ -1157,6 +1266,8 @@ export function MeetingWorkspace({
                 onEdit={() => openEdit(meeting)}
                 onDelete={() => removeMeeting(meeting)}
                 onStatus={changeStatus}
+                onRemind={(item) => remindRows([{ item, meeting }], true)}
+                busy={waBusy}
               />
             ))
           )}
@@ -1180,6 +1291,8 @@ export function MeetingWorkspace({
                 onEdit={() => openEdit(meeting)}
                 onDelete={() => removeMeeting(meeting)}
                 onStatus={changeStatus}
+                onRemind={(item) => remindRows([{ item, meeting }], true)}
+                busy={waBusy}
               />
             ))
           )}
@@ -1261,6 +1374,10 @@ export function MeetingWorkspace({
                   departments={departments}
                   onOpen={() => openEdit(row.meeting)}
                   onStatus={(status) => changeStatus(row.item.id, status)}
+                  onRemind={() =>
+                    remindRows([{ item: row.item, meeting: row.meeting }], true)
+                  }
+                  busy={waBusy}
                 />
               ))}
             </div>
@@ -1274,6 +1391,19 @@ export function MeetingWorkspace({
           departments={departments}
           query={search}
           onOpen={openEdit}
+        />
+      ) : null}
+
+      {waTargets ? (
+        <WaReminderDialog
+          targets={waTargets}
+          today={today}
+          busy={waBusy}
+          onOpen={openReminderChat}
+          onSend={() => sendReminder(waTargets.flatMap((target) => target.items), waTargets)}
+          onClose={() => {
+            if (!waBusy) setWaTargets(null);
+          }}
         />
       ) : null}
     </div>
@@ -1392,6 +1522,8 @@ function MeetingCard({
   onEdit,
   onDelete,
   onStatus,
+  onRemind,
+  busy,
 }: {
   meeting: MeetingNote;
   departments: Department[];
@@ -1400,6 +1532,8 @@ function MeetingCard({
   onEdit: () => void;
   onDelete: () => void;
   onStatus: (itemId: string, status: MeetingItemStatus) => void;
+  onRemind: (item: MeetingItem) => void;
+  busy: boolean;
 }) {
   return (
     <article className="panel p-4">
@@ -1489,21 +1623,31 @@ function MeetingCard({
                     ) : null}
                   </div>
                 </div>
-                <select
-                  value={item.status}
-                  onChange={(e) =>
-                    onStatus(item.id, e.target.value as MeetingItemStatus)
-                  }
-                  className="rounded-lg border border-line bg-bg-elevated px-2 py-1 text-xs"
-                >
-                  {(Object.keys(MEETING_STATUS_LABEL) as MeetingItemStatus[]).map(
-                    (status) => (
-                      <option key={status} value={status}>
-                        {MEETING_STATUS_LABEL[status]}
-                      </option>
-                    ),
-                  )}
-                </select>
+                <div className="flex shrink-0 flex-col items-end gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => onRemind(item)}
+                    className="rounded-lg border border-ok/30 bg-ok-soft px-2 py-1 text-xs text-ok disabled:opacity-50"
+                    disabled={busy}
+                  >
+                    WA PIC
+                  </button>
+                  <select
+                    value={item.status}
+                    onChange={(e) =>
+                      onStatus(item.id, e.target.value as MeetingItemStatus)
+                    }
+                    className="rounded-lg border border-line bg-bg-elevated px-2 py-1 text-xs"
+                  >
+                    {(Object.keys(MEETING_STATUS_LABEL) as MeetingItemStatus[]).map(
+                      (status) => (
+                        <option key={status} value={status}>
+                          {MEETING_STATUS_LABEL[status]}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                </div>
               </li>
             );
           })}
@@ -1518,6 +1662,8 @@ function FollowRow({
   departments,
   onOpen,
   onStatus,
+  onRemind,
+  busy,
 }: {
   row: {
     item: MeetingItem;
@@ -1529,6 +1675,8 @@ function FollowRow({
   departments: Department[];
   onOpen: () => void;
   onStatus: (status: MeetingItemStatus) => void;
+  onRemind: () => void;
+  busy: boolean;
 }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-2 rounded-xl border border-line px-3 py-2">
@@ -1567,17 +1715,156 @@ function FollowRow({
           ) : null}
         </div>
       </div>
-      <select
-        value={row.item.status}
-        onChange={(e) => onStatus(e.target.value as MeetingItemStatus)}
-        className="rounded-lg border border-line bg-bg-elevated px-2 py-1 text-xs"
+      <div className="flex shrink-0 flex-col items-end gap-1.5">
+        <button
+          type="button"
+          onClick={onRemind}
+          className="rounded-lg border border-ok/30 bg-ok-soft px-2 py-1 text-xs text-ok disabled:opacity-50"
+          disabled={busy}
+        >
+          WA PIC
+        </button>
+        <select
+          value={row.item.status}
+          onChange={(e) => onStatus(e.target.value as MeetingItemStatus)}
+          className="rounded-lg border border-line bg-bg-elevated px-2 py-1 text-xs"
+        >
+          {(Object.keys(MEETING_STATUS_LABEL) as MeetingItemStatus[]).map((status) => (
+            <option key={status} value={status}>
+              {MEETING_STATUS_LABEL[status]}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+}
+
+function WaReminderDialog({
+  targets,
+  today,
+  busy,
+  onOpen,
+  onSend,
+  onClose,
+}: {
+  targets: WaReminderTarget[];
+  today: string;
+  busy: boolean;
+  onOpen: (target: WaReminderTarget) => void;
+  onSend: () => void;
+  onClose: () => void;
+}) {
+  const ready = targets.filter((target) => target.wa);
+  const missing = targets.filter((target) => !target.wa);
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="wa-reminder-title"
+        className="panel max-h-[85vh] w-full max-w-lg overflow-y-auto p-4"
+        onClick={(e) => e.stopPropagation()}
       >
-        {(Object.keys(MEETING_STATUS_LABEL) as MeetingItemStatus[]).map((status) => (
-          <option key={status} value={status}>
-            {MEETING_STATUS_LABEL[status]}
-          </option>
-        ))}
-      </select>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 id="wa-reminder-title" className="font-semibold">
+              Ingatkan PIC via WhatsApp
+            </h2>
+            <p className="mt-1 text-xs text-ink-muted">
+              Pesan berisi isi bahasan dan jadwal, lalu dikirim otomatis ke
+              nomor PIC. Chat manual hanya cadangan jika gateway gagal.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-line px-2 py-1 text-xs"
+          >
+            Tutup
+          </button>
+        </div>
+        {targets.length === 0 ? (
+          <p className="mt-4 text-sm text-ink-muted">
+            Tidak ada bahasan yang bisa diingatkan.
+          </p>
+        ) : (
+          <ul className="mt-4 space-y-3">
+            {ready.map((target) => (
+              <li key={target.key} className="rounded-xl border border-line p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-medium">{target.name}</p>
+                    <p className="text-[11px] text-ink-muted">{target.phone}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onOpen(target)}
+                    className="rounded-lg border border-line px-2.5 py-1 text-xs"
+                  >
+                    Manual
+                  </button>
+                </div>
+                <ul className="mt-2 space-y-1 text-xs text-ink-muted">
+                  {target.items.map((row) => {
+                    const track = itemTrack(row.item.status, row.item.dueDate, today);
+                    const schedule = [
+                      row.item.startDate
+                        ? `mulai ${formatIsoDateId(row.item.startDate)}`
+                        : "",
+                      row.item.dueDate
+                        ? `selesai ${formatIsoDateId(row.item.dueDate)}`
+                        : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" – ");
+                    return (
+                      <li key={row.item.id}>
+                        {row.item.topic}
+                        {schedule ? ` · ${schedule}` : ""}
+                        {` · ${MEETING_TRACK_LABEL[track]}`}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </li>
+            ))}
+            {missing.map((target) => (
+              <li
+                key={target.key}
+                className="rounded-xl border border-warn/30 bg-warn-soft p-3"
+              >
+                <p className="text-sm font-medium">{target.name}</p>
+                <p className="mt-1 text-xs text-warn">
+                  {target.key === "none"
+                    ? "Bahasan ini belum punya PIC."
+                    : "Nomor HP belum diisi di data karyawan, jadi pesan tidak terkirim."}
+                </p>
+                <ul className="mt-2 space-y-1 text-xs text-ink-muted">
+                  {target.items.map((row) => (
+                    <li key={row.item.id}>{row.item.topic}</li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        )}
+        {ready.length > 0 ? (
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={onSend}
+              disabled={busy}
+              className="rounded-xl bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+            >
+              {busy ? "Mengirim..." : `Kirim ke ${ready.length} PIC`}
+            </button>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

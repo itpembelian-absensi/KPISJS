@@ -3,6 +3,7 @@ import { SESSION_DAYS } from "./auth";
 import { seedAssetCategoriesIfEmpty, seedAssetCategoryMenuIfMissing } from "./asset-category-ops";
 import { seedJenisDataIfEmpty, seedJenisDataMenuIfMissing } from "./jenis-data-ops";
 import { backfillCustomersFromSubmissions } from "./customer-ops";
+import { ensureGowaConfig } from "./gowa";
 import { seedMeetingMenuIfMissing } from "./meeting-ops";
 import { seedPengajuanMenusIfMissing } from "./pengajuan-ops";
 import { boolToInt, getDb, getMeta, intToBool, setMeta } from "./db";
@@ -1160,8 +1161,33 @@ function migrateOrphanKpiFunctions() {
   ).run(it.id);
 }
 
+function seedWaGatewayMenuIfMissing() {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT id, role, allowed_menus_json FROM users
+       WHERE allowed_menus_json IS NOT NULL AND trim(allowed_menus_json) != ''`,
+    )
+    .all() as Array<{ id: string; role: string; allowed_menus_json: string }>;
+  const update = db.prepare(
+    "UPDATE users SET allowed_menus_json = ? WHERE id = ?",
+  );
+  for (const row of rows) {
+    if (row.role !== "admin" && row.role !== "it_staff") continue;
+    let menus: unknown;
+    try {
+      menus = JSON.parse(row.allowed_menus_json);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(menus) || menus.includes("/master/wa-gateway")) continue;
+    update.run(JSON.stringify([...menus, "/master/wa-gateway"]), row.id);
+  }
+}
+
 function ensureDb() {
   getDb();
+  ensureGowaConfig();
   seedIfEmpty();
   migrateOrphanKpiFunctions();
   seedKpiFunctionsIfEmpty();
@@ -1169,6 +1195,7 @@ function ensureDb() {
   seedMeetingMenuIfMissing();
   seedBrandingMenuIfMissing();
   seedBackupMenuIfMissing();
+  seedWaGatewayMenuIfMissing();
   seedApprovalChainMenuIfMissing();
   seedPengajuanMenusIfMissing();
   seedAssetCategoriesIfEmpty();

@@ -548,6 +548,12 @@ export const NAV_ENTRIES: NavEntry[] = [
           hint: "Salin / timpa database SQLite",
           roles: ["admin", "it_staff"],
         },
+        {
+          href: "/master/wa-gateway",
+          label: "Gateway WhatsApp",
+          hint: "GOWA dan jadwal kirim laporan bahasan",
+          roles: ["admin", "it_staff"],
+        },
       ],
     },
   },

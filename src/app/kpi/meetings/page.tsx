@@ -20,9 +20,15 @@ export default async function MeetingsPage() {
   if (departments.length === 0) redirect("/");
 
   const deptIds = new Set(departments.map((d) => d.id));
-  const staff = listStaff(true)
+  const allStaff = listStaff(true);
+  const staff = allStaff
     .filter((s) => deptIds.has(s.departmentId))
     .map((s) => ({ id: s.id, name: s.name, departmentId: s.departmentId }));
+  const phoneBook = allStaff.map((s) => ({
+    id: s.id,
+    name: s.name,
+    phone: s.phone,
+  }));
 
   return (
     <div className="space-y-5">
@@ -39,12 +45,15 @@ export default async function MeetingsPage() {
         <p className="mt-2 max-w-3xl text-sm text-ink-muted">
           Semua notulen rapat dikumpulkan di sini. Bahasan bisa dilacak mana
           yang on progress, mana yang overdue, dan mana yang dibahas berulang.
+          Isi bahasan yang belum selesai dikirim otomatis ke WhatsApp masing-masing
+          PIC, memakai nomor HP di data karyawan.
         </p>
       </div>
       <MeetingWorkspace
         departments={departments}
         companyWide={deptScope === "all"}
         staff={staff}
+        phoneBook={phoneBook}
         initialMeetings={listMeetingNotes(
           deptScope === "all" ? undefined : deptScope,
         )}
