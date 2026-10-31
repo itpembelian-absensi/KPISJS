@@ -7,7 +7,15 @@ import {
   resolveDisciplineDeleteRange,
   type DisciplineDeleteUnit,
 } from "@/lib/discipline-period";
-import type { AttendancePeriodSummary, Department, StaffMember } from "@/lib/types";
+import {
+  VIOLATION_LEVELS,
+  type ViolationLevel,
+} from "@/lib/discipline-score";
+import type {
+  AttendancePeriodSummary,
+  Department,
+  StaffMember,
+} from "@/lib/types";
 
 type SummaryRow = AttendancePeriodSummary & { staff: StaffMember | null };
 
@@ -29,6 +37,9 @@ export function AttendanceMaster({
   const [periodFilter, setPeriodFilter] = useState(periods[0] ?? "all");
   const [importing, setImporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [savingViolationId, setSavingViolationId] = useState<string | null>(
+    null,
+  );
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleteScope, setDeleteScope] = useState<"staff" | "all">("staff");
@@ -159,6 +170,38 @@ export function AttendanceMaster({
       setSummaries(data.summaries || []);
       if (data.periods) setPeriodList(data.periods);
     }
+  }
+
+  async function saveViolation(row: SummaryRow, level: ViolationLevel) {
+    if (row.violationLevel === level) return;
+    setSavingViolationId(row.id);
+    setError(null);
+    setMessage(null);
+    const res = await fetch("/api/master/attendance/violation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        staffId: row.staffId,
+        periodLabel: row.periodLabel,
+        violationLevel: level,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setSavingViolationId(null);
+    if (!res.ok || !data.summary) {
+      setError(data.error || "Gagal menyimpan tingkat pelanggaran");
+      return;
+    }
+    const saved = data.summary as AttendancePeriodSummary;
+    setSummaries((prev) =>
+      prev.map((item) =>
+        item.id === row.id
+          ? { ...item, ...saved, staff: item.staff }
+          : item,
+      ),
+    );
+    setMessage("Tingkat pelanggaran disimpan. Skor kedisiplinan dihitung ulang.");
+    router.refresh();
   }
 
   async function deleteDiscipline(input: {
@@ -475,8 +518,10 @@ export function AttendanceMaster({
           <div>
             <h2 className="font-semibold">Skor kedisiplinan</h2>
             <p className="text-xs text-ink-muted">
-              Dihitung dari absensi, keterlambatan, dan lembur · otomatis masuk
-              penilaian KPI &quot;Kedisiplinan &amp; Kehadiran&quot;
+              Rata-rata 4 komponen (25%): kehadiran, keterlambatan (skala per
+              kali), laporan harian (skala persen), dan pelanggaran. Otomatis
+              masuk penilaian KPI
+              &quot;Kedisiplinan &amp; Kehadiran&quot;
             </p>
           </div>
           {avgScore != null ? (
@@ -492,7 +537,7 @@ export function AttendanceMaster({
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
+            <table className="w-full min-w-[980px] text-left text-sm">
               <thead>
                 <tr className="border-b border-line bg-bg-elevated/70 text-xs text-ink-muted uppercase">
                   <th className="px-4 py-2.5 font-medium">Staf</th>
@@ -500,6 +545,7 @@ export function AttendanceMaster({
                   <th className="px-4 py-2.5 font-medium">Hadir</th>
                   <th className="px-4 py-2.5 font-medium">Absen</th>
                   <th className="px-4 py-2.5 font-medium">Telat</th>
+                  <th className="px-4 py-2.5 font-medium">Pelanggaran</th>
                   <th className="px-4 py-2.5 font-medium">Lembur</th>
                   <th className="px-4 py-2.5 font-medium">Skor</th>
                   <th className="px-4 py-2.5 font-medium">Aksi</th>
@@ -523,6 +569,24 @@ export function AttendanceMaster({
                     <td className="px-4 py-3">{s.absentDays}</td>
                     <td className="px-4 py-3">
                       {s.lateCount}x · {s.totalLateMinutes} mnt
+                    </td>
+                    <td className="px-4 py-3">
+                      <select
+                        value={s.violationLevel || "none"}
+                        disabled={
+                          savingViolationId === s.id || deleting || importing
+                        }
+                        onChange={(e) =>
+                          void saveViolation(s, e.target.value as ViolationLevel)
+                        }
+                        className="w-full min-w-[9.5rem] rounded-lg border border-line bg-bg-elevated px-2 py-1.5 text-xs"
+                      >
+                        {VIOLATION_LEVELS.map((item) => (
+                          <option key={item.level} value={item.level}>
+                            {item.label} ({item.score})
+                          </option>
+                        ))}
+                      </select>
                     </td>
                     <td className="px-4 py-3">{s.totalOvertimeMinutes} mnt</td>
                     <td className="px-4 py-3">

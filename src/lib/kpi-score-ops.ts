@@ -1,8 +1,5 @@
 import { randomUUID } from "crypto";
-import {
-  DISCIPLINE_FN_NAME,
-  ensureDisciplineKpiFunctions,
-} from "./attendance-ops";
+import { ensureDisciplineScoreIndicators } from "./attendance-ops";
 import { getDb, boolToInt, intToBool } from "./db";
 import {
   METRIC_TYPE_LABEL,
@@ -326,78 +323,6 @@ export function ensureITScoreRules() {
     );
   if (inds.length > 0 && hasSupportWeighted) return;
   applyScoreTemplateToDepartment(it.id, "IT");
-}
-
-/** Pastikan setiap dept punya indikator skor absensi di fungsi Kedisiplinan & Kehadiran */
-export function ensureDisciplineScoreIndicators() {
-  ensureDisciplineKpiFunctions();
-  const db = getDb();
-  const depts = listDepartments(true);
-  const now = new Date().toISOString();
-  const configJson = JSON.stringify({
-    dataSource: "attendance",
-    notes: "Sumber: modul Absensi & Kedisiplinan (sudah terhubung)",
-  });
-
-  const tx = db.transaction(() => {
-    for (const dept of depts) {
-      const fn = db
-        .prepare(
-          `SELECT id FROM kpi_functions
-           WHERE department_id = ? AND lower(name) = lower(?)
-           LIMIT 1`,
-        )
-        .get(dept.id, DISCIPLINE_FN_NAME) as { id: string } | undefined;
-      if (!fn) continue;
-
-      db.prepare("UPDATE kpi_functions SET active = 1 WHERE id = ?").run(fn.id);
-
-      const existing = db
-        .prepare(
-          `SELECT id, active, metric_type FROM kpi_score_indicators
-           WHERE kpi_function_id = ?
-             AND (
-               metric_type = 'attendance'
-               OR lower(name) = lower('Skor absensi periode')
-             )
-           LIMIT 1`,
-        )
-        .get(fn.id) as
-        | { id: string; active: number; metric_type: string }
-        | undefined;
-
-      if (existing) {
-        db.prepare(
-          `UPDATE kpi_score_indicators SET
-            active = 1,
-            metric_type = 'attendance',
-            config_json = ?,
-            weight_percent = 100,
-            updated_at = ?
-           WHERE id = ?`,
-        ).run(configJson, now, existing.id);
-        continue;
-      }
-
-      db.prepare(
-        `INSERT INTO kpi_score_indicators (
-          id, department_id, kpi_function_id, name, description,
-          weight_percent, metric_type, config_json, sort_order, active,
-          created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, 100, 'attendance', ?, 1, 1, ?, ?)`,
-      ).run(
-        randomUUID(),
-        dept.id,
-        fn.id,
-        "Skor absensi periode",
-        "Dari impor absensi (kehadiran, terlambat, lembur, pulang cepat)",
-        configJson,
-        now,
-        now,
-      );
-    }
-  });
-  tx();
 }
 
 /** Tandai indikator Backup/Patch yang sudah ada sebagai sumber kegiatan */

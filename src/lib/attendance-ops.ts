@@ -8,6 +8,22 @@ import {
 } from "./attendance-import";
 import { getDb, getMeta, setMeta } from "./db";
 import {
+  computeDisciplineBreakdown,
+  dailyReportCoverage,
+  DISCIPLINE_FOCUS,
+  DISCIPLINE_INDICATOR_TEMPLATES,
+  disciplineComponentScore,
+  disciplineIndicatorConfig,
+  disciplinePartNotes,
+  parseViolationLevel,
+  resolveDisciplinePart,
+  todayIsoJakarta,
+  violationLevelLabel,
+  worstViolationLevel,
+  type DisciplineBreakdown,
+  type ViolationLevel,
+} from "./discipline-score";
+import {
   buildDisciplinePeriodOptions,
   disciplinePeriodFromDate,
   disciplinePeriodRange,
@@ -20,6 +36,7 @@ import { upsertKpiAssessment } from "./kpi-ops";
 import {
   ensureDepartmentKpiTemplates,
   ensureStaffFromAttendanceImport,
+  listDepartments,
   listStaff,
 } from "./store";
 import type {
@@ -64,6 +81,7 @@ type SummaryRow = {
   total_late_minutes: number;
   total_overtime_minutes: number;
   discipline_score: number;
+  violation_level: string | null;
   notes: string;
   updated_at: string;
 };
@@ -96,6 +114,7 @@ function mapSummary(row: SummaryRow): AttendancePeriodSummary {
     totalLateMinutes: Number(row.total_late_minutes) || 0,
     totalOvertimeMinutes: Number(row.total_overtime_minutes) || 0,
     disciplineScore: Number(row.discipline_score) || 0,
+    violationLevel: parseViolationLevel(row.violation_level),
     notes: row.notes || "",
     updatedAt: row.updated_at,
   };
@@ -136,7 +155,7 @@ export function ensureDisciplineKpiFunctions() {
         randomUUID(),
         dept.id,
         DISCIPLINE_FN_NAME,
-        "Absensi, keterlambatan, lembur, dan kepatuhan jam kerja (dari impor Excel)",
+        DISCIPLINE_FOCUS,
       );
     }
   });
@@ -154,10 +173,126 @@ function getDisciplineFunctionId(departmentId: string): string | null {
   return row?.id ?? null;
 }
 
+function dailyReportCoverageForStaff(
+  staffId: string,
+  start: string,
+  end: string,
+) {
+  const db = getDb();
+  const holidays = db
+    .prepare(
+      `SELECT work_date FROM attendance_records
+       WHERE staff_id = ? AND work_date >= ? AND work_date <= ?
+         AND status = 'holiday'`,
+    )
+    .all(staffId, start, end) as Array<{ work_date: string }>;
+  const reports = db
+    .prepare(
+      `SELECT r.report_date AS report_date
+       FROM kpi_wa_reports r
+       INNER JOIN users u ON u.id = r.user_id
+       WHERE u.staff_id = ?
+         AND substr(r.report_date, 1, 10) >= ?
+         AND substr(r.report_date, 1, 10) <= ?`,
+    )
+    .all(staffId, start, end) as Array<{ report_date: string }>;
+  return dailyReportCoverage({
+    start,
+    end,
+    holidayDates: holidays.map((row) => row.work_date),
+    reportDates: reports.map((row) => row.report_date),
+    asOf: todayIsoJakarta(),
+  });
+}
+
+export function dailyReportScoreInput(staffId: string, periodLabel: string) {
+  if (!/^\d{4}-\d{2}$/.test(periodLabel)) return null;
+  const { start, end } = disciplinePeriodRange(periodLabel);
+  return dailyReportCoverageForStaff(staffId, start, end);
+}
+
+/** Hitung ulang skor kedisiplinan setelah bukti Lapor WhatsApp berubah. */
+export function refreshDisciplineAfterWaReport(
+  userId: string,
+  reportDates: Array<string | null | undefined>,
+) {
+  const dates = reportDates
+    .map((value) => (value || "").slice(0, 10))
+    .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value));
+  if (!userId || dates.length === 0) return;
+  const row = getDb()
+    .prepare("SELECT staff_id FROM users WHERE id = ?")
+    .get(userId) as { staff_id: string | null } | undefined;
+  const staffId = row?.staff_id?.trim();
+  if (!staffId) return;
+  const periods = [
+    ...new Set(dates.map((date) => disciplinePeriodFromDate(date))),
+  ];
+  rebuildPeriodSummaries([staffId], periods, "Sistem · lapor WhatsApp");
+}
+
+function violationKey(staffId: string, period: string) {
+  return `${staffId}|${period}`;
+}
+
+function readStoredViolationLevel(
+  staffId: string,
+  period: string,
+): ViolationLevel {
+  const row = getDb()
+    .prepare(
+      `SELECT violation_level FROM attendance_period_summaries
+       WHERE staff_id = ? AND period_label = ?`,
+    )
+    .get(staffId, period) as { violation_level: string | null } | undefined;
+  return parseViolationLevel(row?.violation_level);
+}
+
+function snapshotViolationLevels(): Map<string, ViolationLevel> {
+  const rows = getDb()
+    .prepare(
+      `SELECT staff_id, period_label, violation_level
+       FROM attendance_period_summaries`,
+    )
+    .all() as Array<{
+    staff_id: string;
+    period_label: string;
+    violation_level: string | null;
+  }>;
+  const saved = new Map<string, ViolationLevel>();
+  for (const row of rows) {
+    saved.set(
+      violationKey(row.staff_id, row.period_label),
+      parseViolationLevel(row.violation_level),
+    );
+  }
+  return saved;
+}
+
+function violationLevelForRange(
+  staffId: string,
+  from: string,
+  to: string,
+): ViolationLevel {
+  const periods = disciplinePeriodsOverlapping(from, to);
+  if (periods.length === 0) return "none";
+  const placeholders = periods.map(() => "?").join(", ");
+  const rows = getDb()
+    .prepare(
+      `SELECT violation_level FROM attendance_period_summaries
+       WHERE staff_id = ? AND period_label IN (${placeholders})`,
+    )
+    .all(staffId, ...periods) as Array<{ violation_level: string | null }>;
+  return worstViolationLevel(
+    rows.map((row) => parseViolationLevel(row.violation_level)),
+  );
+}
+
 function rebuildPeriodSummaries(
   staffIds: string[],
   periods: string[],
   assessedByName: string,
+  violationOverrides?: Map<string, ViolationLevel>,
 ) {
   const db = getDb();
   const staffMap = new Map(listStaff().map((s) => [s.id, s]));
@@ -202,16 +337,23 @@ function rebuildPeriodSummaries(
         continue;
       }
 
-      const disciplineScore = computeDisciplineScore({
+      const reports = dailyReportCoverageForStaff(staffId, start, end);
+      const violationLevel =
+        violationOverrides?.get(violationKey(staffId, period)) ??
+        readStoredViolationLevel(staffId, period);
+      const parts = computeDisciplineBreakdown({
         workDays,
         presentDays,
         absentDays,
         lateCount,
-        totalLateMinutes,
-        totalOvertimeMinutes,
+        dailyReportPercent: reports.percent,
+        reportRequiredDays: reports.requiredDays,
+        reportCoveredDays: reports.coveredDays,
+        violationLevel,
       });
+      const disciplineScore = parts.total;
 
-      const notes = `Hadir ${presentDays}/${workDays}, absen ${absentDays}, telat ${lateCount}x (${totalLateMinutes} mnt), lembur ${totalOvertimeMinutes} mnt · periode ${formatDisciplinePeriodLabel(period)}`;
+      const notes = `Kehadiran ${parts.attendanceScore} (${presentDays}/${workDays}), telat ${lateCount}x skor ${parts.latenessScore}, laporan harian ${parts.dailyReportScore}, pelanggaran ${violationLevelLabel(parts.violationLevel)} skor ${parts.violationScore} · rata-rata 4 komponen · periode ${formatDisciplinePeriodLabel(period)}`;
       const now = new Date().toISOString();
       const existing = db
         .prepare(
@@ -225,7 +367,7 @@ function rebuildPeriodSummaries(
           `UPDATE attendance_period_summaries SET
             work_days = ?, present_days = ?, absent_days = ?, late_count = ?,
             total_late_minutes = ?, total_overtime_minutes = ?,
-            discipline_score = ?, notes = ?, updated_at = ?
+            discipline_score = ?, violation_level = ?, notes = ?, updated_at = ?
            WHERE id = ?`,
         ).run(
           workDays,
@@ -235,6 +377,7 @@ function rebuildPeriodSummaries(
           totalLateMinutes,
           totalOvertimeMinutes,
           disciplineScore,
+          violationLevel,
           notes,
           now,
           existing.id,
@@ -244,8 +387,8 @@ function rebuildPeriodSummaries(
           `INSERT INTO attendance_period_summaries
             (id, staff_id, period_label, work_days, present_days, absent_days,
              late_count, total_late_minutes, total_overtime_minutes,
-             discipline_score, notes, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             discipline_score, violation_level, notes, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           randomUUID(),
           staffId,
@@ -257,6 +400,7 @@ function rebuildPeriodSummaries(
           totalLateMinutes,
           totalOvertimeMinutes,
           disciplineScore,
+          violationLevel,
           notes,
           now,
         );
@@ -286,7 +430,7 @@ function rebuildPeriodSummaries(
           assessedByName,
         });
       }
-      syncAttendanceIndicatorActuals(staffId, period, disciplineScore);
+      syncAttendanceIndicatorActuals(staffId, period, parts);
     }
   }
 }
@@ -311,37 +455,115 @@ function clearDisciplinePeriod(staff: StaffMember, period: string) {
   clearDisciplinePeriodByStaffId(staff.id, period);
 }
 
-/** Selaraskan capaian indikator absensi yang sudah tersimpan dengan skor baru. */
+type DisciplineIndicatorRow = {
+  id: string;
+  name: string;
+  config_json: string;
+  department_id: string;
+};
+
+function disciplineIndicatorsForStaff(staffId: string): DisciplineIndicatorRow[] {
+  return getDb()
+    .prepare(
+      `SELECT i.id, i.name, i.config_json, i.department_id
+       FROM kpi_score_indicators i
+       INNER JOIN staff s ON s.department_id = i.department_id
+       INNER JOIN kpi_functions f ON f.id = i.kpi_function_id
+       WHERE s.id = ?
+         AND lower(f.name) = lower(?)
+         AND i.active = 1
+         AND i.metric_type = 'attendance'`,
+    )
+    .all(staffId, DISCIPLINE_FN_NAME) as DisciplineIndicatorRow[];
+}
+
+function readIndicatorConfig(raw: string): { disciplinePart?: string | null } {
+  try {
+    const parsed = JSON.parse(raw || "{}") as { disciplinePart?: string | null };
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Tulis skor tiap komponen kedisiplinan ke capaian indikator. */
 function syncAttendanceIndicatorActuals(
   staffId: string,
   period: string,
-  score: number | null,
+  parts: DisciplineBreakdown | null,
 ) {
   const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT a.id
-       FROM kpi_indicator_actuals a
-       INNER JOIN kpi_score_indicators i ON i.id = a.indicator_id
-       WHERE a.staff_id = ? AND a.period_label = ? AND i.metric_type = 'attendance'`,
-    )
-    .all(staffId, period) as Array<{ id: string }>;
-  if (rows.length === 0) return;
+  const indicators = disciplineIndicatorsForStaff(staffId);
+  const now = new Date().toISOString();
 
-  if (score == null) {
+  if (parts == null) {
+    const rows = db
+      .prepare(
+        `SELECT a.id
+         FROM kpi_indicator_actuals a
+         INNER JOIN kpi_score_indicators i ON i.id = a.indicator_id
+         WHERE a.staff_id = ? AND a.period_label = ? AND i.metric_type = 'attendance'`,
+      )
+      .all(staffId, period) as Array<{ id: string }>;
     const del = db.prepare("DELETE FROM kpi_indicator_actuals WHERE id = ?");
     for (const row of rows) del.run(row.id);
     return;
   }
 
-  const rounded = Math.max(0, Math.min(100, Math.round(score * 10) / 10));
-  const now = new Date().toISOString();
-  const upd = db.prepare(
-    `UPDATE kpi_indicator_actuals
-     SET actual_value = ?, computed_score = ?, updated_at = ?
+  const findExisting = db.prepare(
+    `SELECT id FROM kpi_indicator_actuals
+     WHERE staff_id = ? AND period_label = ? AND indicator_id = ?`,
+  );
+  const updateActual = db.prepare(
+    `UPDATE kpi_indicator_actuals SET
+      department_id = ?, actual_value = ?, computed_score = ?, notes = ?,
+      updated_by = ?, updated_at = ?
      WHERE id = ?`,
   );
-  for (const row of rows) upd.run(score, rounded, now, row.id);
+  const insertActual = db.prepare(
+    `INSERT INTO kpi_indicator_actuals (
+      id, department_id, staff_id, period_label, indicator_id,
+      actual_value, target_override, computed_score, notes,
+      updated_by, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
+  );
+
+  for (const ind of indicators) {
+    const part = resolveDisciplinePart({
+      name: ind.name,
+      config: readIndicatorConfig(ind.config_json),
+    });
+    const score = disciplineComponentScore(part, parts);
+    const notes = disciplinePartNotes(part, parts);
+    const existing = findExisting.get(staffId, period, ind.id) as
+      | { id: string }
+      | undefined;
+    if (existing) {
+      updateActual.run(
+        ind.department_id,
+        score,
+        score,
+        notes,
+        "Sistem · kedisiplinan",
+        now,
+        existing.id,
+      );
+      continue;
+    }
+    insertActual.run(
+      randomUUID(),
+      ind.department_id,
+      staffId,
+      period,
+      ind.id,
+      score,
+      score,
+      notes,
+      "Sistem · kedisiplinan",
+      now,
+      now,
+    );
+  }
 }
 
 export function deleteDisciplineData(input: {
@@ -499,6 +721,7 @@ export function rebuildAllDisciplineSummaries(
   assessedByName = "Periode disiplin 21–20",
 ) {
   const db = getDb();
+  const savedViolations = snapshotViolationLevels();
   const records = db
     .prepare("SELECT staff_id, work_date FROM attendance_records")
     .all() as Array<{ staff_id: string; work_date: string }>;
@@ -517,12 +740,150 @@ export function rebuildAllDisciplineSummaries(
     periods.add(disciplinePeriodFromDate(r.work_date));
   }
 
-  rebuildPeriodSummaries([...staffIds], [...periods], assessedByName);
+  rebuildPeriodSummaries(
+    [...staffIds],
+    [...periods],
+    assessedByName,
+    savedViolations,
+  );
   setDisciplinePeriodMode();
   return { staffCount: staffIds.size, periods: [...periods].sort() };
 }
 
 const DISCIPLINE_PERIOD_META = "discipline_period_mode";
+const DISCIPLINE_PARTS_META = "discipline_score_parts";
+
+function readStoredPart(raw: string): string | null {
+  return readIndicatorConfig(raw).disciplinePart ?? null;
+}
+
+/** Pastikan setiap fungsi kedisiplinan punya 4 indikator @ 25%. */
+export function ensureDisciplineScoreIndicators() {
+  ensureDisciplineKpiFunctions();
+  const db = getDb();
+  const depts = listDepartments(true);
+  const now = new Date().toISOString();
+  const legacyFocus = new Set([
+    "",
+    "absensi, keterlambatan, kepatuhan jam kerja",
+    "absensi, keterlambatan, lembur, dan kepatuhan jam kerja (dari impor excel)",
+    "tepat waktu, tidak alpha, tidak pulang cepat / absensi",
+    "kehadiran, keterlambatan (toleransi 2 kali), laporan kerja harian (97%), pelanggaran aturan (sp = 0). empat komponen sama rata.",
+  ]);
+
+  const tx = db.transaction(() => {
+    for (const dept of depts) {
+      const fn = db
+        .prepare(
+          `SELECT id, focus FROM kpi_functions
+           WHERE department_id = ? AND lower(name) = lower(?)
+           LIMIT 1`,
+        )
+        .get(dept.id, DISCIPLINE_FN_NAME) as
+        | { id: string; focus: string }
+        | undefined;
+      if (!fn) continue;
+
+      const focus = (fn.focus || "").trim();
+      if (legacyFocus.has(focus.toLowerCase())) {
+        db.prepare(
+          "UPDATE kpi_functions SET active = 1, focus = ? WHERE id = ?",
+        ).run(DISCIPLINE_FOCUS, fn.id);
+      } else {
+        db.prepare("UPDATE kpi_functions SET active = 1 WHERE id = ?").run(fn.id);
+      }
+
+      const existing = db
+        .prepare(
+          `SELECT id, name, config_json, metric_type
+           FROM kpi_score_indicators
+           WHERE kpi_function_id = ?`,
+        )
+        .all(fn.id) as Array<{
+        id: string;
+        name: string;
+        config_json: string;
+        metric_type: string;
+      }>;
+
+      const used = new Set<string>();
+      for (const tpl of DISCIPLINE_INDICATOR_TEMPLATES) {
+        const match = existing.find((row) => {
+          if (readStoredPart(row.config_json) === tpl.part) return true;
+          return row.name.trim().toLowerCase() === tpl.name.toLowerCase();
+        });
+        const configJson = JSON.stringify(disciplineIndicatorConfig(tpl.part));
+        if (match) {
+          used.add(match.id);
+          db.prepare(
+            `UPDATE kpi_score_indicators SET
+              name = ?, description = ?, weight_percent = ?, metric_type = 'attendance',
+              config_json = ?, sort_order = ?, active = 1, updated_at = ?
+             WHERE id = ?`,
+          ).run(
+            tpl.name,
+            tpl.description,
+            tpl.weightPercent,
+            configJson,
+            tpl.sortOrder,
+            now,
+            match.id,
+          );
+          continue;
+        }
+        const id = randomUUID();
+        used.add(id);
+        db.prepare(
+          `INSERT INTO kpi_score_indicators (
+            id, department_id, kpi_function_id, name, description,
+            weight_percent, metric_type, config_json, sort_order, active,
+            created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, 'attendance', ?, ?, 1, ?, ?)`,
+        ).run(
+          id,
+          dept.id,
+          fn.id,
+          tpl.name,
+          tpl.description,
+          tpl.weightPercent,
+          configJson,
+          tpl.sortOrder,
+          now,
+          now,
+        );
+      }
+
+      const deactivate = db.prepare(
+        `UPDATE kpi_score_indicators
+         SET active = 0, weight_percent = 0, updated_at = ?
+         WHERE id = ?`,
+      );
+      const dropActuals = db.prepare(
+        "DELETE FROM kpi_indicator_actuals WHERE indicator_id = ?",
+      );
+      for (const row of existing) {
+        if (used.has(row.id)) continue;
+        const part = readStoredPart(row.config_json);
+        const legacy =
+          !part &&
+          (row.metric_type === "attendance" ||
+            /skor absensi periode/i.test(row.name));
+        if (!legacy) continue;
+        deactivate.run(now, row.id);
+        dropActuals.run(row.id);
+      }
+    }
+  });
+  tx();
+  ensureDisciplinePartsFormula();
+}
+
+/** Hitung ulang ringkasan sekali setelah skala realisasi dipakai. */
+export function ensureDisciplinePartsFormula() {
+  if (getMeta(DISCIPLINE_PARTS_META) === "4-bands") return;
+  rebuildAllDisciplineSummaries("Skor kedisiplinan skala realisasi");
+  setMeta(DISCIPLINE_PARTS_META, "4-bands");
+}
 
 function setDisciplinePeriodMode() {
   setMeta(DISCIPLINE_PERIOD_META, "21-20");
@@ -755,13 +1116,22 @@ export function summarizeDisciplineByRange(filters: {
   for (const [staffId, list] of byStaff) {
     const tally = tallyDisciplineRecords(list);
     if (tally.workDays === 0) continue;
-    const disciplineScore = computeDisciplineScore(tally);
+    const reports = dailyReportCoverageForStaff(staffId, from, to);
+    const violationLevel = violationLevelForRange(staffId, from, to);
+    const disciplineScore = computeDisciplineScore({
+      ...tally,
+      dailyReportPercent: reports.percent,
+      reportRequiredDays: reports.requiredDays,
+      reportCoveredDays: reports.coveredDays,
+      violationLevel,
+    });
     result.push({
       id: `${staffId}:${from}:${to}`,
       staffId,
       periodLabel: `${from}..${to}`,
       ...tally,
       disciplineScore,
+      violationLevel,
       notes: "",
       updatedAt: now,
       staff: staffMap.get(staffId) ?? null,
@@ -774,12 +1144,63 @@ export function summarizeDisciplineByRange(filters: {
   return result;
 }
 
+export function setDisciplineViolation(input: {
+  staffId: string;
+  periodLabel: string;
+  violationLevel: string;
+  assessedByName: string;
+}):
+  | { ok: true; summary: AttendancePeriodSummary }
+  | { error: string } {
+  const staffId = input.staffId.trim();
+  const periodLabel = input.periodLabel.trim();
+  if (!staffId || !/^\d{4}-\d{2}$/.test(periodLabel)) {
+    return { error: "Staf dan periode wajib." };
+  }
+  if (
+    input.violationLevel !== "none" &&
+    input.violationLevel !== "written" &&
+    input.violationLevel !== "sp1" &&
+    input.violationLevel !== "sp2"
+  ) {
+    return { error: "Tingkat pelanggaran tidak dikenal." };
+  }
+  const level = input.violationLevel;
+  const db = getDb();
+  const existing = db
+    .prepare(
+      `SELECT id FROM attendance_period_summaries
+       WHERE staff_id = ? AND period_label = ?`,
+    )
+    .get(staffId, periodLabel) as { id: string } | undefined;
+  if (!existing) {
+    return { error: "Belum ada ringkasan absensi pada periode ini." };
+  }
+  db.prepare(
+    `UPDATE attendance_period_summaries
+     SET violation_level = ?
+     WHERE staff_id = ? AND period_label = ?`,
+  ).run(level, staffId, periodLabel);
+  rebuildPeriodSummaries([staffId], [periodLabel], input.assessedByName);
+  const row = db
+    .prepare(
+      `SELECT * FROM attendance_period_summaries
+       WHERE staff_id = ? AND period_label = ?`,
+    )
+    .get(staffId, periodLabel) as SummaryRow | undefined;
+  if (!row) {
+    return { error: "Ringkasan periode tidak ditemukan setelah disimpan." };
+  }
+  return { ok: true, summary: mapSummary(row) };
+}
+
 export function listAttendanceSummaries(filters?: {
   departmentId?: string;
   periodLabel?: string;
 }): Array<AttendancePeriodSummary & { staff: StaffMember | null }> {
   listStaff(); // ensure db
   ensureDisciplinePeriodMode();
+  ensureDisciplineScoreIndicators();
   let sql = "SELECT * FROM attendance_period_summaries";
   const params: string[] = [];
   const where: string[] = [];

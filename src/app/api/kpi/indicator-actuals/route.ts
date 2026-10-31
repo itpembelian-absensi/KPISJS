@@ -8,7 +8,11 @@ import {
   listKpiIndicatorActuals,
   upsertKpiIndicatorActualsBatch,
 } from "@/lib/kpi-indicator-actuals-ops";
-import { listAttendanceSummaries } from "@/lib/attendance-ops";
+import {
+  dailyReportScoreInput,
+  listAttendanceSummaries,
+} from "@/lib/attendance-ops";
+import { computeDisciplineBreakdown } from "@/lib/discipline-score";
 import { getUserBySessionToken } from "@/lib/store";
 
 export const runtime = "nodejs";
@@ -81,6 +85,21 @@ export async function POST(req: NextRequest) {
     const disc = listAttendanceSummaries().find(
       (s) => s.staffId === staffId && s.periodLabel === periodLabel,
     );
+    const reportCoverage = disc
+      ? dailyReportScoreInput(disc.staffId, disc.periodLabel)
+      : null;
+    const disciplineBreakdown = disc
+      ? computeDisciplineBreakdown({
+          workDays: disc.workDays,
+          presentDays: disc.presentDays,
+          absentDays: disc.absentDays,
+          lateCount: disc.lateCount,
+          dailyReportPercent: reportCoverage?.percent,
+          reportRequiredDays: reportCoverage?.requiredDays,
+          reportCoveredDays: reportCoverage?.coveredDays,
+          violationLevel: disc.violationLevel,
+        })
+      : null;
 
     const result = upsertKpiIndicatorActualsBatch({
       departmentId,
@@ -106,7 +125,8 @@ export async function POST(req: NextRequest) {
         }),
       ),
       updatedBy: user.name,
-      disciplineScore: disc?.disciplineScore ?? null,
+      disciplineScore: disciplineBreakdown?.total ?? disc?.disciplineScore ?? null,
+      disciplineBreakdown,
       syncAssessments: true,
     });
 

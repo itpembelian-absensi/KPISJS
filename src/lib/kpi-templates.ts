@@ -1,3 +1,4 @@
+import { DISCIPLINE_FOCUS } from "./discipline-score";
 import type { KpiFunction } from "./types";
 
 export type KpiTemplateItem = Omit<
@@ -39,7 +40,7 @@ export const DEPT_KPI_TEMPLATES: Record<string, KpiTemplateItem[]> = {
     {
       name: "Kedisiplinan & Kehadiran",
       weightPercent: 5,
-      focus: "Absensi, keterlambatan, kepatuhan jam kerja",
+      focus: DISCIPLINE_FOCUS,
       sortOrder: 5,
     },
   ],
@@ -207,7 +208,7 @@ export const DEPT_KPI_TEMPLATES: Record<string, KpiTemplateItem[]> = {
     {
       name: "Kedisiplinan & Kehadiran",
       weightPercent: 5,
-      focus: "Tepat waktu, tidak alpha, tidak pulang cepat / absensi",
+      focus: DISCIPLINE_FOCUS,
       sortOrder: 6,
     },
   ],

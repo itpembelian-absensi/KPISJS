@@ -24,8 +24,8 @@ export default async function AttendancePage() {
           Absensi & Kedisiplinan
         </h1>
         <p className="mt-2 text-sm text-ink-muted">
-          Impor data absensi/lembur dari Excel, hitung skor kedisiplinan, dan
-          sinkron ke penilaian KPI per staf.
+          Impor data absensi dari Excel, hitung skor kedisiplinan dari 4
+          komponen yang dibagi rata, dan sinkron ke penilaian KPI per staf.
         </p>
       </div>
       <AttendanceMaster

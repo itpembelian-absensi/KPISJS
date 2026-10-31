@@ -964,6 +964,16 @@ function createSchema(db: Database.Database) {
     .prepare("PRAGMA table_info(kpi_wa_reports)")
     .all() as Array<{ name: string }>;
   const waNames = new Set(waCols.map((col) => col.name));
+  const summaryCols = db
+    .prepare("PRAGMA table_info(attendance_period_summaries)")
+    .all() as Array<{ name: string }>;
+  const summaryNames = new Set(summaryCols.map((col) => col.name));
+  if (!summaryNames.has("violation_level")) {
+    db.exec(
+      "ALTER TABLE attendance_period_summaries ADD COLUMN violation_level TEXT NOT NULL DEFAULT 'none'",
+    );
+  }
+
   if (!waNames.has("username")) {
     db.exec("ALTER TABLE kpi_wa_reports ADD COLUMN username TEXT NOT NULL DEFAULT ''");
     try {

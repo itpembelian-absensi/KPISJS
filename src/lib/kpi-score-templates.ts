@@ -1,3 +1,7 @@
+import {
+  DISCIPLINE_FOCUS,
+  DISCIPLINE_INDICATOR_TEMPLATES,
+} from "./discipline-score";
 import type {
   KpiScoreBand,
   KpiScoreDataSource,
@@ -13,6 +17,21 @@ export type ScoreIndicatorTemplate = {
   config: KpiScoreIndicatorConfig;
   sortOrder: number;
 };
+
+function disciplineScoreIndicators(): ScoreIndicatorTemplate[] {
+  return DISCIPLINE_INDICATOR_TEMPLATES.map((tpl) => ({
+    name: tpl.name,
+    description: tpl.description,
+    weightPercent: tpl.weightPercent,
+    metricType: "attendance" as const,
+    sortOrder: tpl.sortOrder,
+    config: {
+      dataSource: "attendance" as const,
+      disciplinePart: tpl.part,
+      notes: tpl.notes,
+    },
+  }));
+}
 
 export type ScoreFunctionTemplate = {
   name: string;
@@ -258,23 +277,9 @@ export const MEKANIK_SCORE_TEMPLATE: ScoreFunctionTemplate[] = [
   {
     name: "Kedisiplinan & Kehadiran",
     weightPercent: 5,
-    focus: "Tepat waktu, tidak alpha, tidak pulang cepat / absensi",
+    focus: DISCIPLINE_FOCUS,
     sortOrder: 6,
-    indicators: [
-      {
-        name: "Skor absensi periode",
-        description:
-          "Dari impor absensi (tepat waktu, tidak alpha, tidak pulang cepat)",
-        weightPercent: 100,
-        metricType: "attendance",
-        sortOrder: 1,
-        config: {
-          dataSource: "attendance",
-          notes:
-            "Bisa dipecah: tepat waktu 40, tidak alpha 40, tidak pulang cepat 20 (fase input capaian)",
-        },
-      },
-    ],
+    indicators: disciplineScoreIndicators(),
   },
 ];
 
@@ -545,22 +550,9 @@ export const IT_SCORE_TEMPLATE: ScoreFunctionTemplate[] = [
   {
     name: "Kedisiplinan & Kehadiran",
     weightPercent: 5,
-    focus: "Absensi, keterlambatan, kepatuhan jam kerja",
+    focus: DISCIPLINE_FOCUS,
     sortOrder: 5,
-    indicators: [
-      {
-        name: "Skor absensi periode",
-        description:
-          "Dari impor absensi (kehadiran, terlambat, lembur, pulang cepat)",
-        weightPercent: 100,
-        metricType: "attendance",
-        sortOrder: 1,
-        config: {
-          dataSource: "attendance",
-          notes: "Sumber: modul Absensi & Kedisiplinan (sudah terhubung)",
-        },
-      },
-    ],
+    indicators: disciplineScoreIndicators(),
   },
 ];
 
@@ -588,6 +580,7 @@ export const DATA_SOURCE_LABEL: Record<KpiScoreDataSource, string> = {
   ticket: "Otomatis · Ticket",
   activity: "Otomatis · Kegiatan",
   project: "Otomatis · Project",
+  wa_report: "Otomatis · Lapor WhatsApp",
 };
 
 /** Sumber yang sudah benar-benar terhubung ke data sistem */
@@ -597,6 +590,7 @@ export const DATA_SOURCE_WIRED: Record<KpiScoreDataSource, boolean> = {
   ticket: true,
   activity: true,
   project: false,
+  wa_report: true,
 };
 
 export function resolveIndicatorDataSource(

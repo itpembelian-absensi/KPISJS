@@ -4,6 +4,7 @@ import {
   activityProgressOf,
   isActivitySourcedIndicator,
 } from "./activity-score-metrics";
+import { attendanceIndicatorActual } from "./discipline-score";
 import { computeFunctionScoreFromIndicators } from "./kpi-score-compute";
 import {
   assigneeIdsForTicketScore,
@@ -135,6 +136,8 @@ export function computeIndividualScore(input: {
                 targetOverride: fromDb.targetOverride,
               };
             }
+            const fromPart = attendanceIndicatorActual(ind, input.discipline);
+            if (fromPart != null) return { actualValue: fromPart };
             if (discScore != null && Number.isFinite(discScore)) {
               return { actualValue: Number(discScore) };
             }

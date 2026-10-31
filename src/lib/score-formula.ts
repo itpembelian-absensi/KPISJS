@@ -1,4 +1,9 @@
 import {
+  DAILY_REPORT_SCALE_LABEL,
+  LATENESS_SCALE_LABEL,
+  VIOLATION_SCALE_LABEL,
+} from "./discipline-score";
+import {
   dataSourceBadgeLabel,
   METRIC_TYPE_LABEL,
   resolveIndicatorDataSource,
@@ -42,7 +47,15 @@ function indicatorFormulaLine(ind: KpiScoreIndicator): string {
         ? `jumlah vs target ${target} → skor skala`
         : "jumlah capaian → skor skala";
   } else if (ind.metricType === "attendance") {
-    how = "skor absensi 0–100";
+    const part = ind.config.disciplinePart;
+    if (part === "attendance") how = "(hari hadir ÷ hari kerja) × 100";
+    else if (part === "lateness")
+      how = `skala per kali, target 0 (${LATENESS_SCALE_LABEL})`;
+    else if (part === "daily_report")
+      how = `Lapor WhatsApp, satu tanggal satu laporan kecuali hari libur. Target 100% (${DAILY_REPORT_SCALE_LABEL})`;
+    else if (part === "violation")
+      how = `target tidak ada (${VIOLATION_SCALE_LABEL})`;
+    else how = "skor absensi 0–100";
   } else if (ind.metricType === "weighted_leaf") {
     how = "nilai 0–100";
   }
@@ -95,15 +108,16 @@ export function buildFunctionScoreFormula(input: {
     };
   }
 
-  if (source === "absensi" || (isDisciplineFn(fn.name) && activeInds.length === 0)) {
+  if (isDisciplineFn(fn.name) || source === "absensi") {
     return {
-      summary: "Dari absensi: mulai 100, dikurangi absen/telat, + lembur.",
+      summary:
+        "Empat komponen sama rata: kehadiran, keterlambatan, laporan harian, dan pelanggaran.",
       lines: [
-        "Skor fungsi = skor absensi periode (maks 100)",
-        "− (hari absen ÷ hari kerja) × 45",
-        "− min(jumlah telat × 2,5, 20)",
-        "− min(menit telat ÷ 30, 15)",
-        "+ min(menit lembur ÷ 120, 5)",
+        "Skor fungsi = (kehadiran + keterlambatan + laporan harian + pelanggaran) ÷ 4",
+        "Kehadiran (25%): (hari hadir ÷ hari kerja) × 100. 100% = skor 100",
+        `Keterlambatan (25%): target 0 kali. ${LATENESS_SCALE_LABEL}`,
+        `Laporan kerja harian (25%): Lapor WhatsApp, satu laporan per tanggal periode 21–20 kecuali hari libur. Target 100%. ${DAILY_REPORT_SCALE_LABEL}`,
+        `Pelanggaran aturan (25%): diisi di Master Absensi. ${VIOLATION_SCALE_LABEL}`,
         contrib,
       ],
     };

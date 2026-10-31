@@ -23,6 +23,12 @@ import {
   disciplinePeriodRange,
   formatDisciplinePeriodLabel,
 } from "@/lib/discipline-period";
+import {
+  attendanceIndicatorActual,
+  DAILY_REPORT_SCALE_LABEL,
+  LATENESS_SCALE_LABEL,
+  VIOLATION_SCALE_LABEL,
+} from "@/lib/discipline-score";
 import { computeFunctionScoreFromIndicators } from "@/lib/kpi-score-compute";
 import {
   METRIC_TYPE_LABEL,
@@ -157,12 +163,11 @@ const SCORE_SOURCE_META = {
     hint: "Dari impor absensi & kedisiplinan",
     className: "bg-ok/15 text-ok ring-1 ring-ok/25",
     formula: [
-      "Skor fungsi = skor absensi periode (maks 100)",
-      "Mulai dari 100",
-      "− (hari absen ÷ hari kerja) × 45",
-      "− min(jumlah telat × 2,5, 20)",
-      "− min(menit telat ÷ 30, 15)",
-      "+ min(menit lembur ÷ 120, 5)",
+      "Skor fungsi = (kehadiran + keterlambatan + laporan harian + pelanggaran) ÷ 4",
+      "Kehadiran 25%: (hari hadir ÷ hari kerja) × 100. 100% = skor 100",
+      `Keterlambatan 25%: target 0 kali. ${LATENESS_SCALE_LABEL}`,
+      `Laporan kerja harian 25%: Lapor WhatsApp, satu per tanggal kecuali hari libur. Target 100%. ${DAILY_REPORT_SCALE_LABEL}`,
+      `Pelanggaran / SP 25%: diisi di Master Absensi. ${VIOLATION_SCALE_LABEL}`,
       "Kontribusi total = skor fungsi × bobot fungsi ÷ 100",
     ],
   },
@@ -798,7 +803,7 @@ export function DepartmentKpiWorkspace({
     const resolveActualForIndicator = (
       ind: (typeof deptIndicators)[number],
       actualMap: Map<string, (typeof deptActuals)[number]>,
-      disc: number | undefined,
+      disc: DisciplineRow | undefined,
       ticketMetrics: ReturnType<typeof computeTicketScoreMetrics>,
       activityPool: typeof activeActs,
     ) => {
@@ -810,9 +815,8 @@ export function DepartmentKpiWorkspace({
             targetOverride: fromDb.targetOverride,
           };
         }
-        if (disc != null && Number.isFinite(disc)) {
-          return { actualValue: Number(disc) };
-        }
+        const fromPart = attendanceIndicatorActual(ind, disc);
+        if (fromPart != null) return { actualValue: fromPart };
         return null;
       }
 
@@ -933,7 +937,7 @@ export function DepartmentKpiWorkspace({
         for (const sid of staffIdsForRules) {
           const disc = deptDiscipline.find(
             (d) => d.staffId === sid && d.periodLabel === periodForRules,
-          )?.disciplineScore;
+          );
           const staffActuals = deptActuals.filter(
             (a) => a.staffId === sid && a.periodLabel === periodForRules,
           );
@@ -1225,11 +1229,12 @@ export function DepartmentKpiWorkspace({
           (d) =>
             d.staffId === scoreStaffId && d.periodLabel === scorePeriod,
         );
+        const fromPart = attendanceIndicatorActual(ind, disc);
         drafts[ind.id] =
           existing?.actualValue != null
             ? String(existing.actualValue)
-            : disc != null
-              ? String(disc.disciplineScore)
+            : fromPart != null
+              ? String(fromPart)
               : "";
       } else if (isTicketSourcedIndicator(ind)) {
         const auto = ticketActualValueForIndicator(ind, ticketMetrics);
@@ -3498,12 +3503,12 @@ export function DepartmentKpiWorkspace({
         {tab === "kedisiplinan" ? (
           <div className="space-y-4 p-4">
             <p className="text-sm text-ink-muted">
-              Skor dari absensi, keterlambatan, dan lembur pada rentang tanggal
-              yang dipilih. Default mengikuti periode baku{" "}
-              <strong>tanggal 21 s/d 20 bulan berikutnya</strong>. Impor Excel
-              dilakukan di Master data → Absensi &amp; Kedisiplinan. Penilaian
-              fungsi <strong>Kedisiplinan &amp; Kehadiran</strong> tetap memakai
-              periode baku.
+              Skor = rata-rata 4 komponen (masing-masing 25%): kehadiran,
+              keterlambatan (target 0 kali), laporan kerja harian (target
+              100%), dan pelanggaran aturan. Laporan harian dihitung dari Lapor
+              WhatsApp: satu laporan per tanggal pada periode{" "}
+              <strong>21 s/d 20</strong>, kecuali hari libur. Tingkat
+              pelanggaran diisi di Master Absensi.
             </p>
 
             <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">

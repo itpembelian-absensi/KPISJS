@@ -1,6 +1,10 @@
 import { randomUUID } from "crypto";
 import { getDb } from "./db";
 import {
+  attendanceIndicatorActual,
+  type DisciplineBreakdown,
+} from "./discipline-score";
+import {
   computeFunctionScoreFromIndicators,
   computeIndicatorScore,
 } from "./kpi-score-compute";
@@ -110,8 +114,10 @@ export function upsertKpiIndicatorActualsBatch(input: {
   periodLabel: string;
   items: ActualInputItem[];
   updatedBy?: string;
-  /** Skor absensi periode (untuk metricType attendance) */
+  /** Skor gabungan, dipakai jika rincian komponen tidak dikirim */
   disciplineScore?: number | null;
+  /** Rincian 4 komponen. Jika ada, tiap indikator absensi diisi skor bagiannya. */
+  disciplineBreakdown?: DisciplineBreakdown | null;
   syncAssessments?: boolean;
 }):
   | {
@@ -147,7 +153,13 @@ export function upsertKpiIndicatorActualsBatch(input: {
 
       let actualValue = item.actualValue;
       if (ind.metricType === "attendance") {
-        if (
+        const fromDiscipline = attendanceIndicatorActual(
+          ind,
+          input.disciplineBreakdown ?? null,
+        );
+        if (fromDiscipline != null) {
+          actualValue = fromDiscipline;
+        } else if (
           input.disciplineScore != null &&
           Number.isFinite(input.disciplineScore)
         ) {
@@ -233,14 +245,25 @@ export function upsertKpiIndicatorActualsBatch(input: {
   });
   tx();
 
-  // Auto-fill attendance indicators if discipline provided but not in items
-  if (
-    input.disciplineScore != null &&
-    Number.isFinite(input.disciplineScore)
-  ) {
-    const disc = Number(input.disciplineScore);
+  // Isi indikator absensi yang belum ikut di batch
+  const hasDiscipline =
+    input.disciplineBreakdown != null ||
+    (input.disciplineScore != null && Number.isFinite(input.disciplineScore));
+  if (hasDiscipline) {
     for (const ind of indicators.filter((i) => i.metricType === "attendance")) {
       if (saved.some((a) => a.indicatorId === ind.id)) continue;
+      const fromPart = attendanceIndicatorActual(
+        ind,
+        input.disciplineBreakdown ?? null,
+      );
+      const disc =
+        fromPart != null
+          ? fromPart
+          : input.disciplineScore != null &&
+              Number.isFinite(input.disciplineScore)
+            ? Number(input.disciplineScore)
+            : null;
+      if (disc == null) continue;
       const existing = db
         .prepare(
           `SELECT id FROM kpi_indicator_actuals
@@ -349,6 +372,7 @@ export function scoreStaffPeriodFromIndicators(input: {
   indicators?: KpiScoreIndicator[];
   actuals?: KpiIndicatorActual[];
   disciplineScore?: number | null;
+  disciplineBreakdown?: DisciplineBreakdown | null;
   tickets?: import("./types").Ticket[];
   agents?: import("./types").Agent[];
   activities?: KpiActivity[];
@@ -427,6 +451,11 @@ export function scoreStaffPeriodFromIndicators(input: {
               targetOverride: fromDb.targetOverride,
             };
           }
+          const fromPart = attendanceIndicatorActual(
+            ind,
+            input.disciplineBreakdown ?? null,
+          );
+          if (fromPart != null) return { actualValue: fromPart };
           if (
             input.disciplineScore != null &&
             Number.isFinite(input.disciplineScore)

@@ -105,15 +105,19 @@ export function KpiScoreRulesMaster({
     setMessage(null);
     const fd = new FormData(e.currentTarget);
     const metricType = String(fd.get("metricType")) as KpiScoreMetricType;
-    const dataSource = String(fd.get("dataSource") || "manual") as KpiScoreDataSource;
+    const pickedSource = String(fd.get("dataSource") || "manual") as KpiScoreDataSource;
+    const disciplinePart = editing?.config.disciplinePart;
     const defaultTarget = Number(fd.get("defaultTarget") || 0);
+    const dataSource: KpiScoreDataSource =
+      disciplinePart === "daily_report"
+        ? "wa_report"
+        : metricType === "attendance"
+          ? "attendance"
+          : pickedSource || "manual";
     const config: KpiScoreIndicator["config"] = {
       ...(editing?.config || {}),
       notes: String(fd.get("notes") || ""),
-      dataSource:
-        metricType === "attendance"
-          ? "attendance"
-          : dataSource || "manual",
+      dataSource,
     };
     if (defaultTarget > 0) config.defaultTarget = defaultTarget;
     else delete config.defaultTarget;
@@ -291,7 +295,10 @@ export function KpiScoreRulesMaster({
                 {(Object.keys(METRIC_TYPE_LABEL) as KpiScoreMetricType[]).map(
                   (k) => (
                     <option key={k} value={k}>
-                      {METRIC_TYPE_LABEL[k]}
+                      {k === "attendance" &&
+                      editing?.config.disciplinePart === "daily_report"
+                        ? "Dari Lapor WhatsApp"
+                        : METRIC_TYPE_LABEL[k]}
                     </option>
                   ),
                 )}
@@ -302,10 +309,12 @@ export function KpiScoreRulesMaster({
               <select
                 name="dataSource"
                 defaultValue={
-                  editing?.config.dataSource ||
-                  (editing?.metricType === "attendance"
-                    ? "attendance"
-                    : "manual")
+                  editing?.config.disciplinePart === "daily_report"
+                    ? "wa_report"
+                    : editing?.config.dataSource ||
+                      (editing?.metricType === "attendance"
+                        ? "attendance"
+                        : "manual")
                 }
                 className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2.5"
               >
@@ -321,8 +330,10 @@ export function KpiScoreRulesMaster({
           </div>
           <p className="text-[11px] text-ink-muted">
             <strong>Manual</strong> = diisi di Penilaian &amp; Skor.{" "}
-            <strong>Absensi</strong>, <strong>Ticket</strong>, dan{" "}
-            <strong>Kegiatan</strong> sudah terhubung otomatis. Project masih
+            <strong>Absensi</strong>, <strong>Lapor WhatsApp</strong>,{" "}
+            <strong>Ticket</strong>, dan <strong>Kegiatan</strong> sudah
+            terhubung otomatis. Laporan kerja harian wajib satu bukti per
+            tanggal pada periode 21–20, kecuali hari libur. Project masih
             rencana (sementara bisa diisi manual).
           </p>
           <label className="block text-sm">
@@ -510,7 +521,9 @@ export function KpiScoreRulesMaster({
                             );
                           })()}
                           <span className="text-xs text-brand">
-                            {METRIC_TYPE_LABEL[ind.metricType]}
+                            {ind.config.disciplinePart === "daily_report"
+                              ? "Dari Lapor WhatsApp"
+                              : METRIC_TYPE_LABEL[ind.metricType]}
                             {ind.config.defaultTarget != null
                               ? ` · target ${ind.config.defaultTarget}`
                               : ""}

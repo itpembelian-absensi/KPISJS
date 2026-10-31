@@ -2,6 +2,11 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import {
+  DAILY_REPORT_SCALE_LABEL,
+  LATENESS_SCALE_LABEL,
+  VIOLATION_SCALE_LABEL,
+} from "@/lib/discipline-score";
 import type { Department, KpiFunction } from "@/lib/types";
 
 function isDisciplineFn(name: string) {
@@ -100,13 +105,13 @@ export function ScoreGuideClient({
               2. Kedisiplinan (Absensi)
             </p>
             <p className="mt-2 text-sm">
-              Mulai 100, dikurangi absen/telat, ditambah lembur (maks 100).
+              Rata-rata 4 komponen, masing-masing 25%.
             </p>
             <ul className="mt-2 space-y-1 text-xs text-ink-muted">
-              <li>− (hari absen ÷ hari kerja) × 45</li>
-              <li>− min(jumlah telat × 2.5, 20)</li>
-              <li>− min(menit telat ÷ 30, 15)</li>
-              <li>+ min(menit lembur ÷ 120, 5)</li>
+              <li>Kehadiran: (hari hadir ÷ hari kerja) × 100</li>
+              <li>Keterlambatan: {LATENESS_SCALE_LABEL}</li>
+              <li>Laporan harian: {DAILY_REPORT_SCALE_LABEL}</li>
+              <li>Pelanggaran: {VIOLATION_SCALE_LABEL}</li>
             </ul>
             <p className="mt-2 text-xs text-ink-muted">
               Skor fungsi = rata-rata staf dept (atau individu jika difilter).
@@ -187,8 +192,8 @@ export function ScoreGuideClient({
                           </span>
                         </td>
                         <td className="px-4 py-3 text-xs text-ink-muted">
-                          {disc
-                            ? "Rata-rata skor disiplin staf dari impor absensi (periode 21–20)."
+                            {disc
+                            ? "Rata-rata 4 komponen (25%). Keterlambatan dan laporan harian memakai skala realisasi. Pelanggaran diisi di Master Absensi. Periode 21–20."
                             : "Rata-rata capaian kegiatan tertaut fungsi ini (Selesai 100% · Berjalan 50%)."}
                         </td>
                         <td className="px-4 py-3 text-xs text-ink-muted">

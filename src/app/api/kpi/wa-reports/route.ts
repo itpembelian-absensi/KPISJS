@@ -9,6 +9,7 @@ import {
   SESSION_COOKIE,
 } from "@/lib/auth";
 import type { SessionUser } from "@/lib/types";
+import { refreshDisciplineAfterWaReport } from "@/lib/attendance-ops";
 import { getUserBySessionToken } from "@/lib/store";
 import {
   deleteKpiWaReport,
@@ -184,6 +185,11 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: result.error }, { status: 400 });
       }
 
+      refreshDisciplineAfterWaReport(result.userId, [
+        existing?.reportDate,
+        result.reportDate,
+      ]);
+
       return NextResponse.json({ report: result });
     }
 
@@ -212,6 +218,7 @@ export async function POST(req: NextRequest) {
       if ("error" in result) {
         return NextResponse.json({ error: result.error }, { status: 400 });
       }
+      refreshDisciplineAfterWaReport(existing.userId, [existing.reportDate]);
       return NextResponse.json({ ok: true });
     }
 
@@ -247,6 +254,11 @@ export async function POST(req: NextRequest) {
     if ("error" in result) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
+
+    refreshDisciplineAfterWaReport(result.userId, [
+      existing?.reportDate,
+      result.reportDate,
+    ]);
 
     return NextResponse.json({ report: result });
   } catch (err) {

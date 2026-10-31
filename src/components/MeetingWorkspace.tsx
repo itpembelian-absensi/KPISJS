@@ -190,6 +190,7 @@ export function MeetingWorkspace({
   const [summary, setSummary] = useState("");
   const [items, setItems] = useState<DraftItem[]>([emptyItem()]);
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [waTargets, setWaTargets] = useState<WaReminderTarget[] | null>(null);
@@ -613,6 +614,60 @@ export function MeetingWorkspace({
     setWaTargets(targets);
   }
 
+  async function importExcel(file: File) {
+    setImporting(true);
+    setError(null);
+    setMessage(null);
+    const body = new FormData();
+    body.append("file", file);
+    const res = await fetch("/api/kpi/meetings/import", { method: "POST", body });
+    const data = await res.json().catch(() => ({}));
+    setImporting(false);
+    if (!res.ok) {
+      const details = Array.isArray(data.errors)
+        ? data.errors.map((item: unknown) => String(item)).filter(Boolean)
+        : [];
+      setError(
+        details.length > 0
+          ? [String(data.error || "Gagal unggah Excel"), ...details].join("\n")
+          : String(data.error || "Gagal unggah Excel"),
+      );
+      return;
+    }
+    const created = (Array.isArray(data.meetings) ? data.meetings : []) as MeetingNote[];
+    setMeetings((prev) => {
+      const map = new Map(prev.map((meeting) => [meeting.id, meeting]));
+      for (const meeting of created) map.set(meeting.id, meeting);
+      return [...map.values()].sort((a, b) => {
+        const byDate = b.meetingDate.localeCompare(a.meetingDate);
+        if (byDate !== 0) return byDate;
+        return b.createdAt.localeCompare(a.createdAt);
+      });
+    });
+    if (created.length > 0) {
+      const weeks = new Set(created.map((meeting) => weekBounds(meeting.meetingDate).start));
+      if (weeks.size === 1) {
+        setView("week");
+        setWeekAnchor(created[0].meetingDate);
+      } else {
+        setView("notes");
+      }
+      setSearch("");
+    }
+    const names = created.map((meeting) => meeting.title);
+    const shown = names.slice(0, 3).join(", ");
+    const rest = names.length > 3 ? `, dan ${names.length - 3} lainnya` : "";
+    const warnings = Array.isArray(data.warnings)
+      ? data.warnings.map((item: unknown) => String(item)).filter(Boolean)
+      : [];
+    setMessage(
+      [
+        `${created.length} notulen diimpor${shown ? `: ${shown}${rest}` : ""} · ${Number(data.itemCount) || 0} bahasan.`,
+        ...warnings,
+      ].join("\n"),
+    );
+  }
+
   const pickedDepartmentIds = allDepartments
     ? departments.map((dept) => dept.id)
     : departmentIds;
@@ -632,10 +687,12 @@ export function MeetingWorkspace({
   return (
     <div className="space-y-4">
       {message ? (
-        <p className="rounded-xl bg-ok-soft px-4 py-3 text-sm text-ok">{message}</p>
+        <p className="whitespace-pre-line rounded-xl bg-ok-soft px-4 py-3 text-sm text-ok">
+          {message}
+        </p>
       ) : null}
       {error && !showForm ? (
-        <p className="rounded-xl bg-danger-soft px-4 py-3 text-sm text-danger">
+        <p className="whitespace-pre-line rounded-xl bg-danger-soft px-4 py-3 text-sm text-danger">
           {error}
         </p>
       ) : null}
@@ -673,7 +730,8 @@ export function MeetingWorkspace({
         />
       </div>
 
-      <div className="panel flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
+      <div className="panel flex flex-col gap-3 p-3 sm:p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -718,6 +776,30 @@ export function MeetingWorkspace({
           >
             Ingatkan PIC
           </button>
+          <a
+            href="/api/kpi/meetings/template"
+            className="rounded-xl border border-line px-4 py-2 text-sm font-medium hover:bg-bg-elevated"
+          >
+            Template Excel
+          </a>
+          <label
+            className={`rounded-xl border border-line px-4 py-2 text-sm font-medium hover:bg-bg-elevated ${
+              importing ? "pointer-events-none opacity-60" : "cursor-pointer"
+            }`}
+          >
+            {importing ? "Mengunggah..." : "Unggah Excel"}
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              disabled={importing}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void importExcel(file);
+                e.target.value = "";
+              }}
+            />
+          </label>
           <button
             type="button"
             onClick={openNew}
@@ -726,6 +808,12 @@ export function MeetingWorkspace({
             Notulen baru
           </button>
         </div>
+        </div>
+        <p className="text-[11px] text-ink-muted">
+          Untuk banyak bahasan sekaligus: unduh Template Excel, isi satu baris
+          per bahasan di sheet Notulen, lalu Unggah Excel. Baris dengan Kode
+          grup yang sama menjadi satu notulen.
+        </p>
       </div>
 
       <div className="flex flex-wrap gap-2">

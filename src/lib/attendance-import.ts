@@ -1,6 +1,10 @@
 import fs from "fs";
 import path from "path";
 import * as XLSX from "xlsx";
+import {
+  computeDisciplineBreakdown,
+  type DisciplineScoreInput,
+} from "./discipline-score";
 import type { AttendanceStatus } from "./types";
 
 export type ExcelAttendanceRow = {
@@ -372,20 +376,12 @@ export function defaultAttendanceFilePath() {
   return ABSENSI_FILE;
 }
 
-/** Skor kedisiplinan 0–100 dari ringkasan periode */
-export function computeDisciplineScore(input: {
-  workDays: number;
-  presentDays: number;
-  absentDays: number;
-  lateCount: number;
-  totalLateMinutes: number;
-  totalOvertimeMinutes: number;
-}): number {
-  const workDays = Math.max(input.workDays, 1);
-  let score = 100;
-  score -= (input.absentDays / workDays) * 45;
-  score -= Math.min(input.lateCount * 2.5, 20);
-  score -= Math.min(input.totalLateMinutes / 30, 15);
-  score += Math.min(input.totalOvertimeMinutes / 120, 5);
-  return Math.round(Math.max(0, Math.min(100, score)) * 10) / 10;
+/** Skor kedisiplinan 0–100: rata-rata 4 komponen (kehadiran, telat, laporan, SP). */
+export function computeDisciplineScore(
+  input: DisciplineScoreInput & {
+    totalLateMinutes?: number;
+    totalOvertimeMinutes?: number;
+  },
+): number {
+  return computeDisciplineBreakdown(input).total;
 }

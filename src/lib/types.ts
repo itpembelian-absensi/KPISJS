@@ -96,7 +96,8 @@ export type KpiScoreDataSource =
   | "attendance"
   | "ticket"
   | "activity"
-  | "project";
+  | "project"
+  | "wa_report";
 
 export type KpiScoreBand = {
   /** Nilai minimum capaian (unit / persen / skor) */
@@ -122,6 +123,8 @@ export type KpiScoreIndicatorConfig = {
   notes?: string;
   /** Sumber capaian: manual vs otomatis dari modul */
   dataSource?: KpiScoreDataSource;
+  /** Komponen fungsi Kedisiplinan (empat bagian sama rata) */
+  disciplinePart?: "attendance" | "lateness" | "daily_report" | "violation";
 };
 
 /** Indikator terukur di bawah fungsi KPI (aturan skor per dept) */
@@ -370,6 +373,8 @@ export interface AttendancePeriodSummary {
   totalLateMinutes: number;
   totalOvertimeMinutes: number;
   disciplineScore: number;
+  /** none | written | sp1 | sp2 */
+  violationLevel: "none" | "written" | "sp1" | "sp2";
   notes: string;
   updatedAt: string;
 }

@@ -45,6 +45,7 @@ export default async function MeetingsPage() {
         <p className="mt-2 max-w-3xl text-sm text-ink-muted">
           Semua notulen rapat dikumpulkan di sini. Bahasan bisa dilacak mana
           yang on progress, mana yang overdue, dan mana yang dibahas berulang.
+          Banyak notulen sekaligus bisa diisi lewat template Excel.
           Isi bahasan yang belum selesai dikirim otomatis ke WhatsApp masing-masing
           PIC, memakai nomor HP di data karyawan.
         </p>
