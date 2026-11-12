@@ -373,8 +373,8 @@ export const NAV_ENTRIES: NavEntry[] = [
       children: [
         {
           href: "/kpi",
-          label: "KPI IT",
-          hint: "SLA, repeat, satisfaction",
+          label: "Papan KPI",
+          hint: "Ringkasan sesuai departemen",
           roles: ["admin", "manager", "it_staff"],
         },
         {

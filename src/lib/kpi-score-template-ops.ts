@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { getDb, boolToInt, intToBool } from "./db";
+import { getDb, boolToInt, getMeta, intToBool, setMeta } from "./db";
 import { SCORE_TEMPLATE_BY_CODE } from "./kpi-score-templates";
 import { listDepartments, listKpiFunctions } from "./store";
 import type {
@@ -196,12 +196,38 @@ export function upsertKpiScoreTemplate(
   return getKpiScoreTemplate(id)!;
 }
 
+const DISMISSED_BUILTIN_META = "kpi_score_template_dismissed_codes";
+
+function dismissedBuiltinCodes(): Set<string> {
+  const raw = getMeta(DISMISSED_BUILTIN_META);
+  if (!raw) return new Set();
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(
+      parsed.map((code) => String(code).trim().toUpperCase()).filter(Boolean),
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function rememberDismissedBuiltin(code: string) {
+  const upper = code.trim().toUpperCase();
+  if (!SCORE_TEMPLATE_BY_CODE[upper]) return;
+  const codes = dismissedBuiltinCodes();
+  if (codes.has(upper)) return;
+  codes.add(upper);
+  setMeta(DISMISSED_BUILTIN_META, JSON.stringify([...codes]));
+}
+
 export function deleteKpiScoreTemplate(
   id: string,
 ): { ok: true } | { error: string } {
   const existing = getKpiScoreTemplate(id);
   if (!existing) return { error: "Template tidak ditemukan" };
   getDb().prepare("DELETE FROM kpi_score_templates WHERE id = ?").run(id);
+  rememberDismissedBuiltin(existing.code);
   return { ok: true };
 }
 
@@ -312,7 +338,9 @@ export function ensureBuiltInScoreTemplates() {
       },
     ];
 
+  const dismissed = dismissedBuiltinCodes();
   for (const meta of builtins) {
+    if (dismissed.has(meta.code)) continue;
     const built = SCORE_TEMPLATE_BY_CODE[meta.code];
     if (!built) continue;
     const existing = db

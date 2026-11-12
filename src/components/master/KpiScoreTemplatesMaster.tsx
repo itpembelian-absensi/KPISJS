@@ -385,7 +385,7 @@ export function KpiScoreTemplatesMaster({
               </li>
             ) : (
               templates.map((t) => (
-                <li key={t.id}>
+                <li key={t.id} className="flex items-stretch">
                   <button
                     type="button"
                     onClick={() => {
@@ -394,7 +394,7 @@ export function KpiScoreTemplatesMaster({
                       setError(null);
                       setMessage(null);
                     }}
-                    className={`flex w-full flex-col items-start gap-0.5 px-3 py-3 text-left text-sm transition hover:bg-brand-soft/40 ${
+                    className={`flex min-w-0 flex-1 flex-col items-start gap-0.5 px-3 py-3 text-left text-sm transition hover:bg-brand-soft/40 ${
                       selectedId === t.id && !draft
                         ? "bg-brand-soft/50"
                         : ""
@@ -411,6 +411,14 @@ export function KpiScoreTemplatesMaster({
                       {t.functions.length} fungsi · {countIndicators(t)}{" "}
                       indikator
                     </span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => void removeTemplate(t)}
+                    className="shrink-0 border-l border-line px-2.5 text-xs text-danger hover:bg-danger/5 disabled:opacity-50"
+                  >
+                    Hapus
                   </button>
                 </li>
               ))

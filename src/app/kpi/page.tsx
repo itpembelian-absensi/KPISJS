@@ -1,13 +1,16 @@
 import Link from "next/link";
+import { PriorityBadge } from "@/components/Badges";
+import { DepartmentKpiBoard } from "@/components/DepartmentKpiBoard";
 import {
   formatHours,
   formatPercent,
   formatScore,
   StatCard,
 } from "@/components/StatCard";
-import { PriorityBadge } from "@/components/Badges";
-import { canManageMaster } from "@/lib/auth";
+import { canManageMaster, getEffectiveDepartmentScope } from "@/lib/auth";
 import { computeKpi } from "@/lib/kpi";
+import { listKpiIndicatorActuals } from "@/lib/kpi-indicator-actuals-ops";
+import { listKpiScoreIndicators } from "@/lib/kpi-score-ops";
 import { requireUser } from "@/lib/session";
 import {
   formatSlaTarget,
@@ -18,13 +21,34 @@ import { listAgents, listDepartments, listKpiFunctions, readData } from "@/lib/s
 
 export const dynamic = "force-dynamic";
 
-export default async function KpiPage() {
+export default async function KpiPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ departmentId?: string }>;
+}) {
   const user = await requireUser(["admin", "manager", "it_staff"]);
+  const params = await searchParams;
+  const deptScope = getEffectiveDepartmentScope(user);
+  const allDepartments = listDepartments(true);
+  const departments =
+    deptScope === "all"
+      ? allDepartments
+      : allDepartments.filter((d) => deptScope.includes(d.id));
+  const requested = params.departmentId;
+  const selected =
+    departments.find((d) => d.id === requested) ||
+    (user.departmentId
+      ? departments.find((d) => d.id === user.departmentId)
+      : undefined) ||
+    departments.find((d) => d.code === "IT") ||
+    departments[0];
+  const isIt = selected?.code === "IT";
   const data = readData();
   const agents = listAgents();
-  const kpi = computeKpi(data.tickets, agents);
-  const itDept = listDepartments(true).find((d) => d.code === "IT");
-  const functions = listKpiFunctions(true, itDept?.id);
+  const kpi = isIt ? computeKpi(data.tickets, agents) : null;
+  const functions = selected ? listKpiFunctions(true, selected.id) : [];
+  const indicators = selected ? listKpiScoreIndicators(selected.id) : [];
+  const actuals = selected ? listKpiIndicatorActuals({ departmentId: selected.id }) : [];
   const weightTotal = functions.reduce((sum, f) => sum + f.weightPercent, 0);
 
   return (
@@ -34,21 +58,47 @@ export default async function KpiPage() {
           className="text-sm text-brand"
           style={{ fontFamily: "var(--font-accent), serif" }}
         >
-          SJS — KPI IT Systems
+          SJS — Papan KPI
         </p>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
-          KPI dari data tiket
+          {selected ? `KPI ${selected.name}` : "Papan KPI"}
         </h1>
         <p className="mt-2 max-w-3xl text-sm text-ink-muted">
-          Angka di halaman ini dihitung otomatis dari antrian helpdesk — cocok
-          untuk mengisi kerangka spreadsheet KPI IT Staff & IT Manager.
+          {isIt
+            ? "Angka IT dihitung dari antrian helpdesk: waktu selesai, SLA, repeat issue, dan kepuasan user."
+            : "Kartu di bawah mengikuti fungsi dan indikator departemen yang dipilih. Isinya tidak disalin dari tiket IT."}
         </p>
       </div>
+
+      <form method="get" className="panel flex flex-wrap items-end gap-3 p-4">
+        <label className="block text-sm">
+          <span className="text-xs text-ink-muted">Departemen</span>
+          <select
+            name="departmentId"
+            defaultValue={selected?.id || ""}
+            className="mt-1 block rounded-xl border border-line bg-bg-elevated px-3 py-2.5 text-sm"
+          >
+            {departments.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.code} — {d.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="submit"
+          className="rounded-xl bg-brand px-4 py-2.5 text-sm font-medium text-white"
+        >
+          Tampilkan
+        </button>
+      </form>
 
       <section className="panel overflow-hidden">
         <div className="flex flex-wrap items-end justify-between gap-2 border-b border-line px-4 py-3">
           <div>
-            <h2 className="font-semibold">Fungsi KPI IT</h2>
+            <h2 className="font-semibold">
+              Fungsi KPI {selected?.code || ""}
+            </h2>
             <p className="text-xs text-ink-muted">
               Kerangka bobot penilaian · total aktif{" "}
               {weightTotal.toFixed(weightTotal % 1 ? 1 : 0)}%
@@ -123,6 +173,8 @@ export default async function KpiPage() {
         )}
       </section>
 
+      {isIt && kpi ? (
+      <>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Ticket Resolution Time"
@@ -259,6 +311,14 @@ export default async function KpiPage() {
           </div>
         </section>
       </div>
+      </>
+      ) : (
+        <DepartmentKpiBoard
+          functions={functions}
+          indicators={indicators}
+          actuals={actuals}
+        />
+      )}
     </div>
   );
 }
