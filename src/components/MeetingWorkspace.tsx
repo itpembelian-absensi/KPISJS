@@ -201,6 +201,42 @@ export function MeetingWorkspace({
 
   const week = weekBounds(weekAnchor);
 
+  const meetingDateOptions = useMemo(() => {
+    const map = new Map<string, { date: string; titles: string[] }>();
+    for (const m of meetings) {
+      if (!m.meetingDate) continue;
+      const existing = map.get(m.meetingDate);
+      if (existing) {
+        if (!existing.titles.includes(m.title)) existing.titles.push(m.title);
+      } else {
+        map.set(m.meetingDate, { date: m.meetingDate, titles: [m.title] });
+      }
+    }
+    return [...map.values()].sort((a, b) => b.date.localeCompare(a.date));
+  }, [meetings]);
+
+  const allMeetingDates = useMemo(() => {
+    return meetingDateOptions.map((opt) => opt.date);
+  }, [meetingDateOptions]);
+
+  function prevMeetingDate() {
+    const older = allMeetingDates.filter((d) => d < weekAnchor);
+    if (older.length > 0) {
+      setWeekAnchor(older[0]);
+    } else {
+      setWeekAnchor(addDays(week.start, -7));
+    }
+  }
+
+  function nextMeetingDate() {
+    const newer = allMeetingDates.filter((d) => d > weekAnchor).reverse();
+    if (newer.length > 0) {
+      setWeekAnchor(newer[0]);
+    } else {
+      setWeekAnchor(addDays(week.start, 7));
+    }
+  }
+
   const repeats = useMemo(() => {
     const map = new Map<string, RepeatInfo>();
     for (const meeting of meetings) {
@@ -749,7 +785,7 @@ export function MeetingWorkspace({
           tone="warn"
         />
         <StatCard
-          label="Notulen minggu ini"
+          label="Weekly meeting minggu ini"
           value={stats.weekNotes}
           hint={formatWeekLabel(week.start, week.end)}
           active={view === "week"}
@@ -763,21 +799,31 @@ export function MeetingWorkspace({
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() => setWeekAnchor(addDays(week.start, -7))}
+                onClick={prevMeetingDate}
                 className="rounded-lg border border-line px-2.5 py-1.5 text-sm"
-                aria-label="Minggu sebelumnya"
+                aria-label="Weekly meeting sebelumnya"
+                title="Weekly meeting sebelumnya"
               >
                 ‹
               </button>
               <div className="min-w-0">
-                <p className="text-sm font-medium">{formatWeekLabel(week.start, week.end)}</p>
-                <p className="text-[11px] text-ink-muted">Senin–Minggu</p>
+                <p className="text-sm font-medium">
+                  {weekMeetings.length > 0
+                    ? `Weekly: ${formatIsoDateId(weekMeetings[0].meetingDate)}`
+                    : formatWeekLabel(week.start, week.end)}
+                </p>
+                <p className="text-[11px] text-ink-muted">
+                  {weekMeetings.length > 0
+                    ? (weekMeetings[0].title || "Weekly meeting")
+                    : "Tidak ada weekly meeting minggu ini"}
+                </p>
               </div>
               <button
                 type="button"
-                onClick={() => setWeekAnchor(addDays(week.start, 7))}
+                onClick={nextMeetingDate}
                 className="rounded-lg border border-line px-2.5 py-1.5 text-sm"
-                aria-label="Minggu berikutnya"
+                aria-label="Weekly meeting berikutnya"
+                title="Weekly meeting berikutnya"
               >
                 ›
               </button>
@@ -788,18 +834,39 @@ export function MeetingWorkspace({
               >
                 Minggu ini
               </button>
-              <div className="flex items-center gap-1.5 border-l border-line pl-2">
-                <span className="hidden text-xs text-ink-muted sm:inline">Pilih tanggal:</span>
-                <input
-                  type="date"
-                  value={weekAnchor}
-                  onChange={(e) => {
-                    if (e.target.value) setWeekAnchor(e.target.value);
-                  }}
-                  className="rounded-lg border border-line bg-bg-elevated px-2 py-1 text-xs"
-                  title="Pilih tanggal untuk melihat notulen minggu tersebut"
-                />
-              </div>
+              {meetingDateOptions.length > 0 ? (
+                <div className="flex items-center gap-1.5 border-l border-line pl-2">
+                  <span className="hidden text-xs text-ink-muted sm:inline">Tanggal meeting:</span>
+                  <select
+                    value={
+                      allMeetingDates.includes(weekAnchor)
+                        ? weekAnchor
+                        : (weekMeetings[0]?.meetingDate || "")
+                    }
+                    onChange={(e) => {
+                      if (e.target.value) setWeekAnchor(e.target.value);
+                    }}
+                    className="max-w-[200px] truncate rounded-lg border border-line bg-bg-elevated px-2 py-1 text-xs font-medium"
+                    title="Pilih tanggal pelaksanaan weekly meeting"
+                  >
+                    <option value="" disabled>Pilih tanggal weekly meeting...</option>
+                    {meetingDateOptions.map((opt) => (
+                      <option key={opt.date} value={opt.date}>
+                        {formatIsoDateId(opt.date)} {opt.titles.length > 0 ? `· ${opt.titles.join(", ")}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+              <input
+                type="date"
+                value={weekAnchor}
+                onChange={(e) => {
+                  if (e.target.value) setWeekAnchor(e.target.value);
+                }}
+                className="rounded-lg border border-line bg-bg-elevated px-2 py-1 text-xs"
+                title="Pilih tanggal dari kalender"
+              />
             </div>
           ) : view === "notes" ? (
             <div className="flex flex-wrap items-center gap-2">
@@ -885,7 +952,7 @@ export function MeetingWorkspace({
       <div className="flex flex-wrap gap-2">
         {(
           [
-            ["week", "Minggu ini"],
+            ["week", "Weekly meeting"],
             ["follow", "Tindak lanjut"],
             ["notes", "Semua notulen"],
             ["report", "Laporan"],
@@ -1465,6 +1532,49 @@ export function MeetingWorkspace({
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <label className="text-sm">
+                <span className="text-xs text-ink-muted">Tanggal Weekly Meeting</span>
+                <select
+                  value={
+                    dateFrom && dateFrom === dateTo && allMeetingDates.includes(dateFrom)
+                      ? dateFrom
+                      : ""
+                  }
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val) {
+                      setDateFrom(val);
+                      setDateTo(val);
+                    } else {
+                      setDateFrom("");
+                      setDateTo("");
+                    }
+                  }}
+                  className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2 text-sm"
+                >
+                  <option value="">Semua tanggal meeting</option>
+                  {meetingDateOptions.map((opt) => (
+                    <option key={opt.date} value={opt.date}>
+                      {formatIsoDateId(opt.date)} {opt.titles.length > 0 ? `· ${opt.titles.join(", ")}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm">
+                <span className="text-xs text-ink-muted">Departemen</span>
+                <select
+                  value={selectedDeptId}
+                  onChange={(e) => setSelectedDeptId(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2 text-sm"
+                >
+                  <option value="all">Semua departemen</option>
+                  {departments.map((dept) => (
+                    <option key={dept.id} value={dept.id}>
+                      {dept.code} — {dept.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm">
                 <span className="text-xs text-ink-muted">Dari tanggal</span>
                 <input
                   type="date"
@@ -1484,80 +1594,63 @@ export function MeetingWorkspace({
                   className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2 text-sm"
                 />
               </label>
-              <label className="text-sm">
-                <span className="text-xs text-ink-muted">Departemen</span>
-                <select
-                  value={selectedDeptId}
-                  onChange={(e) => setSelectedDeptId(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2 text-sm"
-                >
-                  <option value="all">Semua departemen</option>
-                  {departments.map((dept) => (
-                    <option key={dept.id} value={dept.id}>
-                      {dept.code} — {dept.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="flex flex-col justify-end">
-                <span className="mb-1 text-xs text-ink-muted">Preset cepat</span>
-                <div className="flex flex-wrap gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDateFrom(today);
-                      setDateTo(today);
-                    }}
-                    className={`rounded-lg border border-line px-2.5 py-1 text-xs hover:bg-bg-elevated ${
-                      dateFrom === today && dateTo === today
-                        ? "border-brand bg-brand text-white"
-                        : ""
-                    }`}
-                  >
-                    Hari ini
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDateFrom(week.start);
-                      setDateTo(week.end);
-                    }}
-                    className={`rounded-lg border border-line px-2.5 py-1 text-xs hover:bg-bg-elevated ${
-                      dateFrom === week.start && dateTo === week.end
-                        ? "border-brand bg-brand text-white"
-                        : ""
-                    }`}
-                  >
-                    Minggu ini
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const firstDay = `${today.slice(0, 7)}-01`;
-                      setDateFrom(firstDay);
-                      setDateTo(today);
-                    }}
-                    className="rounded-lg border border-line px-2.5 py-1 text-xs hover:bg-bg-elevated"
-                  >
-                    Bulan ini
-                  </button>
-                  {(dateFrom || dateTo) && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDateFrom("");
-                        setDateTo("");
-                      }}
-                      className="rounded-lg border border-line px-2 py-1 text-xs text-ink-muted hover:bg-bg-elevated"
-                    >
-                      Semua
-                    </button>
-                  )}
-                </div>
-              </div>
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line/60 pt-2 text-xs text-ink-muted">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-xs text-ink-muted mr-1">Preset cepat:</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDateFrom(today);
+                    setDateTo(today);
+                  }}
+                  className={`rounded-lg border border-line px-2.5 py-1 text-xs hover:bg-bg-elevated ${
+                    dateFrom === today && dateTo === today
+                      ? "border-brand bg-brand text-white"
+                      : ""
+                  }`}
+                >
+                  Hari ini
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDateFrom(week.start);
+                    setDateTo(week.end);
+                  }}
+                  className={`rounded-lg border border-line px-2.5 py-1 text-xs hover:bg-bg-elevated ${
+                    dateFrom === week.start && dateTo === week.end
+                      ? "border-brand bg-brand text-white"
+                      : ""
+                  }`}
+                >
+                  Minggu ini
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const firstDay = `${today.slice(0, 7)}-01`;
+                    setDateFrom(firstDay);
+                    setDateTo(today);
+                  }}
+                  className="rounded-lg border border-line px-2.5 py-1 text-xs hover:bg-bg-elevated"
+                >
+                  Bulan ini
+                </button>
+                {(dateFrom || dateTo) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDateFrom("");
+                      setDateTo("");
+                    }}
+                    className="rounded-lg border border-line px-2 py-1 text-xs text-ink-muted hover:bg-bg-elevated"
+                  >
+                    Semua tanggal
+                  </button>
+                )}
+              </div>
               <span>
                 Menampilkan <strong>{allMeetings.length}</strong> dari {meetings.length} notulen
                 {dateFrom || dateTo ? (
