@@ -172,6 +172,9 @@ export function MeetingWorkspace({
   const [weekAnchor, setWeekAnchor] = useState(today);
   const [filter, setFilter] = useState<TrackFilter>("all");
   const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [selectedDeptId, setSelectedDeptId] = useState("all");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [allDepartments, setAllDepartments] = useState(false);
@@ -270,6 +273,21 @@ export function MeetingWorkspace({
     return query.split(/\s+/).every((token) => hay.includes(token));
   }
 
+  function matchesDept(meeting: MeetingNote) {
+    if (selectedDeptId === "all") return true;
+    return (
+      meeting.departmentIds.includes("*") ||
+      meeting.departmentIds.includes(selectedDeptId) ||
+      meeting.departmentId === selectedDeptId
+    );
+  }
+
+  function matchesDate(dateStr: string) {
+    if (dateFrom && dateStr < dateFrom) return false;
+    if (dateTo && dateStr > dateTo) return false;
+    return true;
+  }
+
   const visibleRepeats = repeatedTopics.filter(([key, info]) => {
     if (!query) return true;
     const hay = `${key} ${info.meetings.map((meeting) => meeting.title).join(" ")}`.toLowerCase();
@@ -280,11 +298,19 @@ export function MeetingWorkspace({
     (m) =>
       m.meetingDate >= week.start &&
       m.meetingDate <= week.end &&
-      matchesQuery(m),
+      matchesQuery(m) &&
+      matchesDept(m),
   );
-  const allMeetings = meetings.filter(matchesQuery);
+  const allMeetings = meetings.filter(
+    (m) =>
+      matchesQuery(m) &&
+      matchesDept(m) &&
+      matchesDate(m.meetingDate),
+  );
   const followRows = tracked.filter((row) => {
     if (!matchesQuery(row.meeting)) return false;
+    if (!matchesDept(row.meeting)) return false;
+    if (!matchesDate(row.meeting.meetingDate)) return false;
     if (filter === "repeated") return row.repeated && row.track !== "done";
     if (filter === "all") return row.track !== "done";
     return row.track === filter;
@@ -292,6 +318,7 @@ export function MeetingWorkspace({
   const carryOver = tracked.filter(
     (row) =>
       matchesQuery(row.meeting) &&
+      matchesDept(row.meeting) &&
       (row.track === "in_progress" || row.track === "overdue") &&
       (row.meeting.meetingDate < week.start ||
         row.meeting.meetingDate > week.end),
@@ -732,82 +759,121 @@ export function MeetingWorkspace({
 
       <div className="panel flex flex-col gap-3 p-3 sm:p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setWeekAnchor(addDays(week.start, -7))}
-            className="rounded-lg border border-line px-2.5 py-1.5 text-sm"
-            aria-label="Minggu sebelumnya"
-          >
-            ‹
-          </button>
-          <div className="min-w-0">
-            <p className="text-sm font-medium">{formatWeekLabel(week.start, week.end)}</p>
-            <p className="text-[11px] text-ink-muted">Senin–Minggu</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setWeekAnchor(addDays(week.start, 7))}
-            className="rounded-lg border border-line px-2.5 py-1.5 text-sm"
-            aria-label="Minggu berikutnya"
-          >
-            ›
-          </button>
-          <button
-            type="button"
-            onClick={() => setWeekAnchor(today)}
-            className="rounded-lg border border-line px-2.5 py-1.5 text-xs"
-          >
-            Minggu ini
-          </button>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Cari judul, bahasan, peserta..."
-            className="w-full rounded-xl border border-line bg-bg-elevated px-3 py-2 text-sm sm:w-64"
-          />
-          <button
-            type="button"
-            onClick={() => remindRows(openReminderRows, false)}
-            disabled={view === "report" || openReminderRows.length === 0 || waBusy}
-            className="rounded-xl border border-ok/30 bg-ok-soft px-4 py-2 text-sm font-medium text-ok disabled:opacity-50"
-          >
-            Ingatkan PIC
-          </button>
-          <a
-            href="/api/kpi/meetings/template"
-            className="rounded-xl border border-line px-4 py-2 text-sm font-medium hover:bg-bg-elevated"
-          >
-            Template Excel
-          </a>
-          <label
-            className={`rounded-xl border border-line px-4 py-2 text-sm font-medium hover:bg-bg-elevated ${
-              importing ? "pointer-events-none opacity-60" : "cursor-pointer"
-            }`}
-          >
-            {importing ? "Mengunggah..." : "Unggah Excel"}
+          {view === "week" ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setWeekAnchor(addDays(week.start, -7))}
+                className="rounded-lg border border-line px-2.5 py-1.5 text-sm"
+                aria-label="Minggu sebelumnya"
+              >
+                ‹
+              </button>
+              <div className="min-w-0">
+                <p className="text-sm font-medium">{formatWeekLabel(week.start, week.end)}</p>
+                <p className="text-[11px] text-ink-muted">Senin–Minggu</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWeekAnchor(addDays(week.start, 7))}
+                className="rounded-lg border border-line px-2.5 py-1.5 text-sm"
+                aria-label="Minggu berikutnya"
+              >
+                ›
+              </button>
+              <button
+                type="button"
+                onClick={() => setWeekAnchor(today)}
+                className="rounded-lg border border-line px-2.5 py-1.5 text-xs"
+              >
+                Minggu ini
+              </button>
+              <div className="flex items-center gap-1.5 border-l border-line pl-2">
+                <span className="hidden text-xs text-ink-muted sm:inline">Pilih tanggal:</span>
+                <input
+                  type="date"
+                  value={weekAnchor}
+                  onChange={(e) => {
+                    if (e.target.value) setWeekAnchor(e.target.value);
+                  }}
+                  className="rounded-lg border border-line bg-bg-elevated px-2 py-1 text-xs"
+                  title="Pilih tanggal untuk melihat notulen minggu tersebut"
+                />
+              </div>
+            </div>
+          ) : view === "notes" ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Semua Notulen</p>
+                <p className="text-[11px] text-ink-muted">
+                  {allMeetings.length} notulen ditemukan
+                  {dateFrom || dateTo ? " · Filter tanggal aktif" : " · Tanpa batasan tanggal"}
+                </p>
+              </div>
+            </div>
+          ) : view === "follow" ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Tindak Lanjut Bahasan</p>
+                <p className="text-[11px] text-ink-muted">
+                  {followRows.length} bahasan terpantau
+                  {dateFrom || dateTo ? " · Filter tanggal aktif" : ""}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Laporan Rekapitulasi</p>
+              <p className="text-[11px] text-ink-muted">Rekap bahasan &amp; tindak lanjut</p>
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
             <input
-              type="file"
-              accept=".xlsx,.xls"
-              className="hidden"
-              disabled={importing}
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void importExcel(file);
-                e.target.value = "";
-              }}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Cari judul, bahasan, peserta..."
+              className="w-full rounded-xl border border-line bg-bg-elevated px-3 py-2 text-sm sm:w-64"
             />
-          </label>
-          <button
-            type="button"
-            onClick={openNew}
-            className="rounded-xl bg-brand px-4 py-2 text-sm font-medium text-white"
-          >
-            Notulen baru
-          </button>
-        </div>
+            <button
+              type="button"
+              onClick={() => remindRows(openReminderRows, false)}
+              disabled={view === "report" || openReminderRows.length === 0 || waBusy}
+              className="rounded-xl border border-ok/30 bg-ok-soft px-4 py-2 text-sm font-medium text-ok disabled:opacity-50"
+            >
+              Ingatkan PIC
+            </button>
+            <a
+              href="/api/kpi/meetings/template"
+              className="rounded-xl border border-line px-4 py-2 text-sm font-medium hover:bg-bg-elevated"
+            >
+              Template Excel
+            </a>
+            <label
+              className={`rounded-xl border border-line px-4 py-2 text-sm font-medium hover:bg-bg-elevated ${
+                importing ? "pointer-events-none opacity-60" : "cursor-pointer"
+              }`}
+            >
+              {importing ? "Mengunggah..." : "Unggah Excel"}
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                className="hidden"
+                disabled={importing}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void importExcel(file);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              onClick={openNew}
+              className="rounded-xl bg-brand px-4 py-2 text-sm font-medium text-white"
+            >
+              Notulen baru
+            </button>
+          </div>
         </div>
         <p className="text-[11px] text-ink-muted">
           Untuk banyak bahasan sekaligus: unduh Template Excel, isi satu baris
@@ -836,6 +902,12 @@ export function MeetingWorkspace({
             }`}
           >
             {label}
+            {id === "notes" && (dateFrom || dateTo || selectedDeptId !== "all") ? (
+              <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-warn align-middle" />
+            ) : null}
+            {id === "follow" && (dateFrom || dateTo) ? (
+              <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-warn align-middle" />
+            ) : null}
           </button>
         ))}
       </div>
@@ -1364,10 +1436,158 @@ export function MeetingWorkspace({
 
       {view === "notes" ? (
         <div className="space-y-3">
+          <div className="panel space-y-3 p-3 sm:p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                  Filter Notulen &amp; Tanggal
+                </span>
+                {(dateFrom || dateTo || selectedDeptId !== "all") && (
+                  <span className="rounded-full bg-brand-soft px-2 py-0.5 text-[11px] font-medium text-brand">
+                    Filter aktif
+                  </span>
+                )}
+              </div>
+              {(dateFrom || dateTo || selectedDeptId !== "all") && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDateFrom("");
+                    setDateTo("");
+                    setSelectedDeptId("all");
+                  }}
+                  className="text-xs text-brand hover:underline"
+                >
+                  Reset filter
+                </button>
+              )}
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <label className="text-sm">
+                <span className="text-xs text-ink-muted">Dari tanggal</span>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  max={dateTo || undefined}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="text-sm">
+                <span className="text-xs text-ink-muted">Sampai tanggal</span>
+                <input
+                  type="date"
+                  value={dateTo}
+                  min={dateFrom || undefined}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="text-sm">
+                <span className="text-xs text-ink-muted">Departemen</span>
+                <select
+                  value={selectedDeptId}
+                  onChange={(e) => setSelectedDeptId(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2 text-sm"
+                >
+                  <option value="all">Semua departemen</option>
+                  {departments.map((dept) => (
+                    <option key={dept.id} value={dept.id}>
+                      {dept.code} — {dept.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="flex flex-col justify-end">
+                <span className="mb-1 text-xs text-ink-muted">Preset cepat</span>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDateFrom(today);
+                      setDateTo(today);
+                    }}
+                    className={`rounded-lg border border-line px-2.5 py-1 text-xs hover:bg-bg-elevated ${
+                      dateFrom === today && dateTo === today
+                        ? "border-brand bg-brand text-white"
+                        : ""
+                    }`}
+                  >
+                    Hari ini
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDateFrom(week.start);
+                      setDateTo(week.end);
+                    }}
+                    className={`rounded-lg border border-line px-2.5 py-1 text-xs hover:bg-bg-elevated ${
+                      dateFrom === week.start && dateTo === week.end
+                        ? "border-brand bg-brand text-white"
+                        : ""
+                    }`}
+                  >
+                    Minggu ini
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const firstDay = `${today.slice(0, 7)}-01`;
+                      setDateFrom(firstDay);
+                      setDateTo(today);
+                    }}
+                    className="rounded-lg border border-line px-2.5 py-1 text-xs hover:bg-bg-elevated"
+                  >
+                    Bulan ini
+                  </button>
+                  {(dateFrom || dateTo) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDateFrom("");
+                        setDateTo("");
+                      }}
+                      className="rounded-lg border border-line px-2 py-1 text-xs text-ink-muted hover:bg-bg-elevated"
+                    >
+                      Semua
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line/60 pt-2 text-xs text-ink-muted">
+              <span>
+                Menampilkan <strong>{allMeetings.length}</strong> dari {meetings.length} notulen
+                {dateFrom || dateTo ? (
+                  <span>
+                    {" "}· Periode: {dateFrom ? formatIsoDateId(dateFrom) : "Awal"} s/d{" "}
+                    {dateTo ? formatIsoDateId(dateTo) : "Sekarang"}
+                  </span>
+                ) : null}
+              </span>
+            </div>
+          </div>
+
           {allMeetings.length === 0 ? (
-            <p className="panel px-4 py-8 text-center text-sm text-ink-muted">
-              Belum ada notulen.
-            </p>
+            <div className="panel space-y-3 px-4 py-8 text-center text-sm text-ink-muted">
+              <p>Tidak ada notulen yang cocok dengan filter tanggal atau pencarian.</p>
+              {(dateFrom || dateTo || selectedDeptId !== "all" || search) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDateFrom("");
+                    setDateTo("");
+                    setSelectedDeptId("all");
+                    setSearch("");
+                  }}
+                  className="rounded-lg border border-line px-3 py-1.5 text-xs text-brand hover:bg-bg-elevated"
+                >
+                  Reset semua filter &amp; pencarian
+                </button>
+              )}
+            </div>
           ) : (
             allMeetings.map((meeting) => (
               <MeetingCard
@@ -1389,30 +1609,50 @@ export function MeetingWorkspace({
 
       {view === "follow" ? (
         <div className="panel p-4">
-          <div className="flex flex-wrap gap-2">
-            {(
-              [
-                ["all", "Belum selesai"],
-                ["in_progress", "On progress"],
-                ["overdue", "Overdue"],
-                ["open", "Belum mulai"],
-                ["done", "Selesai"],
-                ["repeated", "Repeated"],
-              ] as Array<[TrackFilter, string]>
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setFilter(id)}
-                className={`rounded-full px-3 py-1 text-xs font-medium ${
-                  filter === id
-                    ? "bg-brand text-white"
-                    : "border border-line text-ink-muted"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap gap-2">
+              {(
+                [
+                  ["all", "Belum selesai"],
+                  ["in_progress", "On progress"],
+                  ["overdue", "Overdue"],
+                  ["open", "Belum mulai"],
+                  ["done", "Selesai"],
+                  ["repeated", "Repeated"],
+                ] as Array<[TrackFilter, string]>
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setFilter(id)}
+                  className={`rounded-full px-3 py-1 text-xs font-medium ${
+                    filter === id
+                      ? "bg-brand text-white"
+                      : "border border-line text-ink-muted"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {(dateFrom || dateTo) && (
+              <div className="flex items-center gap-2 text-xs text-ink-muted">
+                <span>
+                  Periode notulen: {dateFrom ? formatIsoDateId(dateFrom) : "Awal"} s/d{" "}
+                  {dateTo ? formatIsoDateId(dateTo) : "Sekarang"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDateFrom("");
+                    setDateTo("");
+                  }}
+                  className="text-brand hover:underline"
+                >
+                  Hapus filter tanggal
+                </button>
+              </div>
+            )}
           </div>
           {filter === "repeated" ? (
             <div className="mt-4 space-y-3">
