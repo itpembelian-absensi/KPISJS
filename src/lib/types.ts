@@ -444,6 +444,26 @@ export interface WorkOrder {
   events: WorkOrderEvent[];
 }
 
+export interface JabatanRecord {
+  id: string;
+  name: string;
+  kelompok: string;
+  /** "bobot" = bobot per indikator. "rata-rata" = rata-rata skor dalam fungsi. Kosong = belum diatur. */
+  scoreMethod: "" | "bobot" | "rata-rata";
+  indicatorCount: number;
+  /** kpi = paket MAJU, aplikasi = hanya ada di staf, keduanya = paket dan sudah ada pemegang. */
+  origin: "kpi" | "aplikasi" | "keduanya";
+  sortOrder: number;
+  active: boolean;
+  staffCount: number;
+  staff: Array<{
+    id: string;
+    name: string;
+    active: boolean;
+    departmentName: string;
+  }>;
+}
+
 export interface StaffMember {
   id: string;
   employeeCode: string;
@@ -452,6 +472,8 @@ export interface StaffMember {
   phone: string;
   departmentId: string;
   position: string;
+  jabatanId: string | null;
+  jabatanName: string;
   active: boolean;
 }
 

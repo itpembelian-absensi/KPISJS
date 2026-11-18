@@ -1013,6 +1013,35 @@ function createSchema(db: Database.Database) {
   `);
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS jabatan (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      kelompok TEXT NOT NULL DEFAULT '',
+      score_method TEXT NOT NULL DEFAULT '',
+      indicator_count INTEGER NOT NULL DEFAULT 0,
+      origin TEXT NOT NULL DEFAULT 'aplikasi',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_jabatan_kelompok
+      ON jabatan(kelompok, sort_order, name);
+  `);
+
+  const staffCols = db
+    .prepare("PRAGMA table_info(staff)")
+    .all() as Array<{ name: string }>;
+  const staffColNames = new Set(staffCols.map((col) => col.name));
+  if (!staffColNames.has("jabatan_id")) {
+    db.exec("ALTER TABLE staff ADD COLUMN jabatan_id TEXT");
+  }
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_staff_jabatan ON staff(jabatan_id)",
+  );
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS jenis_data (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,

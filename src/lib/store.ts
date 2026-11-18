@@ -3,6 +3,11 @@ import { SESSION_DAYS } from "./auth";
 import { seedAssetCategoriesIfEmpty, seedAssetCategoryMenuIfMissing } from "./asset-category-ops";
 import { seedJenisDataIfEmpty, seedJenisDataMenuIfMissing } from "./jenis-data-ops";
 import { seedMajuGroupsIfEmpty, seedMajuMenuIfMissing } from "./kpi-maju-ops";
+import {
+  resolveJabatanId,
+  seedJabatan,
+  seedJabatanMenuIfMissing,
+} from "./jabatan-ops";
 import { backfillCustomersFromSubmissions } from "./customer-ops";
 import { ensureGowaConfig } from "./gowa";
 import { seedMeetingMenuIfMissing } from "./meeting-ops";
@@ -78,6 +83,8 @@ type StaffRow = {
   phone: string;
   department_id: string;
   position: string;
+  jabatan_id?: string | null;
+  jabatan_name?: string | null;
   active: number;
 };
 
@@ -359,6 +366,8 @@ function mapStaff(row: StaffRow): StaffMember {
     phone: row.phone,
     departmentId: row.department_id,
     position: row.position,
+    jabatanId: row.jabatan_id || null,
+    jabatanName: row.jabatan_name || "",
     active: intToBool(row.active),
   };
 }
@@ -711,6 +720,8 @@ function buildSeedData(): AppData {
       phone: "08110000001",
       departmentId: "dep-it",
       position: "System Administrator",
+      jabatanId: null,
+      jabatanName: "",
       active: true,
     },
     {
@@ -721,6 +732,8 @@ function buildSeedData(): AppData {
       phone: "08110000002",
       departmentId: "dep-it",
       position: "IT Manager",
+      jabatanId: null,
+      jabatanName: "",
       active: true,
     },
     {
@@ -731,6 +744,8 @@ function buildSeedData(): AppData {
       phone: "08110000003",
       departmentId: "dep-it",
       position: "IT Support",
+      jabatanId: null,
+      jabatanName: "",
       active: true,
     },
     {
@@ -741,6 +756,8 @@ function buildSeedData(): AppData {
       phone: "08110000004",
       departmentId: "dep-it",
       position: "IT Support",
+      jabatanId: null,
+      jabatanName: "",
       active: true,
     },
     {
@@ -751,6 +768,8 @@ function buildSeedData(): AppData {
       phone: "08110000005",
       departmentId: "dep-fin",
       position: "Staff Finance",
+      jabatanId: null,
+      jabatanName: "",
       active: true,
     },
     {
@@ -761,6 +780,8 @@ function buildSeedData(): AppData {
       phone: "08110000006",
       departmentId: "dep-mkt",
       position: "Manager Marketing",
+      jabatanId: null,
+      jabatanName: "",
       active: true,
     },
     {
@@ -771,6 +792,8 @@ function buildSeedData(): AppData {
       phone: "08110000007",
       departmentId: "dep-wh",
       position: "Staff Warehouse",
+      jabatanId: null,
+      jabatanName: "",
       active: true,
     },
     {
@@ -781,6 +804,8 @@ function buildSeedData(): AppData {
       phone: "08110000008",
       departmentId: "dep-hrd",
       position: "Staff HRD",
+      jabatanId: null,
+      jabatanName: "",
       active: true,
     },
   ];
@@ -1209,6 +1234,8 @@ function ensureDb() {
   seedJenisDataMenuIfMissing();
   seedMajuGroupsIfEmpty();
   seedMajuMenuIfMissing();
+  seedJabatan();
+  seedJabatanMenuIfMissing();
   backfillCustomersFromSubmissions();
 }
 
@@ -1467,8 +1494,15 @@ export function listStaff(activeOnly = false): StaffMember[] {
   const rows = getDb()
     .prepare(
       activeOnly
-        ? "SELECT * FROM staff WHERE active = 1 ORDER BY name"
-        : "SELECT * FROM staff ORDER BY name",
+        ? `SELECT s.*, j.name AS jabatan_name
+           FROM staff s
+           LEFT JOIN jabatan j ON j.id = s.jabatan_id
+           WHERE s.active = 1
+           ORDER BY s.name`
+        : `SELECT s.*, j.name AS jabatan_name
+           FROM staff s
+           LEFT JOIN jabatan j ON j.id = s.jabatan_id
+           ORDER BY s.name`,
     )
     .all() as StaffRow[];
   return rows.map(mapStaff);
@@ -1849,6 +1883,7 @@ export function upsertStaff(
     employeeCode: string;
     name: string;
     departmentId: string;
+    jabatanId?: string | null;
   },
 ): StaffMember {
   ensureDb();
@@ -1865,12 +1900,23 @@ export function upsertStaff(
       .get(input.employeeCode) as StaffRow | undefined;
   }
 
+  const department = getDb()
+    .prepare("SELECT code FROM departments WHERE id = ?")
+    .get(input.departmentId) as { code: string } | undefined;
+  const jabatanId =
+    input.jabatanId ||
+    resolveJabatanId(
+      input.name,
+      input.position ?? existing?.position ?? "",
+      department?.code ?? "",
+    );
+
   if (existing) {
     getDb()
       .prepare(
         `UPDATE staff SET
           employee_code = ?, name = ?, email = ?, phone = ?,
-          department_id = ?, position = ?, active = ?
+          department_id = ?, position = ?, jabatan_id = ?, active = ?
          WHERE id = ?`,
       )
       .run(
@@ -1880,14 +1926,11 @@ export function upsertStaff(
         input.phone ?? existing.phone,
         input.departmentId,
         input.position ?? existing.position,
+        jabatanId,
         boolToInt(input.active ?? intToBool(existing.active)),
         existing.id,
       );
-    return mapStaff(
-      getDb()
-        .prepare("SELECT * FROM staff WHERE id = ?")
-        .get(existing.id) as StaffRow,
-    );
+    return loadStaff(existing.id);
   }
 
   const member: StaffMember = {
@@ -1898,13 +1941,15 @@ export function upsertStaff(
     phone: input.phone ?? "",
     departmentId: input.departmentId,
     position: input.position ?? "Staff",
+    jabatanId,
+    jabatanName: "",
     active: input.active ?? true,
   };
   getDb()
     .prepare(
       `INSERT INTO staff (
-        id, employee_code, name, email, phone, department_id, position, active
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        id, employee_code, name, email, phone, department_id, position, jabatan_id, active
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       member.id,
@@ -1914,9 +1959,23 @@ export function upsertStaff(
       member.phone,
       member.departmentId,
       member.position,
+      jabatanId,
       boolToInt(member.active),
     );
-  return member;
+  return loadStaff(member.id);
+}
+
+function loadStaff(id: string): StaffMember {
+  return mapStaff(
+    getDb()
+      .prepare(
+        `SELECT s.*, j.name AS jabatan_name
+         FROM staff s
+         LEFT JOIN jabatan j ON j.id = s.jabatan_id
+         WHERE s.id = ?`,
+      )
+      .get(id) as StaffRow,
+  );
 }
 
 function findOrCreateDepartment(code: string, name: string): Department {

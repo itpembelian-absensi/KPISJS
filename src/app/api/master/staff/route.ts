@@ -7,6 +7,7 @@ import {
   listStaff,
   upsertStaff,
 } from "@/lib/store";
+import { listJabatan } from "@/lib/jabatan-ops";
 
 export const runtime = "nodejs";
 
@@ -26,6 +27,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     staff: listStaff(activeOnly),
     departments: listDepartments(true),
+    jabatan: listJabatan(false, false),
   });
 }
 
@@ -47,6 +49,7 @@ export async function POST(req: NextRequest) {
     phone: String(body.phone || ""),
     departmentId: String(body.departmentId),
     position: String(body.position || "Staff"),
+    jabatanId: body.jabatanId ? String(body.jabatanId) : null,
     active: body.active ?? true,
   });
   return NextResponse.json({ staff });

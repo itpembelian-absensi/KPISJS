@@ -2,7 +2,7 @@
 
 import { FormEvent, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { Department, StaffMember } from "@/lib/types";
+import type { Department, JabatanRecord, StaffMember } from "@/lib/types";
 
 type SortKey = "name" | "employeeCode" | "department" | "position";
 type SortDir = "asc" | "desc";
@@ -10,13 +10,18 @@ type SortDir = "asc" | "desc";
 export function StaffMaster({
   initial,
   departments: initialDepartments,
+  jabatan: initialJabatan,
+  initialJabatanId = "all",
 }: {
   initial: StaffMember[];
   departments: Department[];
+  jabatan: JabatanRecord[];
+  initialJabatanId?: string;
 }) {
   const router = useRouter();
   const [items, setItems] = useState(initial);
   const [departments, setDepartments] = useState(initialDepartments);
+  const [jabatan, setJabatan] = useState(initialJabatan);
   const [editing, setEditing] = useState<StaffMember | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -24,6 +29,7 @@ export function StaffMaster({
   const [importing, setImporting] = useState(false);
   const [query, setQuery] = useState("");
   const [deptFilter, setDeptFilter] = useState("all");
+  const [jabatanFilter, setJabatanFilter] = useState(initialJabatanId);
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "resigned">(
     "all",
   );
@@ -45,6 +51,9 @@ export function StaffMaster({
     if (deptFilter !== "all") {
       list = list.filter((s) => s.departmentId === deptFilter);
     }
+    if (jabatanFilter !== "all") {
+      list = list.filter((s) => s.jabatanId === jabatanFilter);
+    }
     if (statusFilter === "active") {
       list = list.filter((s) => s.active);
     } else if (statusFilter === "resigned") {
@@ -57,6 +66,7 @@ export function StaffMaster({
           s.employeeCode,
           s.name,
           s.position,
+          s.jabatanName,
           s.email,
           s.phone,
           deptName(s.departmentId),
@@ -75,17 +85,21 @@ export function StaffMaster({
       const av =
         sortKey === "department"
           ? deptName(a.departmentId)
-          : String(a[sortKey] ?? "");
+          : sortKey === "position"
+            ? a.jabatanName || a.position
+            : String(a[sortKey] ?? "");
       const bv =
         sortKey === "department"
           ? deptName(b.departmentId)
-          : String(b[sortKey] ?? "");
+          : sortKey === "position"
+            ? b.jabatanName || b.position
+            : String(b[sortKey] ?? "");
       const cmp = av.localeCompare(bv, "id", { sensitivity: "base" });
       return sortDir === "asc" ? cmp : -cmp;
     });
 
     return list;
-  }, [items, query, deptFilter, statusFilter, sortKey, sortDir, departments]);
+  }, [items, query, deptFilter, jabatanFilter, statusFilter, sortKey, sortDir, departments]);
 
   async function reloadLists() {
     const res = await fetch("/api/master/staff");
@@ -93,6 +107,7 @@ export function StaffMaster({
     if (res.ok) {
       setItems(data.staff);
       setDepartments(data.departments);
+      if (Array.isArray(data.jabatan)) setJabatan(data.jabatan);
     }
     router.refresh();
   }
@@ -160,6 +175,7 @@ export function StaffMaster({
           email: fd.get("email"),
           phone: fd.get("phone"),
           departmentId: fd.get("departmentId"),
+          jabatanId: fd.get("jabatanId"),
           position: fd.get("position"),
           active: fd.get("status") !== "resign",
         }),
@@ -229,14 +245,33 @@ export function StaffMaster({
             </label>
             <label className="block text-sm">
               <span className="text-xs text-ink-muted">Jabatan</span>
-              <input
-                name="position"
-                defaultValue={editing?.position ?? "Staff"}
-                key={`pos-${editing?.id ?? "new"}`}
+              <select
+                name="jabatanId"
+                required
+                defaultValue={editing?.jabatanId ?? ""}
+                key={`jab-${editing?.id ?? "new"}`}
                 className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
-              />
+              >
+                <option value="" disabled>
+                  Pilih jabatan
+                </option>
+                {jabatan.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
+          <label className="block text-sm">
+            <span className="text-xs text-ink-muted">Judul di absensi</span>
+            <input
+              name="position"
+              defaultValue={editing?.position ?? ""}
+              key={`pos-${editing?.id ?? "new"}`}
+              className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
+            />
+          </label>
           <label className="block text-sm">
             <span className="text-xs text-ink-muted">Nama</span>
             <input
@@ -332,13 +367,25 @@ export function StaffMaster({
               </div>
             </div>
 
-            <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto_auto]">
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Cari nama, kode, jabatan, email..."
                 className="w-full rounded-xl border border-line bg-bg-elevated px-3 py-2 text-sm outline-none focus:border-brand"
               />
+              <select
+                value={jabatanFilter}
+                onChange={(e) => setJabatanFilter(e.target.value)}
+                className="rounded-xl border border-line bg-bg-elevated px-3 py-2 text-sm"
+              >
+                <option value="all">Semua jabatan</option>
+                {jabatan.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
               <select
                 value={statusFilter}
                 onChange={(e) =>
@@ -362,7 +409,8 @@ export function StaffMaster({
                   </option>
                 ))}
               </select>
-              <div className="flex gap-2">
+            </div>
+            <div className="mt-2 flex gap-2">
                 <select
                   value={sortKey}
                   onChange={(e) => setSortKey(e.target.value as SortKey)}
@@ -384,7 +432,6 @@ export function StaffMaster({
                   {sortDir === "asc" ? "A↑" : "Z↓"}
                 </button>
               </div>
-            </div>
           </div>
 
           <div className="max-h-[70vh] overflow-y-auto">
@@ -411,7 +458,12 @@ export function StaffMaster({
                     </div>
                     <p className="font-medium">{s.name}</p>
                     <p className="text-xs text-ink-muted sm:truncate">
-                      {s.position} · {deptName(s.departmentId)}
+                      {s.jabatanName || s.position}
+                      {s.jabatanName && s.position && s.jabatanName !== s.position
+                        ? ` · ${s.position}`
+                        : ""}
+                      {" · "}
+                      {deptName(s.departmentId)}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
