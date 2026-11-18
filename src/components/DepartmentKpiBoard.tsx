@@ -1,4 +1,5 @@
 import { StatCard } from "@/components/StatCard";
+import { groupKpiFunctions, type MajuGroup } from "@/lib/kpi-maju";
 import { computeIndicatorScore } from "@/lib/kpi-score-compute";
 import { dataSourceBadgeLabel } from "@/lib/kpi-score-templates";
 import type {
@@ -28,10 +29,12 @@ export function DepartmentKpiBoard({
   functions,
   indicators,
   actuals,
+  majuGroups,
 }: {
   functions: KpiFunction[];
   indicators: KpiScoreIndicator[];
   actuals: KpiIndicatorActual[];
+  majuGroups?: MajuGroup[];
 }) {
   const active = indicators.filter((i) => i.active);
 
@@ -45,7 +48,23 @@ export function DepartmentKpiBoard({
 
   return (
     <div className="space-y-5">
-      {functions.map((fn) => {
+      {groupKpiFunctions(functions, majuGroups).map(({ group, items }) => (
+        <section key={group.code} className="space-y-3">
+          <div>
+            <h2 className="font-semibold">
+              {group.code} — {group.name}{" "}
+              <span className="text-sm font-normal text-ink-muted">
+                {group.weightPercent}%
+              </span>
+            </h2>
+            <p className="mt-1 text-xs text-ink-muted">{group.subtitle}</p>
+          </div>
+          {items.length === 0 ? (
+            <p className="panel px-4 py-4 text-sm text-ink-muted">
+              Belum ada fungsi di grup ini.
+            </p>
+          ) : (
+            items.map((fn) => {
         const inds = active
           .filter((i) => i.kpiFunctionId === fn.id)
           .sort((a, b) => a.sortOrder - b.sortOrder);
@@ -131,7 +150,10 @@ export function DepartmentKpiBoard({
             )}
           </section>
         );
-      })}
+      })
+          )}
+        </section>
+      ))}
     </div>
   );
 }

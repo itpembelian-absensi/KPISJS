@@ -1,3 +1,5 @@
+import type { MajuCode } from "./kpi-maju";
+
 export type TicketPriority =
   | "critical"
   | "high"
@@ -59,12 +61,14 @@ export interface MasterJenisData {
   active: boolean;
 }
 
-/** Fungsi penilaian KPI per departemen (bobot + fokus) */
+/** Fungsi penilaian KPI per departemen (bobot + fokus), dikelompokkan ke MAJU */
 export interface KpiFunction {
   id: string;
   departmentId: string;
   name: string;
   weightPercent: number;
+  /** Grup MAJU: M, A, J, atau U */
+  groupCode: MajuCode;
   focus: string;
   sortOrder: number;
   active: boolean;
@@ -280,6 +284,19 @@ export interface MeetingNote {
   createdAt: string;
   updatedAt: string;
   items: MeetingItem[];
+  /** Bahasan notulen lain yang dicatat lagi pada tanggal meeting ini. */
+  linkedItems: MeetingItem[];
+}
+
+/** Satu kali bahasan dicatat pada tanggal meeting tertentu. */
+export interface MeetingItemSession {
+  id: string;
+  meetingId: string;
+  sessionDate: string;
+  status: MeetingItemStatus;
+  note: string;
+  /** Tanggal disembunyikan karena dihapus dari riwayat pembahasan. */
+  hidden?: boolean;
 }
 
 /** Bahasan / tindak lanjut di dalam notulen */
@@ -301,6 +318,8 @@ export interface MeetingItem {
   /** Jadwal / Target selesai pekerjaan */
   dueDate: string;
   status: MeetingItemStatus;
+  /** Tanggal-tanggal meeting yang sudah membahas bahasan ini. */
+  sessions: MeetingItemSession[];
   sortOrder: number;
   createdAt: string;
   updatedAt: string;

@@ -207,13 +207,21 @@ export function MeetingReportPanel({
                         <th className="px-2 py-2 font-medium">PIC</th>
                         <th className="px-2 py-2 font-medium">Jadwal</th>
                         <th className="px-2 py-2 font-medium">Status</th>
+                        <th className="px-2 py-2 font-medium">Riwayat meeting</th>
                       </tr>
                     </thead>
                     <tbody>
                       {rows.map((row, index) => (
                         <tr key={`${note.id}-${index}`} className="border-b border-line align-top last:border-0">
                           <td className="px-2 py-2">
-                            <p className="font-medium">{row.topic}</p>
+                            <p className="font-medium">
+                              {row.topic}
+                              {row.linked ? (
+                                <span className="ml-1 text-[11px] font-normal text-ink-muted">
+                                  · lanjutan
+                                </span>
+                              ) : null}
+                            </p>
                             {row.problemDetail ? (
                               <p className="mt-1 whitespace-pre-wrap text-xs text-ink">
                                 {row.problemDetail}
@@ -232,18 +240,18 @@ export function MeetingReportPanel({
                               : ""}
                           </td>
                           <td className="px-2 py-2">
-                            <div className="flex flex-wrap gap-1">
-                              <span
-                                className={`rounded-md px-2 py-0.5 text-[11px] ${TRACK_CLASS[row.track]}`}
-                              >
-                                {row.trackLabel}
-                              </span>
-                              {row.repeated ? (
-                                <span className="rounded-md bg-warn-soft px-2 py-0.5 text-[11px] text-warn">
-                                  {row.repeatCount}x
-                                </span>
-                              ) : null}
-                            </div>
+                            <span
+                              className={`rounded-md px-2 py-0.5 text-[11px] ${TRACK_CLASS[row.track]}`}
+                            >
+                              {row.trackLabel}
+                            </span>
+                          </td>
+                          <td className="px-2 py-2 text-xs text-ink-muted">
+                            {row.touchLabel ? (
+                              <span className="whitespace-pre-wrap">{row.touchLabel}</span>
+                            ) : (
+                              "—"
+                            )}
                           </td>
                         </tr>
                       ))}

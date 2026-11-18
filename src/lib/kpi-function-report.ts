@@ -1,3 +1,4 @@
+import { compareByMaju, majuLabel, type MajuGroup } from "./kpi-maju";
 import type { Department, KpiFunction } from "./types";
 
 export type KpiFunctionReportGroup = {
@@ -38,11 +39,7 @@ export function buildKpiFunctionReportGroups(
     const fns = functions
       .filter((f) => f.departmentId === d.id)
       .filter((f) => (activeOnly ? f.active : true))
-      .sort(
-        (a, b) =>
-          a.sortOrder - b.sortOrder ||
-          a.name.localeCompare(b.name, "id", { sensitivity: "base" }),
-      );
+      .sort(compareByMaju);
     const active = fns.filter((f) => f.active);
     return {
       departmentId: d.id,
@@ -59,6 +56,7 @@ export function buildKpiFunctionReportGroups(
 export function kpiFunctionReportSheetRows(
   groups: KpiFunctionReportGroup[],
   meta: { title: string; departmentLabel: string; generatedAt: string },
+  majuGroups?: MajuGroup[],
 ): (string | number)[][] {
   const rows: (string | number)[][] = [
     [meta.title],
@@ -70,6 +68,7 @@ export function kpiFunctionReportSheetRows(
       "Departemen",
       "Kode",
       "Fungsi KPI",
+      "Grup MAJU",
       "Bobot (%)",
       "Status",
       "Fokus",
@@ -79,7 +78,7 @@ export function kpiFunctionReportSheetRows(
   let n = 1;
   for (const g of groups) {
     if (g.functions.length === 0) {
-      rows.push([n++, g.label, g.departmentCode, "(belum ada fungsi)", "", "", ""]);
+      rows.push([n++, g.label, g.departmentCode, "(belum ada fungsi)", "", "", "", ""]);
       continue;
     }
     for (const f of g.functions) {
@@ -88,6 +87,7 @@ export function kpiFunctionReportSheetRows(
         g.label,
         g.departmentCode,
         f.name,
+        majuLabel(f.groupCode, majuGroups),
         f.weightPercent,
         f.active ? "Aktif" : "Nonaktif",
         f.focus || "",

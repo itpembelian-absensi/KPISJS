@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { KpiFunctionForm } from "@/components/master/KpiFunctionForm";
+import { listMajuGroups } from "@/lib/kpi-maju-ops";
 import { requireMasterAccess } from "@/lib/session";
 import { getKpiFunction, listDepartments } from "@/lib/store";
 
@@ -46,6 +47,7 @@ export default async function EditKpiFunctionPage({
         departments={departments}
         initial={item}
         returnDepartmentId={returnDepartmentId}
+        majuGroups={listMajuGroups()}
       />
     </div>
   );

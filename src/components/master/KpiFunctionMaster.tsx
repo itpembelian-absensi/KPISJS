@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { compareByMaju, majuLabel, type MajuGroup } from "@/lib/kpi-maju";
 import type { Department, KpiFunction } from "@/lib/types";
 
 function resolveDeptFilter(
@@ -17,9 +18,11 @@ function resolveDeptFilter(
 export function KpiFunctionMaster({
   initial,
   departments,
+  majuGroups,
 }: {
   initial: KpiFunction[];
   departments: Department[];
+  majuGroups: MajuGroup[];
 }) {
   const router = useRouter();
   const params = useSearchParams();
@@ -36,10 +39,11 @@ export function KpiFunctionMaster({
 
   const filtered = useMemo(
     () =>
-      deptFilter === "all"
+      (deptFilter === "all"
         ? items
-        : items.filter((f) => f.departmentId === deptFilter),
-    [items, deptFilter],
+        : items.filter((f) => f.departmentId === deptFilter)
+      ).slice().sort((a, b) => compareByMaju(a, b, majuGroups)),
+    [items, deptFilter, majuGroups],
   );
 
   const activeTotal = useMemo(
@@ -156,7 +160,12 @@ export function KpiFunctionMaster({
             <div>
               <h2 className="font-semibold">Daftar fungsi KPI</h2>
               <p className="text-xs text-ink-muted">
-                Add / Change / Delete lewat tombol di list
+                Fungsi dikelompokkan MAJU:{" "}
+                {majuGroups
+                  .filter((group) => group.active)
+                  .map((group) => `${group.name} ${group.weightPercent}%`)
+                  .join(", ")}
+                .
               </p>
             </div>
             <p
@@ -189,6 +198,9 @@ export function KpiFunctionMaster({
                 </p>
                 <div className="mt-0.5 flex flex-wrap items-center gap-2">
                   <p className="font-medium">{f.name}</p>
+                  <span className="rounded-md bg-bg-elevated px-2 py-0.5 text-[11px] font-medium text-ink-muted">
+                    {majuLabel(f.groupCode, majuGroups)}
+                  </span>
                   <span className="rounded-md bg-brand-soft px-2 py-0.5 text-[11px] font-semibold text-brand-deep">
                     {f.weightPercent}%
                   </span>

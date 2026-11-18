@@ -9,9 +9,12 @@ import {
   deleteMeetingNote,
   getMeetingNote,
   listMeetingNotes,
+  markItemDiscussedOn,
   meetingAccessByItem,
   meetingMatchesScope,
+  reviseItemDiscussionDate,
   saveMeetingNote,
+  updateMeetingItem,
   updateMeetingItemStatus,
 } from "@/lib/meeting-ops";
 import { getUserBySessionToken } from "@/lib/store";
@@ -69,7 +72,92 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
-    return NextResponse.json({ meeting: result.meeting });
+    return NextResponse.json({
+      meeting: result.meeting,
+      meetings: result.meetings ?? [result.meeting],
+    });
+  }
+
+  if (body.action === "mark-date") {
+    const itemId = String(body.itemId || "");
+    const access = meetingAccessByItem(itemId);
+    if (!access) {
+      return NextResponse.json({ error: "Bahasan tidak ditemukan" }, { status: 404 });
+    }
+    const scope = getEffectiveDepartmentScope(user);
+    if (scope !== "all" && !meetingMatchesScope(access.departmentIds, scope)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    const result = markItemDiscussedOn(itemId, String(body.date || ""));
+    if (result.error || !result.meetings) {
+      return NextResponse.json(
+        { error: result.error || "Gagal mencatat tanggal" },
+        { status: 400 },
+      );
+    }
+    return NextResponse.json({ meetings: result.meetings, date: result.date });
+  }
+
+  if (body.action === "revise-date") {
+    const itemId = String(body.itemId || "");
+    const access = meetingAccessByItem(itemId);
+    if (!access) {
+      return NextResponse.json({ error: "Bahasan tidak ditemukan" }, { status: 404 });
+    }
+    const scope = getEffectiveDepartmentScope(user);
+    if (scope !== "all" && !meetingMatchesScope(access.departmentIds, scope)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    const result = reviseItemDiscussionDate(
+      itemId,
+      String(body.fromDate || ""),
+      String(body.toDate || ""),
+    );
+    if (result.error || !result.meetings) {
+      return NextResponse.json(
+        { error: result.error || "Gagal mengubah tanggal" },
+        { status: 400 },
+      );
+    }
+    return NextResponse.json({ meetings: result.meetings });
+  }
+
+  if (body.action === "item") {
+    const itemId = String(body.itemId || "");
+    const access = meetingAccessByItem(itemId);
+    if (!access) {
+      return NextResponse.json({ error: "Bahasan tidak ditemukan" }, { status: 404 });
+    }
+    const scope = getEffectiveDepartmentScope(user);
+    if (scope !== "all" && !meetingMatchesScope(access.departmentIds, scope)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    const rawDepartmentIds = Array.isArray(body.departmentIds) ? body.departmentIds : [];
+    const departmentIds: string[] = Array.from(
+      new Set(rawDepartmentIds.map((id: unknown) => String(id).trim()).filter(Boolean)),
+    );
+    const rawOwnerIds = Array.isArray(body.ownerStaffIds) ? body.ownerStaffIds : [];
+    const ownerStaffIds: string[] = Array.from(
+      new Set(rawOwnerIds.map((id: unknown) => String(id).trim()).filter(Boolean)),
+    );
+    const result = updateMeetingItem(itemId, {
+      topic: String(body.topic || ""),
+      problemDetail: String(body.problemDetail || ""),
+      detail: String(body.detail || ""),
+      departmentIds,
+      ownerStaffIds,
+      ownerName: String(body.ownerName || ""),
+      startDate: String(body.startDate || ""),
+      dueDate: String(body.dueDate || ""),
+      status: String(body.status || ""),
+    });
+    if (result.error || !result.meetings) {
+      return NextResponse.json(
+        { error: result.error || "Gagal menyimpan bahasan" },
+        { status: 400 },
+      );
+    }
+    return NextResponse.json({ meetings: result.meetings });
   }
 
   const rawIds = Array.isArray(body.departmentIds)
@@ -110,6 +198,20 @@ export async function POST(req: NextRequest) {
   const rawItems = Array.isArray(body.items) ? body.items : [];
   for (const item of rawItems) {
     if (!item || typeof item !== "object") continue;
+    const continuedFromId = String(item.continuedFromId || "").trim();
+    if (continuedFromId) {
+      const continuedAccess = meetingAccessByItem(continuedFromId);
+      if (!continuedAccess) {
+        return NextResponse.json(
+          { error: "Bahasan yang masih berjalan tidak ditemukan" },
+          { status: 404 },
+        );
+      }
+      if (scope !== "all" && !meetingMatchesScope(continuedAccess.departmentIds, scope)) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+      continue;
+    }
     const itemDeptIds: string[] = Array.isArray(item.departmentIds)
       ? Array.from(
           new Set(
@@ -162,7 +264,10 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
-  return NextResponse.json({ meeting: result.meeting });
+  return NextResponse.json({
+    meeting: result.meeting,
+    meetings: result.meetings ?? [result.meeting],
+  });
 }
 
 export async function DELETE(req: NextRequest) {

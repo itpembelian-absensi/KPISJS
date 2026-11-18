@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
+import { inferMajuGroup } from "./kpi-maju";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "itsupport.db");
@@ -463,6 +464,19 @@ function createSchema(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_meeting_items_meeting ON meeting_items(meeting_id);
     CREATE INDEX IF NOT EXISTS idx_meeting_items_status ON meeting_items(status);
+
+    CREATE TABLE IF NOT EXISTS meeting_item_sessions (
+      id TEXT PRIMARY KEY,
+      item_id TEXT NOT NULL,
+      meeting_id TEXT NOT NULL DEFAULT '',
+      session_date TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      note TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_meeting_item_sessions_item ON meeting_item_sessions(item_id);
+    CREATE INDEX IF NOT EXISTS idx_meeting_item_sessions_meeting ON meeting_item_sessions(meeting_id);
   `);
 
   const meetingCols = db
@@ -550,6 +564,38 @@ function createSchema(db: Database.Database) {
       fillOwners.run(JSON.stringify([row.owner_staff_id]), row.id);
     }
   }
+
+  const sessionCols = db
+    .prepare("PRAGMA table_info(meeting_item_sessions)")
+    .all() as Array<{ name: string }>;
+  if (sessionCols.length > 0) {
+    const sessionNames = new Set(sessionCols.map((column) => column.name));
+    if (!sessionNames.has("hidden")) {
+      db.exec(
+        "ALTER TABLE meeting_item_sessions ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0",
+      );
+    }
+  }
+
+  db.exec(`
+    INSERT INTO meeting_item_sessions (
+      id, item_id, meeting_id, session_date, status, note, created_at
+    )
+    SELECT
+      i.id || ':' || i.meeting_id,
+      i.id,
+      i.meeting_id,
+      n.meeting_date,
+      i.status,
+      '',
+      i.created_at
+    FROM meeting_items i
+    JOIN meeting_notes n ON n.id = i.meeting_id
+    WHERE NOT EXISTS (
+      SELECT 1 FROM meeting_item_sessions s
+      WHERE s.item_id = i.id AND s.meeting_id = i.meeting_id
+    );
+  `);
 
   // Migrasi kolom SOP formal (aman jika tabel lama tanpa kolom baru)
   const sopCols = db
@@ -700,6 +746,29 @@ function createSchema(db: Database.Database) {
     db.prepare(
       "UPDATE kpi_functions SET department_id = ? WHERE department_id IS NULL OR department_id = ''",
     ).run(itDept.id);
+  }
+
+  // Grup MAJU di atas fungsi. Sekali saat kolom baru: isi dari nama fungsi.
+  const kpiColsAfter = db
+    .prepare("PRAGMA table_info(kpi_functions)")
+    .all() as Array<{ name: string }>;
+  const kpiNamesAfter = new Set(kpiColsAfter.map((c) => c.name));
+  if (!kpiNamesAfter.has("group_code")) {
+    db.exec(
+      "ALTER TABLE kpi_functions ADD COLUMN group_code TEXT NOT NULL DEFAULT 'U'",
+    );
+    const fnRows = db
+      .prepare("SELECT id, name FROM kpi_functions")
+      .all() as Array<{ id: string; name: string }>;
+    const setGroup = db.prepare(
+      "UPDATE kpi_functions SET group_code = ? WHERE id = ?",
+    );
+    const classify = db.transaction(() => {
+      for (const row of fnRows) {
+        setGroup.run(inferMajuGroup(row.name), row.id);
+      }
+    });
+    classify();
   }
 
   // Akses per-user: menu & batasan departemen
@@ -924,6 +993,23 @@ function createSchema(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_asset_categories_order
       ON asset_categories(sort_order, name);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS kpi_maju_groups (
+      id TEXT PRIMARY KEY,
+      code TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      subtitle TEXT NOT NULL DEFAULT '',
+      weight_percent REAL NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_kpi_maju_groups_order
+      ON kpi_maju_groups(sort_order, code);
   `);
 
   db.exec(`

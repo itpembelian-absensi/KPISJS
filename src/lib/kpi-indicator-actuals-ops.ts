@@ -4,6 +4,8 @@ import {
   attendanceIndicatorActual,
   type DisciplineBreakdown,
 } from "./discipline-score";
+import { rollupMaju, type MajuWeightedScore } from "./kpi-maju";
+import { listMajuGroups } from "./kpi-maju-ops";
 import {
   computeFunctionScoreFromIndicators,
   computeIndicatorScore,
@@ -431,8 +433,7 @@ export function scoreStaffPeriodFromIndicators(input: {
     },
   );
 
-  let weighted = 0;
-  let usedW = 0;
+  const majuItems: MajuWeightedScore[] = [];
   let hasAny = false;
 
   for (const fn of functions) {
@@ -500,16 +501,20 @@ export function scoreStaffPeriodFromIndicators(input: {
     if (result.filledCount > 0) {
       hasAny = true;
       if (fn.weightPercent > 0) {
-        weighted += result.score * fn.weightPercent;
-        usedW += fn.weightPercent;
+        majuItems.push({
+          groupCode: fn.groupCode,
+          weightPercent: fn.weightPercent,
+          score: result.score,
+        });
       }
     }
   }
 
+  const maju = rollupMaju(majuItems, listMajuGroups());
   return {
     byFunction,
-    overall: usedW > 0 ? Math.round((weighted / usedW) * 10) / 10 : 0,
-    weightUsed: usedW,
+    overall: maju.overall ?? 0,
+    weightUsed: maju.weightUsed,
     hasAny,
   };
 }

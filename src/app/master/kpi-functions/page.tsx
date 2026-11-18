@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { KpiFunctionMaster } from "@/components/master/KpiFunctionMaster";
+import { listMajuGroups } from "@/lib/kpi-maju-ops";
 import { requireMasterAccess } from "@/lib/session";
 import { listDepartments, listKpiFunctions } from "@/lib/store";
 
@@ -33,7 +34,11 @@ export default async function KpiFunctionsMasterPage() {
           <p className="text-sm text-ink-muted">Memuat daftar fungsi KPI...</p>
         }
       >
-        <KpiFunctionMaster initial={kpiFunctions} departments={departments} />
+        <KpiFunctionMaster
+          initial={kpiFunctions}
+          departments={departments}
+          majuGroups={listMajuGroups()}
+        />
       </Suspense>
     </div>
   );

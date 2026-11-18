@@ -2,11 +2,13 @@ import * as XLSX from "xlsx";
 import { getEffectiveDepartmentScope } from "./auth";
 import { getDb } from "./db";
 import {
+  addImportedBahasan,
   listMeetingNotes,
   saveMeetingNote,
   type MeetingInput,
   type MeetingItemInput,
 } from "./meeting-ops";
+import { normalizeTopic } from "./meeting-track";
 import { listDepartments, listStaff } from "./store";
 import type { Department, MeetingItemStatus, MeetingNote, SessionUser } from "./types";
 
@@ -847,37 +849,79 @@ export function importMeetingNotesFromExcel(
   }
 
   const scopeIds = ctx.companyWide ? undefined : ctx.departments.map((dept) => dept.id);
-  const existing = new Set(
-    listMeetingNotes(scopeIds).map(
-      (meeting) => `${normKey(meeting.title)}|${meeting.meetingDate}`,
-    ),
+  const knownMeetings = new Map(
+    listMeetingNotes(scopeIds).map((meeting) => [
+      `${normKey(meeting.title)}|${meeting.meetingDate}`,
+      meeting,
+    ]),
   );
-  const warnings: string[] = [];
-  for (const input of parsed.inputs) {
-    const key = `${normKey(input.title)}|${input.meetingDate}`;
-    if (!existing.has(key)) continue;
-    warnings.push(
-      `Notulen "${input.title}" tanggal ${input.meetingDate} sudah ada. Yang diunggah tetap disimpan sebagai notulen baru`,
-    );
+  const knownTopics = new Map<string, { id: string; date: string }>();
+  for (const meeting of knownMeetings.values()) {
+    for (const item of meeting.items) rememberTopic(knownTopics, item.topic, item.id, meeting.meetingDate);
   }
+
+  const warnings: string[] = [];
+  let continuedCount = 0;
+  let reusedNotes = 0;
+  const ordered = [...parsed.inputs].sort(
+    (a, b) =>
+      a.meetingDate.localeCompare(b.meetingDate) ||
+      a.title.localeCompare(b.title, "id"),
+  );
 
   const db = getDb();
   try {
     const meetings = db.transaction(() => {
-      const saved: MeetingNote[] = [];
-      for (const input of parsed.inputs) {
-        const result = saveMeetingNote(input, actor);
+      const saved = new Map<string, MeetingNote>();
+      for (const input of ordered) {
+        const merged = mergeSameTopics(input.items ?? []);
+        const items = merged.map((item) => {
+          const key = normalizeTopic(item.topic);
+          const hit = key.length >= 3 ? knownTopics.get(key) : undefined;
+          if (!hit) return item;
+          continuedCount += 1;
+          return {
+            ...item,
+            continuedFromId: hit.id,
+            sessionNote: bahasanNote(item),
+            mergeIntoExisting: true,
+          };
+        });
+        const meetingKey = `${normKey(input.title)}|${input.meetingDate}`;
+        const existing = knownMeetings.get(meetingKey);
+        const result = existing
+          ? addImportedBahasan(existing.id, items)
+          : saveMeetingNote({ ...input, items }, actor);
         if (result.error || !result.meeting) {
           throw new Error(result.error || "Gagal menyimpan notulen");
         }
-        saved.push(result.meeting);
+        if (existing) reusedNotes += 1;
+        saved.set(result.meeting.id, result.meeting);
+        for (const meeting of result.meetings ?? [result.meeting]) {
+          saved.set(meeting.id, meeting);
+        }
+        knownMeetings.set(meetingKey, result.meeting);
+        for (const item of result.meeting.items) {
+          rememberTopic(knownTopics, item.topic, item.id, result.meeting.meetingDate);
+        }
       }
-      return saved;
+      return [...saved.values()];
     })();
+    if (reusedNotes > 0) {
+      warnings.push(
+        `${reusedNotes} notulen dengan judul dan tanggal yang sama tidak dibuat ulang.`,
+      );
+    }
+    if (continuedCount > 0) {
+      warnings.push(
+        `${continuedCount} bahasan judulnya sudah ada. Informasi dan tanggalnya ditambahkan ke bahasan yang sama, bukan bahasan baru.`,
+      );
+    }
+    const itemCount = ordered.reduce((sum, input) => sum + mergeSameTopics(input.items ?? []).length, 0);
     return {
       result: {
         meetings,
-        itemCount: parsed.itemCount,
+        itemCount,
         warnings,
       },
     };
@@ -885,6 +929,70 @@ export function importMeetingNotesFromExcel(
     const message = err instanceof Error ? err.message : "Gagal menyimpan notulen";
     return { error: message };
   }
+}
+
+function rememberTopic(
+  topics: Map<string, { id: string; date: string }>,
+  topic: string,
+  id: string,
+  date: string,
+) {
+  const key = normalizeTopic(topic);
+  if (key.length < 3) return;
+  const prev = topics.get(key);
+  if (!prev || date >= prev.date) topics.set(key, { id, date });
+}
+
+function bahasanNote(item: MeetingItemInput): string {
+  return [item.problemDetail, item.detail]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+function mergeSameTopics(items: MeetingItemInput[]): MeetingItemInput[] {
+  const out: MeetingItemInput[] = [];
+  const index = new Map<string, number>();
+  for (const item of items) {
+    const key = normalizeTopic(item.topic);
+    if (key.length < 3) {
+      out.push(item);
+      continue;
+    }
+    const at = index.get(key);
+    if (at == null) {
+      index.set(key, out.length);
+      out.push({ ...item });
+      continue;
+    }
+    const target = out[at];
+    target.problemDetail = appendImportText(target.problemDetail, item.problemDetail);
+    target.detail = appendImportText(target.detail, item.detail);
+    if (item.status) target.status = item.status;
+    if (item.dueDate) target.dueDate = item.dueDate;
+    if (item.startDate && !target.startDate) target.startDate = item.startDate;
+    target.departmentIds = [...new Set([...(target.departmentIds ?? []), ...(item.departmentIds ?? [])])];
+    target.ownerStaffIds = [...new Set([...(target.ownerStaffIds ?? []), ...(item.ownerStaffIds ?? [])])];
+    if (item.ownerName) {
+      const names = new Set(
+        `${target.ownerName || ""}, ${item.ownerName}`
+          .split(",")
+          .map((name) => name.trim())
+          .filter(Boolean),
+      );
+      target.ownerName = [...names].join(", ");
+    }
+  }
+  return out;
+}
+
+function appendImportText(current: string | undefined, next: string | undefined): string {
+  const add = String(next || "").trim();
+  const base = String(current || "").trim();
+  if (!add) return base;
+  if (!base) return add;
+  if (base.includes(add)) return base;
+  return `${base}\n${add}`;
 }
 
 export function meetingImportContext(
@@ -1006,7 +1114,10 @@ export function buildMeetingImportTemplate(
     ["Status: Belum mulai, On progress, atau Selesai. Kosong berarti Belum mulai."],
     ["Sheet Contoh, Referensi, dan Petunjuk tidak diimpor."],
     [
-      "Setiap unggahan membuat notulen baru. Mengunggah file yang sama dua kali akan membuat salinan baru.",
+      "Kalau topik sudah pernah ada, unggahan menambahkan tanggal dan informasi ke bahasan itu. Topik baru tetap menjadi bahasan baru.",
+    ],
+    [
+      "Notulen dengan judul dan tanggal yang sama tidak dibuat ulang.",
     ],
   ];
 

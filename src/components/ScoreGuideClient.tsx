@@ -178,7 +178,12 @@ export function ScoreGuideClient({
                     const disc = isDisciplineFn(f.name);
                     return (
                       <tr key={f.id} className="border-b border-line last:border-0">
-                        <td className="px-4 py-3 font-medium">{f.name}</td>
+                        <td className="px-4 py-3 font-medium">
+                          <span className="mr-2 text-[11px] font-semibold text-brand">
+                            {f.groupCode}
+                          </span>
+                          {f.name}
+                        </td>
                         <td className="px-4 py-3">{f.weightPercent}%</td>
                         <td className="px-4 py-3">
                           <span

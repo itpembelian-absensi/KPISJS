@@ -96,7 +96,7 @@ export async function buildKpiFunctionReportPdf(input: {
 
     group.functions.forEach((f, i) => {
       doc.fontSize(9);
-      const nameH = doc.heightOfString(f.name, { width: colW[1] });
+      const nameH = doc.heightOfString(`${f.groupCode} · ${f.name}`, { width: colW[1] });
       const focus = f.focus || "—";
       const focusH = doc.heightOfString(focus, { width: colW[4] });
       const rowH = Math.max(14, nameH, focusH) + 6;
@@ -112,7 +112,7 @@ export async function buildKpiFunctionReportPdf(input: {
         lineBreak: false,
       });
       x += colW[0];
-      doc.text(f.name, x, y, { width: colW[1] });
+      doc.text(`${f.groupCode} · ${f.name}`, x, y, { width: colW[1] });
       x += colW[1];
       doc.text(formatWeight(f.weightPercent), x, y, {
         width: colW[2],

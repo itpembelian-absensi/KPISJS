@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import type { MajuGroup } from "@/lib/kpi-maju";
 import type { Department, KpiFunction } from "@/lib/types";
 
 function listHref(departmentId: string | null | undefined) {
@@ -15,10 +16,12 @@ export function KpiFunctionForm({
   initial,
   defaultDepartmentId,
   returnDepartmentId,
+  majuGroups,
 }: {
   departments: Department[];
   initial?: KpiFunction | null;
   defaultDepartmentId?: string;
+  majuGroups: MajuGroup[];
   /** Filter list departemen yang harus dipertahankan saat kembali (bisa "all") */
   returnDepartmentId?: string;
 }) {
@@ -47,6 +50,7 @@ export function KpiFunctionForm({
           departmentId,
           name: fd.get("name"),
           weightPercent: fd.get("weightPercent"),
+          groupCode: fd.get("groupCode"),
           focus: fd.get("focus"),
           sortOrder: fd.get("sortOrder"),
           active: fd.get("active") === "on",
@@ -92,6 +96,23 @@ export function KpiFunctionForm({
           {departments.map((d) => (
             <option key={d.id} value={d.id}>
               {d.code} — {d.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="block text-sm">
+        <span className="text-xs text-ink-muted">Grup MAJU</span>
+        <select
+          name="groupCode"
+          required
+          defaultValue={initial?.groupCode ?? "U"}
+          className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2.5"
+        >
+          {majuGroups
+            .filter((group) => group.active || group.code === initial?.groupCode)
+            .map((group) => (
+            <option key={group.code} value={group.code}>
+              {group.code} — {group.name} ({group.subtitle}) · {group.weightPercent}%
             </option>
           ))}
         </select>

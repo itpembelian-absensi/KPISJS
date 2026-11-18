@@ -139,8 +139,8 @@ export function ensureDisciplineKpiFunctions() {
     .prepare("SELECT id FROM departments WHERE active = 1")
     .all() as Array<{ id: string }>;
   const insert = db.prepare(
-    `INSERT INTO kpi_functions (id, department_id, name, weight_percent, focus, sort_order, active)
-     VALUES (?, ?, ?, 0, ?, 99, 1)`,
+    `INSERT INTO kpi_functions (id, department_id, name, weight_percent, group_code, focus, sort_order, active)
+     VALUES (?, ?, ?, 0, 'A', ?, 99, 1)`,
   );
   const tx = db.transaction(() => {
     for (const dept of depts) {

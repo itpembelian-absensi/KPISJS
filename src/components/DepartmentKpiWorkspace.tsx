@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, Fragment, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ActivityPhotoSlider } from "@/components/ActivityPhotoSlider";
@@ -30,6 +30,13 @@ import {
   VIOLATION_SCALE_LABEL,
 } from "@/lib/discipline-score";
 import { computeFunctionScoreFromIndicators } from "@/lib/kpi-score-compute";
+import {
+  groupKpiFunctions,
+  majuContributionPoints,
+  rollupMaju,
+  type MajuGroup,
+  type MajuWeightedScore,
+} from "@/lib/kpi-maju";
 import {
   METRIC_TYPE_LABEL,
   dataSourceBadgeLabel,
@@ -268,6 +275,7 @@ export function DepartmentKpiWorkspace({
   assessmentUnrestricted = true,
   assessorHomeDepartmentId = null,
   assessmentExtraStaffIds = [],
+  majuGroups,
 }: {
   departments: Department[];
   functions: KpiFunction[];
@@ -306,6 +314,7 @@ export function DepartmentKpiWorkspace({
   assessorHomeDepartmentId?: string | null;
   /** Staf dept lain yang diizinkan dinilai */
   assessmentExtraStaffIds?: string[];
+  majuGroups: MajuGroup[];
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1105,41 +1114,48 @@ export function DepartmentKpiWorkspace({
       };
     });
 
-    let weighted = 0;
-    let totalW = 0;
-    const rowsWithContribution = rows.map((r) => {
-      const contribution =
-        r.weight > 0
-          ? Math.round(((r.score ?? 0) * r.weight) / 100 * 10) / 10
-          : 0;
-      if (r.weight > 0) {
-        totalW += r.weight;
-        weighted += (r.score ?? 0) * r.weight;
-      }
+    const majuItems: MajuWeightedScore[] = rows.map((r) => {
+      const fn = functions.find((f) => f.id === r.id);
+      return {
+        groupCode: fn?.groupCode ?? "U",
+        weightPercent: r.weight,
+        score: r.score,
+      };
+    });
+    const maju = rollupMaju(majuItems, majuGroups);
+    const rowsWithContribution = rows.map((r, index) => {
+      const contribution = majuContributionPoints(
+        majuItems[index],
+        majuItems,
+        majuGroups,
+      );
       const fn = functions.find((f) => f.id === r.id);
       const formula = fn
         ? buildFunctionScoreFormula({
             fn,
             indicators: deptIndicators,
             source: r.source,
+            groups: majuGroups,
           })
         : { summary: "", lines: [] as string[] };
       return {
         ...r,
+        groupCode: fn?.groupCode ?? "U",
+        sortOrder: fn?.sortOrder ?? 0,
         contribution,
         formulaSummary: formula.summary,
         formulaLines: formula.lines,
       };
     });
 
-    const overall =
-      totalW > 0 ? Math.round((weighted / totalW) * 10) / 10 : 0;
+    const overall = maju.overall ?? 0;
 
     return {
       rows: rowsWithContribution,
-      weightedScore: totalW > 0 ? overall : null,
+      groups: maju.groups,
+      weightedScore: maju.overall,
       overallPercent: overall,
-      weightUsed: totalW,
+      weightUsed: maju.weightUsed,
       total: activeActs.length,
       done: activeActs.filter((a) => a.status === "done").length,
       disciplineAvg,
@@ -1364,15 +1380,17 @@ export function DepartmentKpiWorkspace({
     const periodAssessments = deptAssessments.filter(
       (a) => a.periodLabel === latestPeriod && !a.staffId,
     );
-    let weighted = 0;
-    let usedWeight = 0;
+    const majuItems: MajuWeightedScore[] = [];
     for (const a of periodAssessments) {
       const fn = functions.find((f) => f.id === a.kpiFunctionId);
-      if (!fn) continue;
-      weighted += a.score * fn.weightPercent;
-      usedWeight += fn.weightPercent;
+      if (!fn || fn.weightPercent <= 0) continue;
+      majuItems.push({
+        groupCode: fn.groupCode,
+        weightPercent: fn.weightPercent,
+        score: a.score,
+      });
     }
-    if (usedWeight > 0) weightedScore = weighted / usedWeight;
+    weightedScore = rollupMaju(majuItems, majuGroups).overall;
   }
 
   const fnName = (id: string | null) =>
@@ -1900,16 +1918,38 @@ export function DepartmentKpiWorkspace({
                 </tr>
               </thead>
               <tbody>
-                {functions.map((f) => (
-                  <tr key={f.id} className="border-b border-line">
-                    <td className="px-4 py-3 font-medium">{f.name}</td>
-                    <td className="px-4 py-3">
-                      <span className="rounded-md bg-brand-soft px-2 py-0.5 text-xs font-semibold text-brand-deep">
-                        {f.weightPercent}%
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-ink-muted">{f.focus}</td>
-                  </tr>
+                {groupKpiFunctions(functions, majuGroups).map(({ group, items }) => (
+                  <Fragment key={group.code}>
+                    <tr className="border-b border-line bg-bg-elevated/80">
+                      <td className="px-4 py-2.5 font-semibold">
+                        {group.code} — {group.name}
+                        <span className="ml-2 font-normal text-ink-muted">
+                          {group.subtitle}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <span className="rounded-md bg-brand px-2 py-0.5 text-xs font-semibold text-white">
+                          {group.weightPercent}%
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-xs text-ink-muted">
+                        {items.length === 0
+                          ? "Belum ada fungsi di grup ini"
+                          : `${items.length} fungsi`}
+                      </td>
+                    </tr>
+                    {items.map((f) => (
+                      <tr key={f.id} className="border-b border-line">
+                        <td className="px-4 py-3 pl-8 font-medium">{f.name}</td>
+                        <td className="px-4 py-3">
+                          <span className="rounded-md bg-brand-soft px-2 py-0.5 text-xs font-semibold text-brand-deep">
+                            {f.weightPercent}%
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-ink-muted">{f.focus}</td>
+                      </tr>
+                    ))}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -2758,12 +2798,36 @@ export function DepartmentKpiWorkspace({
                     {autoScores.overallPercent}%
                   </p>
                   <p className="text-xs text-ink-muted">
-                    Bobot dipakai {autoScores.weightUsed}%
+                    Bobot grup MAJU {autoScores.weightUsed}%
                     {autoScores.total > 0
                       ? ` · kegiatan ${autoScores.done}/${autoScores.total}`
                       : ""}
                   </p>
                 </div>
+              </div>
+
+              <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                {autoScores.groups.map((group) => (
+                  <div
+                    key={group.code}
+                    className="rounded-xl border border-line bg-surface px-3 py-2"
+                  >
+                    <p className="text-xs font-semibold">
+                      {group.code} — {group.name}
+                    </p>
+                    <p className="text-[11px] text-ink-muted">
+                      {group.subtitle} · {group.weightPercent}%
+                    </p>
+                    <p className="mt-1 text-lg font-semibold text-brand">
+                      {group.score == null ? "—" : group.score}
+                    </p>
+                    <p className="text-[11px] text-ink-muted">
+                      {group.functionCount === 0
+                        ? "Belum ada fungsi"
+                        : `${group.functionCount} fungsi`}
+                    </p>
+                  </div>
+                ))}
               </div>
 
               <div className="mt-3 grid gap-2 sm:grid-cols-3">
@@ -3035,7 +3099,7 @@ export function DepartmentKpiWorkspace({
                       </div>
                     ) : null}
                     <p className="mt-2 border-t border-line pt-2 font-medium text-ink">
-                      Total tertimbang = Σ (skor fungsi × bobot) ÷ Σ bobot
+                      Skor grup = Σ (skor fungsi × bobot fungsi) ÷ Σ bobot fungsi dalam grup. Skor akhir = Σ (skor grup × bobot MAJU) ÷ Σ bobot grup yang punya fungsi.
                     </p>
                   </div>
                   <div className="overflow-x-auto rounded-xl border border-line bg-surface">
@@ -3056,7 +3120,18 @@ export function DepartmentKpiWorkspace({
                       </tr>
                     </thead>
                     <tbody>
-                      {autoScores.rows.map((r) => {
+                      {groupKpiFunctions(autoScores.rows, majuGroups).map(({ group, items }) => (
+                        <Fragment key={group.code}>
+                          <tr className="border-b border-line bg-bg-elevated/80">
+                            <td colSpan={6} className="py-2 pr-3 pl-4 text-sm font-semibold normal-case">
+                              {group.code} — {group.name}
+                              <span className="ml-2 font-normal text-ink-muted">
+                                {group.subtitle} · bobot grup {group.weightPercent}%
+                                {items.length === 0 ? " · belum ada fungsi" : ""}
+                              </span>
+                            </td>
+                          </tr>
+                          {items.map((r) => {
                         const srcMeta =
                           SCORE_SOURCE_META[
                             r.source as keyof typeof SCORE_SOURCE_META
@@ -3159,13 +3234,15 @@ export function DepartmentKpiWorkspace({
                         </tr>
                         );
                       })}
+                        </Fragment>
+                      ))}
                     </tbody>
                     <tfoot>
                       <tr className="border-t-2 border-line bg-bg-elevated/80">
                         <td className="py-3 pr-3 pl-4 font-semibold">
                           Total tertimbang
                           <p className="mt-0.5 text-xs font-normal text-ink-muted normal-case">
-                            Σ (capaian × bobot / 100) · fungsi kosong = 0 ·{" "}
+                            Σ poin grup MAJU · fungsi kosong = 0 ·{" "}
                             {autoScores.scopeLabel}
                           </p>
                         </td>

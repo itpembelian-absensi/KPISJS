@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Fragment } from "react";
 import { PriorityBadge } from "@/components/Badges";
 import { DepartmentKpiBoard } from "@/components/DepartmentKpiBoard";
 import {
@@ -9,6 +10,8 @@ import {
 } from "@/components/StatCard";
 import { canManageMaster, getEffectiveDepartmentScope } from "@/lib/auth";
 import { computeKpi } from "@/lib/kpi";
+import { groupKpiFunctions } from "@/lib/kpi-maju";
+import { listMajuGroups } from "@/lib/kpi-maju-ops";
 import { listKpiIndicatorActuals } from "@/lib/kpi-indicator-actuals-ops";
 import { listKpiScoreIndicators } from "@/lib/kpi-score-ops";
 import { requireUser } from "@/lib/session";
@@ -50,6 +53,7 @@ export default async function KpiPage({
   const indicators = selected ? listKpiScoreIndicators(selected.id) : [];
   const actuals = selected ? listKpiIndicatorActuals({ departmentId: selected.id }) : [];
   const weightTotal = functions.reduce((sum, f) => sum + f.weightPercent, 0);
+  const majuGroups = listMajuGroups();
 
   return (
     <div className="space-y-5">
@@ -100,8 +104,14 @@ export default async function KpiPage({
               Fungsi KPI {selected?.code || ""}
             </h2>
             <p className="text-xs text-ink-muted">
-              Kerangka bobot penilaian · total aktif{" "}
-              {weightTotal.toFixed(weightTotal % 1 ? 1 : 0)}%
+              Grup MAJU:{" "}
+              {majuGroups
+                .filter((group) => group.active)
+                .map((group) => `${group.name} ${group.weightPercent}%`)
+                .join(" · ")}
+              .
+              Bobot fungsi di dalam grup{" "}
+              {weightTotal.toFixed(weightTotal % 1 ? 1 : 0)}%.
             </p>
           </div>
           {canManageMaster(user.role) ? (
@@ -151,21 +161,43 @@ export default async function KpiPage({
                 </tr>
               </thead>
               <tbody>
-                {functions.map((f) => (
-                  <tr
-                    key={f.id}
-                    className="border-b border-line last:border-b-0"
-                  >
-                    <td className="px-4 py-3 font-medium text-ink">{f.name}</td>
-                    <td className="px-4 py-3">
-                      <span className="rounded-md bg-brand-soft px-2 py-0.5 text-xs font-semibold text-brand-deep">
-                        {f.weightPercent}%
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-ink-muted">
-                      {f.focus || "—"}
-                    </td>
-                  </tr>
+                {groupKpiFunctions(functions, majuGroups).map(({ group, items }) => (
+                  <Fragment key={group.code}>
+                    <tr className="border-b border-line bg-bg-elevated/80">
+                      <td className="px-4 py-2.5 font-semibold text-ink">
+                        {group.code} — {group.name}
+                        <span className="ml-2 font-normal text-ink-muted">
+                          {group.subtitle}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <span className="rounded-md bg-brand px-2 py-0.5 text-xs font-semibold text-white">
+                          {group.weightPercent}%
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-xs text-ink-muted">
+                        {items.length === 0
+                          ? "Belum ada fungsi di grup ini"
+                          : `${items.length} fungsi`}
+                      </td>
+                    </tr>
+                    {items.map((f) => (
+                      <tr
+                        key={f.id}
+                        className="border-b border-line last:border-b-0"
+                      >
+                        <td className="px-4 py-3 pl-8 font-medium text-ink">{f.name}</td>
+                        <td className="px-4 py-3">
+                          <span className="rounded-md bg-brand-soft px-2 py-0.5 text-xs font-semibold text-brand-deep">
+                            {f.weightPercent}%
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-ink-muted">
+                          {f.focus || "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -317,6 +349,7 @@ export default async function KpiPage({
           functions={functions}
           indicators={indicators}
           actuals={actuals}
+          majuGroups={majuGroups}
         />
       )}
     </div>

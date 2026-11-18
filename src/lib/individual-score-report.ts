@@ -6,6 +6,7 @@ import {
 } from "./activity-score-metrics";
 import { attendanceIndicatorActual } from "./discipline-score";
 import { computeFunctionScoreFromIndicators } from "./kpi-score-compute";
+import { rollupMaju, type MajuCode, type MajuGroup } from "./kpi-maju";
 import {
   assigneeIdsForTicketScore,
   computeTicketScoreMetrics,
@@ -29,6 +30,7 @@ import type {
 export type IndividualFunctionScore = {
   functionId: string;
   functionName: string;
+  groupCode: MajuCode;
   weightPercent: number;
   score: number | null;
   source: "indikator" | "manual" | "absensi" | "kegiatan" | null;
@@ -69,6 +71,7 @@ export function computeIndividualScore(input: {
   allStaff?: StaffMember[];
   itTeam?: ItMember[];
   managerUserStaffIds?: string[];
+  majuGroups?: MajuGroup[];
 }): IndividualScoreRow {
   const {
     staff,
@@ -179,6 +182,7 @@ export function computeIndividualScore(input: {
         return {
           functionId: fn.id,
           functionName: fn.name,
+          groupCode: fn.groupCode,
           weightPercent: fn.weightPercent,
           score: result.score,
           source: "indikator",
@@ -201,6 +205,7 @@ export function computeIndividualScore(input: {
       return {
         functionId: fn.id,
         functionName: fn.name,
+        groupCode: fn.groupCode,
         weightPercent: fn.weightPercent,
         score: manual.score,
         source: "manual",
@@ -212,6 +217,7 @@ export function computeIndividualScore(input: {
         return {
           functionId: fn.id,
           functionName: fn.name,
+          groupCode: fn.groupCode,
           weightPercent: fn.weightPercent,
           score: Math.round(Number(discScore) * 10) / 10,
           source: "absensi",
@@ -220,6 +226,7 @@ export function computeIndividualScore(input: {
       return {
         functionId: fn.id,
         functionName: fn.name,
+        groupCode: fn.groupCode,
         weightPercent: fn.weightPercent,
         score: null,
         source: null,
@@ -233,6 +240,7 @@ export function computeIndividualScore(input: {
       return {
         functionId: fn.id,
         functionName: fn.name,
+        groupCode: fn.groupCode,
         weightPercent: fn.weightPercent,
         score: pct,
         source: "kegiatan",
@@ -242,20 +250,21 @@ export function computeIndividualScore(input: {
     return {
       functionId: fn.id,
       functionName: fn.name,
+      groupCode: fn.groupCode,
       weightPercent: fn.weightPercent,
       score: null,
       source: null,
     };
   });
 
-  let weighted = 0;
-  let totalW = 0;
-  for (const f of fnScores) {
-    if (f.weightPercent <= 0) continue;
-    totalW += f.weightPercent;
-    // Fungsi tanpa capaian dihitung 0 — total 100 hanya jika semua bobot tercapai
-    weighted += (f.score ?? 0) * f.weightPercent;
-  }
+  const maju = rollupMaju(
+    fnScores.map((row) => ({
+      groupCode: row.groupCode,
+      weightPercent: row.weightPercent,
+      score: row.score,
+    })),
+    input.majuGroups,
+  );
 
   return {
     staffId: staff.id,
@@ -265,8 +274,8 @@ export function computeIndividualScore(input: {
     position: staff.position,
     periodLabel,
     functions: fnScores,
-    overall: totalW > 0 ? Math.round((weighted / totalW) * 10) / 10 : null,
-    weightUsed: totalW,
+    overall: maju.overall,
+    weightUsed: maju.weightUsed,
   };
 }
 
@@ -285,6 +294,7 @@ export function buildIndividualScoreReport(input: {
   allStaff?: StaffMember[];
   itTeam?: ItMember[];
   managerUserStaffIds?: string[];
+  majuGroups?: MajuGroup[];
 }): IndividualScoreRow[] {
   const adminSet = new Set(input.adminStaffIds ?? []);
   const functions = input.functions;
@@ -311,6 +321,7 @@ export function buildIndividualScoreReport(input: {
         allStaff: input.allStaff ?? input.staffList,
         itTeam: input.itTeam,
         managerUserStaffIds: input.managerUserStaffIds,
+        majuGroups: input.majuGroups,
       }),
     )
     .sort((a, b) => {

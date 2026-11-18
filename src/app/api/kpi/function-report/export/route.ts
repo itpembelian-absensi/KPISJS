@@ -6,6 +6,7 @@ import {
   SESSION_COOKIE,
 } from "@/lib/auth";
 import { getCompanyName } from "@/lib/branding";
+import { listMajuGroups } from "@/lib/kpi-maju-ops";
 import {
   buildKpiFunctionReportGroups,
   departmentReportLabel,
@@ -89,11 +90,15 @@ export async function GET(req: NextRequest) {
   XLSX.utils.book_append_sheet(
     wb,
     XLSX.utils.aoa_to_sheet(
-      kpiFunctionReportSheetRows(groups, {
-        title: "Laporan Fungsi KPI",
-        departmentLabel,
-        generatedAt,
-      }),
+      kpiFunctionReportSheetRows(
+        groups,
+        {
+          title: "Laporan Fungsi KPI",
+          departmentLabel,
+          generatedAt,
+        },
+        listMajuGroups(),
+      ),
     ),
     "Fungsi KPI",
   );
@@ -124,16 +129,17 @@ export async function GET(req: NextRequest) {
         `${g.functions.length} fungsi · ${g.activeCount} aktif · total bobot aktif ${g.activeWeightTotal}%`,
       ],
       [],
-      ["No", "Fungsi KPI", "Bobot (%)", "Status", "Fokus"],
+      ["No", "Fungsi KPI", "Grup MAJU", "Bobot (%)", "Status", "Fokus"],
       ...(g.functions.length
         ? g.functions.map((f, i) => [
             i + 1,
             f.name,
+            f.groupCode,
             f.weightPercent,
             f.active ? "Aktif" : "Nonaktif",
             f.focus || "",
           ])
-        : [["", "(belum ada fungsi)", "", "", ""]]),
+        : [["", "(belum ada fungsi)", "", "", "", ""]]),
     ];
     XLSX.utils.book_append_sheet(
       wb,

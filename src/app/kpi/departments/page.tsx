@@ -30,6 +30,7 @@ import {
   ensureDepartmentScoreRules,
   listKpiScoreIndicators,
 } from "@/lib/kpi-score-ops";
+import { listMajuGroups } from "@/lib/kpi-maju-ops";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
@@ -132,6 +133,7 @@ export default async function DepartmentKpiPage() {
           staffLimited={staffLimited}
           managerStaffIds={managerStaffIds}
           adminStaffIds={adminStaffIds}
+          majuGroups={listMajuGroups()}
           assessmentUnrestricted={isAssessmentUnrestricted(user.role)}
           assessorHomeDepartmentId={user.departmentId}
           assessmentExtraStaffIds={user.assessmentStaffIds ?? []}

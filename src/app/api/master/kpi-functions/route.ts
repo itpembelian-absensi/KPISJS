@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { canManageMaster, SESSION_COOKIE } from "@/lib/auth";
+import { parseMajuCode } from "@/lib/kpi-maju";
 import {
   getUserBySessionToken,
   deleteKpiFunction,
@@ -62,6 +63,7 @@ export async function POST(req: NextRequest) {
       name: String(body.name),
       weightPercent: Number(body.weightPercent),
       focus: String(body.focus || ""),
+      groupCode: parseMajuCode(String(body.groupCode || ""), String(body.name || "")),
       sortOrder: body.sortOrder !== undefined ? Number(body.sortOrder) : undefined,
       active: body.active ?? true,
     });

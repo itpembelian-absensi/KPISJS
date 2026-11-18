@@ -3,7 +3,7 @@ import type { KpiFunction } from "./types";
 
 export type KpiTemplateItem = Omit<
   KpiFunction,
-  "id" | "departmentId" | "active"
+  "id" | "departmentId" | "active" | "groupCode"
 > & { active?: boolean };
 
 /** Template standar fungsi KPI per kode departemen */

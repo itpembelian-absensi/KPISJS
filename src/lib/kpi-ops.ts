@@ -1,6 +1,8 @@
 import { randomUUID } from "crypto";
 import { deleteActivityUploadFolder } from "./activity-photos";
 import { getDb, getMeta, setMeta } from "./db";
+import { rollupMaju, type MajuWeightedScore } from "./kpi-maju";
+import { listMajuGroups } from "./kpi-maju-ops";
 import { listDepartments, listKpiFunctions } from "./store";
 import type {
   KpiActivity,
@@ -614,8 +616,7 @@ export function computeActivityScores(
   };
 
   const byFunction: ActivityScoreRow[] = [];
-  let weighted = 0;
-  let usedWeight = 0;
+  const majuItems: MajuWeightedScore[] = [];
 
   for (const fn of functions) {
     const isDisc = /kedisiplinan|kehadiran/i.test(fn.name);
@@ -636,8 +637,11 @@ export function computeActivityScores(
         score,
       });
       if (fn.weightPercent > 0) {
-        weighted += score * fn.weightPercent;
-        usedWeight += fn.weightPercent;
+        majuItems.push({
+          groupCode: fn.groupCode,
+          weightPercent: fn.weightPercent,
+          score,
+        });
       }
       continue;
     }
@@ -662,22 +666,24 @@ export function computeActivityScores(
       score: achievementPercent,
     });
     if (fn.weightPercent > 0) {
-      weighted += achievementPercent * fn.weightPercent;
-      usedWeight += fn.weightPercent;
+      majuItems.push({
+        groupCode: fn.groupCode,
+        weightPercent: fn.weightPercent,
+        score: achievementPercent,
+      });
     }
   }
 
   const totalActivities = activities.length;
   const doneActivities = activities.filter((a) => a.status === "done").length;
-  const overallAchievementPercent =
-    usedWeight > 0 ? Math.round((weighted / usedWeight) * 10) / 10 : 0;
+  const maju = rollupMaju(majuItems, listMajuGroups());
+  const overallAchievementPercent = maju.overall ?? 0;
 
   return {
     departmentId,
     periodLabel: periodLabel || null,
     byFunction,
-    weightedScore:
-      usedWeight > 0 ? Math.round((weighted / usedWeight) * 10) / 10 : null,
+    weightedScore: maju.overall,
     overallAchievementPercent,
     totalActivities,
     doneActivities,

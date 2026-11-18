@@ -2,6 +2,8 @@ import {
   formatIsoDateId,
   itemTrack,
   MEETING_TRACK_LABEL,
+  meetingTouchDates,
+  findSameTopicKey,
   normalizeTopic,
   todayIso,
   type MeetingTrack,
@@ -50,6 +52,8 @@ export type MeetingReportItemRow = {
   trackLabel: string;
   repeated: boolean;
   repeatCount: number;
+  touchLabel: string;
+  linked: boolean;
 };
 
 export type MeetingReport = {
@@ -141,14 +145,19 @@ export function buildMeetingReport(
     .split(/\s+/)
     .filter(Boolean);
 
-  const repeatCount = new Map<string, number>();
+  const topicDates = new Map<string, Set<string>>();
   for (const meeting of meetings) {
     const seen = new Set<string>();
-    for (const item of meeting.items) {
+    for (const item of [...meeting.items, ...(meeting.linkedItems ?? [])]) {
       const key = normalizeTopic(item.topic);
       if (key.length < 3 || seen.has(key)) continue;
       seen.add(key);
-      repeatCount.set(key, (repeatCount.get(key) ?? 0) + 1);
+      const canonical = findSameTopicKey(topicDates.keys(), key) ?? key;
+      const bucket = topicDates.get(canonical) ?? new Set<string>();
+      if (meeting.meetingDate) bucket.add(meeting.meetingDate.slice(0, 10));
+      for (const date of meetingTouchDates(item.sessions)) bucket.add(date);
+      topicDates.set(canonical, bucket);
+      if (canonical !== key) topicDates.set(key, bucket);
     }
   }
 
@@ -171,7 +180,11 @@ export function buildMeetingReport(
     const meetingMatchesDept =
       departmentId === "all" || idsMatch(meeting.departmentIds, departmentId);
 
-    const matchedItems = meeting.items.filter((item) => {
+    const sourceItems = [
+      ...meeting.items.map((item) => ({ item, linked: false })),
+      ...(meeting.linkedItems ?? []).map((item) => ({ item, linked: true })),
+    ];
+    const matchedItems = sourceItems.filter(({ item }) => {
       const itemMatchesDept =
         departmentId === "all" ||
         idsMatch(item.departmentIds, departmentId) ||
@@ -203,10 +216,22 @@ export function buildMeetingReport(
       itemCount: matchedItems.length,
     };
 
-    const itemRows = matchedItems.map((item) => {
+    const itemRows = matchedItems.map(({ item, linked }) => {
       const track = itemTrack(item.status, item.dueDate, today);
       const key = normalizeTopic(item.topic);
-      const repeats = key.length >= 3 ? (repeatCount.get(key) ?? 0) : 0;
+      const canonical = key.length >= 3 ? findSameTopicKey(topicDates.keys(), key) ?? key : key;
+      const dates =
+        key.length >= 3
+          ? [...(topicDates.get(canonical) ?? meetingTouchDates(item.sessions))].sort()
+          : meetingTouchDates(item.sessions);
+      const sessionNote = (item.sessions ?? [])
+        .filter((session) => session.note.trim())
+        .map((session) => `${formatIsoDateId(session.sessionDate)}: ${session.note.trim()}`)
+        .join("\n");
+      const discussed = dates.map((date) => formatIsoDateId(date)).join(", ");
+      const touchLabel = [discussed ? `Dibahas: ${discussed}` : "", sessionNote]
+        .filter(Boolean)
+        .join("\n");
       return {
         meetingId: meeting.id,
         meetingTitle: meeting.title,
@@ -223,8 +248,10 @@ export function buildMeetingReport(
         dueDateLabel: dateLabel(item.dueDate),
         track,
         trackLabel: MEETING_TRACK_LABEL[track],
-        repeated: repeats >= 2,
-        repeatCount: repeats,
+        repeated: dates.length >= 2,
+        repeatCount: dates.length,
+        touchLabel,
+        linked,
       } satisfies MeetingReportItemRow;
     });
 
@@ -253,17 +280,18 @@ export function buildMeetingReport(
     items.push(...itemRows);
   }
 
+  const counted = items.filter((row) => !row.linked);
   return {
     notes,
     items,
     stats: {
       notes: notes.length,
-      items: items.length,
-      open: items.filter((row) => row.track === "open").length,
-      progress: items.filter((row) => row.track === "in_progress").length,
-      overdue: items.filter((row) => row.track === "overdue").length,
-      done: items.filter((row) => row.track === "done").length,
-      repeated: items.filter((row) => row.repeated).length,
+      items: counted.length,
+      open: counted.filter((row) => row.track === "open").length,
+      progress: counted.filter((row) => row.track === "in_progress").length,
+      overdue: counted.filter((row) => row.track === "overdue").length,
+      done: counted.filter((row) => row.track === "done").length,
+      repeated: counted.filter((row) => row.repeated).length,
     },
     periodLabel: periodLabel(start, end),
     departmentLabel:
@@ -336,13 +364,13 @@ export function meetingReportSheetRows(report: MeetingReport): {
         "Tanggal awal",
         "Target selesai",
         "Status",
-        "Dibahas ulang",
+        "Riwayat meeting",
       ],
       ...report.items.map((row) => [
         row.meetingDateLabel,
         row.meetingTitle,
         row.meetingDepartmentLabel,
-        row.topic,
+        row.linked ? `${row.topic} (lanjutan)` : row.topic,
         row.problemDetail,
         row.detail,
         row.departmentLabel,
@@ -350,7 +378,7 @@ export function meetingReportSheetRows(report: MeetingReport): {
         row.startDateLabel,
         row.dueDateLabel,
         row.trackLabel,
-        row.repeated ? `${row.repeatCount}x` : "",
+        row.touchLabel,
       ]),
     ],
   };

@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { SESSION_DAYS } from "./auth";
 import { seedAssetCategoriesIfEmpty, seedAssetCategoryMenuIfMissing } from "./asset-category-ops";
 import { seedJenisDataIfEmpty, seedJenisDataMenuIfMissing } from "./jenis-data-ops";
+import { seedMajuGroupsIfEmpty, seedMajuMenuIfMissing } from "./kpi-maju-ops";
 import { backfillCustomersFromSubmissions } from "./customer-ops";
 import { ensureGowaConfig } from "./gowa";
 import { seedMeetingMenuIfMissing } from "./meeting-ops";
@@ -13,6 +14,7 @@ import {
   resolveDepartmentFromAttendance,
 } from "./excel-import";
 import { detectRepeat } from "./kpi";
+import { inferMajuGroup, parseMajuCode } from "./kpi-maju";
 import { templateForDepartmentCode } from "./kpi-templates";
 import { PRIORITY_LABEL, slaDeadline } from "./sla";
 import {
@@ -62,6 +64,7 @@ type KpiFunctionRow = {
   department_id: string | null;
   name: string;
   weight_percent: number;
+  group_code?: string | null;
   focus: string;
   sort_order: number;
   active: number;
@@ -188,6 +191,7 @@ function mapKpiFunction(row: KpiFunctionRow): KpiFunction {
     departmentId: row.department_id || "",
     name: row.name,
     weightPercent: Number(row.weight_percent),
+    groupCode: parseMajuCode(row.group_code, row.name),
     focus: row.focus,
     sortOrder: Number(row.sort_order),
     active: intToBool(row.active),
@@ -316,8 +320,8 @@ export function ensureDepartmentKpiTemplates() {
     .all() as Array<{ id: string; code: string }>;
 
   const insert = db.prepare(
-    `INSERT INTO kpi_functions (id, department_id, name, weight_percent, focus, sort_order, active)
-     VALUES (?, ?, ?, ?, ?, ?, 1)`,
+    `INSERT INTO kpi_functions (id, department_id, name, weight_percent, group_code, focus, sort_order, active)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
   );
 
   const tx = db.transaction(() => {
@@ -336,6 +340,7 @@ export function ensureDepartmentKpiTemplates() {
           dept.id,
           item.name,
           item.weightPercent,
+          inferMajuGroup(item.name),
           item.focus,
           item.sortOrder,
         );
@@ -1202,6 +1207,8 @@ function ensureDb() {
   seedAssetCategoryMenuIfMissing();
   seedJenisDataIfEmpty();
   seedJenisDataMenuIfMissing();
+  seedMajuGroupsIfEmpty();
+  seedMajuMenuIfMissing();
   backfillCustomersFromSubmissions();
 }
 
@@ -1311,6 +1318,7 @@ export function upsertKpiFunction(
   const weightPercent = Number(input.weightPercent);
   const focus = (input.focus ?? "").trim();
   const sortOrder = Number(input.sortOrder ?? 0);
+  const groupCode = parseMajuCode(input.groupCode, name);
 
   if (!name) return { error: "Nama fungsi wajib diisi" };
   if (!departmentId) return { error: "Departemen wajib dipilih" };
@@ -1341,13 +1349,14 @@ export function upsertKpiFunction(
       getDb()
         .prepare(
           `UPDATE kpi_functions
-           SET department_id = ?, name = ?, weight_percent = ?, focus = ?, sort_order = ?, active = ?
+           SET department_id = ?, name = ?, weight_percent = ?, group_code = ?, focus = ?, sort_order = ?, active = ?
            WHERE id = ?`,
         )
         .run(
           departmentId,
           name,
           weightPercent,
+          groupCode,
           focus || existing.focus,
           Number.isFinite(sortOrder) ? sortOrder : existing.sort_order,
           boolToInt(input.active ?? intToBool(existing.active)),
@@ -1382,6 +1391,7 @@ export function upsertKpiFunction(
     departmentId,
     name,
     weightPercent,
+    groupCode,
     focus,
     sortOrder:
       Number.isFinite(sortOrder) && sortOrder > 0 ? sortOrder : maxOrder.m + 1,
@@ -1390,14 +1400,15 @@ export function upsertKpiFunction(
 
   getDb()
     .prepare(
-      `INSERT INTO kpi_functions (id, department_id, name, weight_percent, focus, sort_order, active)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO kpi_functions (id, department_id, name, weight_percent, group_code, focus, sort_order, active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       item.id,
       item.departmentId,
       item.name,
       item.weightPercent,
+      item.groupCode,
       item.focus,
       item.sortOrder,
       boolToInt(item.active),

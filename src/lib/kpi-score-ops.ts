@@ -11,6 +11,7 @@ import {
   getKpiScoreTemplateByCode,
   listKpiScoreTemplates,
 } from "./kpi-score-template-ops";
+import { inferMajuGroup } from "./kpi-maju";
 import {
   ensureDepartmentKpiTemplates,
   listDepartments,
@@ -187,13 +188,14 @@ function upsertFunctionForTemplate(
   const id = randomUUID();
   db.prepare(
     `INSERT INTO kpi_functions
-      (id, department_id, name, weight_percent, focus, sort_order, active)
-     VALUES (?, ?, ?, ?, ?, ?, 1)`,
+      (id, department_id, name, weight_percent, group_code, focus, sort_order, active)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
   ).run(
     id,
     departmentId,
     item.name,
     item.weightPercent,
+    inferMajuGroup(item.name),
     item.focus,
     item.sortOrder,
   );

@@ -1,4 +1,5 @@
 import { KpiFunctionForm } from "@/components/master/KpiFunctionForm";
+import { listMajuGroups } from "@/lib/kpi-maju-ops";
 import { requireMasterAccess } from "@/lib/session";
 import { listDepartments } from "@/lib/store";
 
@@ -38,6 +39,7 @@ export default async function NewKpiFunctionPage({
         departments={departments}
         defaultDepartmentId={defaultDepartmentId}
         returnDepartmentId={defaultDepartmentId}
+        majuGroups={listMajuGroups()}
       />
     </div>
   );

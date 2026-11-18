@@ -8,6 +8,7 @@ import {
   METRIC_TYPE_LABEL,
   resolveIndicatorDataSource,
 } from "./kpi-score-templates";
+import { majuGroup, type MajuGroup } from "./kpi-maju";
 import type { KpiFunction, KpiScoreIndicator } from "./types";
 
 function isDisciplineFn(name: string) {
@@ -90,13 +91,15 @@ export function buildFunctionScoreFormula(input: {
     | "manual"
     | "absensi"
     | "kegiatan";
+  groups?: MajuGroup[];
 }): { summary: string; lines: string[] } {
-  const { fn, indicators, source } = input;
+  const { fn, indicators, source, groups } = input;
   const activeInds = indicators
     .filter((i) => i.active && i.kpiFunctionId === fn.id)
     .sort((a, b) => a.sortOrder - b.sortOrder);
 
-  const contrib = `Kontribusi ke total = skor fungsi × ${fn.weightPercent}% ÷ 100`;
+  const group = majuGroup(fn.groupCode, groups);
+  const contrib = `Kontribusi ke total = porsi bobot fungsi di dalam grup ${group.code} — ${group.name}, lalu × bobot grup ${group.weightPercent}%`;
 
   if ((source as string) === "manual") {
     return {

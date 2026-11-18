@@ -478,6 +478,12 @@ export const NAV_ENTRIES: NavEntry[] = [
           roles: ["admin", "it_staff"],
         },
         {
+          href: "/master/maju",
+          label: "Grup MAJU",
+          hint: "Mutu, Andal, Jalin Kerja Sama, Unjuk Kerja",
+          roles: ["admin", "it_staff"],
+        },
+        {
           href: "/master/kpi-functions",
           label: "Fungsi KPI",
           hint: "Bobot & fokus penilaian",

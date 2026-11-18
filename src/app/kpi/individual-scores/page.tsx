@@ -22,6 +22,7 @@ import {
   listUsers,
 } from "@/lib/store";
 import { IndividualScoreReportClient } from "@/components/IndividualScoreReportClient";
+import { listMajuGroups } from "@/lib/kpi-maju-ops";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -108,6 +109,7 @@ export default async function IndividualScoresPage() {
         initialPeriod={disciplinePeriodFromDate(
           new Date().toISOString().slice(0, 10),
         )}
+        majuGroups={listMajuGroups()}
       />
     </div>
   );

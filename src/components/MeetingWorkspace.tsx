@@ -1,16 +1,23 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 import {
   addDays,
   formatIsoDateId,
   formatWeekLabel,
+  itemBucket,
   itemTrack,
+  MEETING_BUCKET_LABEL,
   MEETING_STATUS_LABEL,
   MEETING_TRACK_LABEL,
+  meetingTouchDates,
+  findSameTopicKey,
   normalizeTopic,
+  sameTopic,
   todayIso,
   weekBounds,
+  type MeetingBucket,
   type MeetingTrack,
 } from "@/lib/meeting-track";
 import { MeetingReportPanel } from "@/components/MeetingReportPanel";
@@ -43,14 +50,24 @@ type DraftItem = {
   startDate: string;
   dueDate: string;
   status: MeetingItemStatus;
+  continuedFromId?: string;
+  sessionNote?: string;
 };
 
 type View = "week" | "notes" | "follow" | "report";
-type TrackFilter = "all" | MeetingTrack | "repeated";
+type TrackFilter = MeetingTrack | "repeated";
 
 type RepeatInfo = {
   count: number;
   meetings: Array<{ id: string; title: string; date: string }>;
+};
+
+const BUCKET_CLASS: Record<MeetingBucket, string> = {
+  open: "bg-line text-ink-muted",
+  in_progress: "bg-brand-soft text-brand",
+  overdue: "bg-danger-soft text-danger",
+  done: "bg-ok-soft text-ok",
+  repeated: "bg-warn-soft text-warn",
 };
 
 const TRACK_CLASS: Record<MeetingTrack, string> = {
@@ -85,6 +102,42 @@ function itemDepartmentLabel(
     .map((id) => departments.find((dept) => dept.id === id)?.code)
     .filter((code): code is string => Boolean(code))
     .join(", ");
+}
+
+function itemDepartmentNames(
+  ids: string[] | undefined,
+  departments: Department[],
+): string {
+  if (!ids || ids.length === 0) return "";
+  if (ids.includes("*")) return "Semua departemen";
+  return ids
+    .map((id) => departments.find((dept) => dept.id === id)?.name)
+    .filter((name): name is string => Boolean(name))
+    .join(", ");
+}
+
+function bahasanDepartmentName(
+  item: MeetingItem,
+  departments: Department[],
+  staff: StaffOption[],
+): string {
+  const assigned = itemDepartmentNames(item.departmentIds, departments);
+  if (assigned) return assigned;
+  const ownerIds = item.ownerStaffIds?.length
+    ? item.ownerStaffIds
+    : item.ownerStaffId
+      ? [item.ownerStaffId]
+      : [];
+  const names = [
+    ...new Set(
+      ownerIds
+        .map((id) => (staff ?? []).find((person) => person.id === id)?.departmentId)
+        .filter((id): id is string => Boolean(id))
+        .map((id) => departments.find((dept) => dept.id === id)?.name || "")
+        .filter(Boolean),
+    ),
+  ];
+  return names.join(", ");
 }
 
 function draftDepartmentIds(
@@ -170,13 +223,33 @@ export function MeetingWorkspace({
   const [meetings, setMeetings] = useState(initialMeetings);
   const [view, setView] = useState<View>("week");
   const [weekAnchor, setWeekAnchor] = useState(today);
-  const [filter, setFilter] = useState<TrackFilter>("all");
+  const [filter, setFilter] = useState<TrackFilter>("overdue");
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selectedDeptId, setSelectedDeptId] = useState("all");
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const pathname = usePathname();
+  const [liveSearch, setLiveSearch] = useState("");
+  const screenQuery = new URLSearchParams(liveSearch);
+  const noteParam = screenQuery.get("note");
+  const itemParam = screenQuery.get("item");
+  const focusParam = screenQuery.get("focus");
+  const isNew = screenQuery.get("new") === "1";
+  const isEdit = screenQuery.get("edit") === "1" && Boolean(noteParam);
+  const showForm = isNew || isEdit;
+  const viewingId = isNew ? null : noteParam;
+  const onBahasan = Boolean(!showForm && viewingId && itemParam);
+  const editingId = isEdit ? noteParam : null;
+  const loadedScreen = useRef<string | null>(null);
+  const [bahasanDraft, setBahasanDraft] = useState<DraftItem | null>(null);
+  const [bahasanSaving, setBahasanSaving] = useState(false);
+  const [markingDate, setMarkingDate] = useState(false);
+  const [dateEdit, setDateEdit] = useState<{
+    itemId: string;
+    from: string;
+    topic: string;
+  } | null>(null);
+  const [dateBusy, setDateBusy] = useState(false);
   const [allDepartments, setAllDepartments] = useState(false);
   const [departmentIds, setDepartmentIds] = useState<string[]>(
     departments[0] ? [departments[0].id] : [],
@@ -192,12 +265,29 @@ export function MeetingWorkspace({
   );
   const [summary, setSummary] = useState("");
   const [items, setItems] = useState<DraftItem[]>([emptyItem()]);
+  const [continued, setContinued] = useState<DraftItem[]>([]);
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [waTargets, setWaTargets] = useState<WaReminderTarget[] | null>(null);
   const [waBusy, setWaBusy] = useState(false);
+
+  function remember(search: string) {
+    const url = search ? `${pathname}?${search}` : pathname;
+    window.history.pushState(window.history.state, "", url);
+    setLiveSearch(search);
+  }
+
+  useEffect(() => {
+    function syncFromLocation() {
+      if (window.location.pathname !== pathname) return;
+      setLiveSearch(window.location.search.replace(/^\?/, ""));
+    }
+    syncFromLocation();
+    window.addEventListener("popstate", syncFromLocation);
+    return () => window.removeEventListener("popstate", syncFromLocation);
+  }, [pathname]);
 
   const week = weekBounds(weekAnchor);
 
@@ -239,20 +329,38 @@ export function MeetingWorkspace({
 
   const repeats = useMemo(() => {
     const map = new Map<string, RepeatInfo>();
+    const titleById = new Map(meetings.map((meeting) => [meeting.id, meeting.title]));
     for (const meeting of meetings) {
       const seen = new Set<string>();
-      for (const item of meeting.items) {
+      for (const item of [...meeting.items, ...(meeting.linkedItems ?? [])]) {
         const key = normalizeTopic(item.topic);
         if (key.length < 3 || seen.has(key)) continue;
         seen.add(key);
-        const info = map.get(key) ?? { count: 0, meetings: [] };
-        info.count += 1;
-        info.meetings.push({
-          id: meeting.id,
-          title: meeting.title,
-          date: meeting.meetingDate,
-        });
-        map.set(key, info);
+        const canonical = findSameTopicKey(map.keys(), key) ?? key;
+        const info = map.get(canonical) ?? { count: 0, meetings: [] };
+        const add = (id: string, date: string) => {
+          const clean = date.slice(0, 10);
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) return;
+          if (info.meetings.some((row) => row.date === clean)) return;
+          info.meetings.push({
+            id,
+            title: titleById.get(id) || meeting.title,
+            date: clean,
+          });
+        };
+        const sessions = item.sessions ?? [];
+        const visible = sessions.filter((session) => !session.hidden);
+        if (visible.length === 0 && sessions.length === 0) {
+          add(meeting.id, meeting.meetingDate);
+        } else {
+          for (const session of visible) {
+            add(session.meetingId || meeting.id, session.sessionDate);
+          }
+        }
+        info.meetings.sort((a, b) => a.date.localeCompare(b.date));
+        info.count = info.meetings.length;
+        map.set(canonical, info);
+        if (canonical !== key) map.set(key, info);
       }
     }
     return map;
@@ -267,6 +375,12 @@ export function MeetingWorkspace({
           item,
           meeting,
           track: itemTrack(item.status, item.dueDate, today),
+          bucket: itemBucket(
+            item.status,
+            item.dueDate,
+            (repeat?.count ?? 0) >= 2,
+            today,
+          ),
           repeated: (repeat?.count ?? 0) >= 2,
           repeat,
         };
@@ -274,16 +388,10 @@ export function MeetingWorkspace({
     );
   }, [meetings, repeats, today]);
 
-  const repeatedTopics = useMemo(() => {
-    return [...repeats.entries()]
-      .filter(([, info]) => info.count >= 2)
-      .sort((a, b) => b[1].count - a[1].count);
-  }, [repeats]);
-
   const stats = {
-    progress: tracked.filter((row) => row.track === "in_progress").length,
-    overdue: tracked.filter((row) => row.track === "overdue").length,
-    repeated: repeatedTopics.length,
+    progress: tracked.filter((row) => row.bucket === "in_progress").length,
+    overdue: tracked.filter((row) => row.bucket === "overdue").length,
+    repeated: tracked.filter((row) => row.bucket === "repeated").length,
     weekNotes: meetings.filter(
       (m) => m.meetingDate >= week.start && m.meetingDate <= week.end,
     ).length,
@@ -324,12 +432,6 @@ export function MeetingWorkspace({
     return true;
   }
 
-  const visibleRepeats = repeatedTopics.filter(([key, info]) => {
-    if (!query) return true;
-    const hay = `${key} ${info.meetings.map((meeting) => meeting.title).join(" ")}`.toLowerCase();
-    return query.split(/\s+/).every((token) => hay.includes(token));
-  });
-
   const weekMeetings = meetings.filter(
     (m) =>
       m.meetingDate >= week.start &&
@@ -337,28 +439,118 @@ export function MeetingWorkspace({
       matchesQuery(m) &&
       matchesDept(m),
   );
-  const allMeetings = meetings.filter(
-    (m) =>
-      matchesQuery(m) &&
-      matchesDept(m) &&
-      matchesDate(m.meetingDate),
-  );
+  const allMeetings = meetings
+    .filter(
+      (m) => matchesQuery(m) && matchesDept(m) && matchesDate(m.meetingDate),
+    )
+    .slice()
+    .sort((a, b) => {
+      const byDate = a.meetingDate.localeCompare(b.meetingDate);
+      if (byDate !== 0) return byDate;
+      return a.createdAt.localeCompare(b.createdAt);
+    });
+  const uniqueTopics = (() => {
+    const groups = new Map<
+      string,
+      {
+        item: MeetingItem;
+        meeting: MeetingNote;
+        dates: Set<string>;
+        firstDate: string;
+      }
+    >();
+    for (const meeting of allMeetings) {
+      const seen = new Set<string>();
+      for (const item of [...meeting.items, ...(meeting.linkedItems ?? [])]) {
+        const key = normalizeTopic(item.topic);
+        if (key.length < 3 || seen.has(key)) continue;
+        seen.add(key);
+        const canonical = findSameTopicKey(groups.keys(), key) ?? key;
+        const dates = meetingTouchDates(item.sessions, [meeting.meetingDate]);
+        const current = groups.get(canonical);
+        if (!current) {
+          groups.set(canonical, {
+            item,
+            meeting,
+            dates: new Set(dates),
+            firstDate: dates[0] || meeting.meetingDate,
+          });
+          continue;
+        }
+        for (const date of dates) current.dates.add(date);
+        const earliest = [...current.dates].sort()[0] || current.firstDate;
+        if (earliest < current.firstDate) current.firstDate = earliest;
+        if (meeting.meetingDate >= current.meeting.meetingDate) {
+          current.item = item;
+          current.meeting = meeting;
+        }
+      }
+    }
+    return [...groups.entries()]
+      .map(([key, group]) => {
+        const dates = [...group.dates].sort();
+        const repeat: RepeatInfo = {
+          count: dates.length,
+          meetings: dates.map((date) => ({
+            id: group.meeting.id,
+            title: group.meeting.title,
+            date,
+          })),
+        };
+        return {
+          key,
+          item: group.item,
+          meeting: group.meeting,
+          firstDate: dates[0] || group.firstDate,
+          track: itemTrack(group.item.status, group.item.dueDate, today),
+          bucket: itemBucket(group.item.status, group.item.dueDate, false, today),
+          repeated: dates.length >= 2,
+          repeat,
+        };
+      })
+      .sort(
+        (a, b) =>
+          a.firstDate.localeCompare(b.firstDate) ||
+          a.item.topic.localeCompare(b.item.topic, "id"),
+      );
+  })();
+  const finishedRows = uniqueTopics
+    .filter((row) => row.bucket === "done")
+    .sort(compareByPicDepartment);
   const followRows = tracked.filter((row) => {
     if (!matchesQuery(row.meeting)) return false;
     if (!matchesDept(row.meeting)) return false;
     if (!matchesDate(row.meeting.meetingDate)) return false;
-    if (filter === "repeated") return row.repeated && row.track !== "done";
-    if (filter === "all") return row.track !== "done";
-    return row.track === filter;
+    return rowMatchesFilter(row);
   });
-  const carryOver = tracked.filter(
-    (row) =>
-      matchesQuery(row.meeting) &&
-      matchesDept(row.meeting) &&
-      (row.track === "in_progress" || row.track === "overdue") &&
-      (row.meeting.meetingDate < week.start ||
-        row.meeting.meetingDate > week.end),
-  );
+  const weekTopicKeys = new Set<string>();
+  for (const meeting of weekMeetings) {
+    for (const item of [...meeting.items, ...(meeting.linkedItems ?? [])]) {
+      const key = normalizeTopic(item.topic);
+      if (key) weekTopicKeys.add(findSameTopicKey(weekTopicKeys, key) ?? key);
+      weekTopicKeys.add(item.id);
+    }
+  }
+  const carryBest = new Map<string, (typeof tracked)[number]>();
+  for (const row of tracked) {
+    if (row.item.status === "done") continue;
+    if (!matchesQuery(row.meeting) || !matchesDept(row.meeting)) continue;
+    if (
+      row.meeting.meetingDate >= week.start &&
+      row.meeting.meetingDate <= week.end
+    ) {
+      continue;
+    }
+    const key = normalizeTopic(row.item.topic) || row.item.id;
+    if (weekTopicKeys.has(row.item.id)) continue;
+    if (normalizeTopic(row.item.topic) && findSameTopicKey(weekTopicKeys, key)) continue;
+    const canonical = findSameTopicKey(carryBest.keys(), key) ?? key;
+    const prev = carryBest.get(canonical);
+    if (!prev || row.meeting.meetingDate > prev.meeting.meetingDate) {
+      carryBest.set(canonical, row);
+    }
+  }
+  const carryOver = [...carryBest.values()].sort(compareByPicDepartment);
   const reminderSource: ReminderRow[] =
     view === "follow"
       ? followRows.map((row) => ({ item: row.item, meeting: row.meeting }))
@@ -374,8 +566,28 @@ export function MeetingWorkspace({
           ];
   const openReminderRows = reminderSource.filter((row) => row.item.status !== "done");
 
-  function openNew() {
-    setEditingId(null);
+  function pendingDrafts(excludeMeetingId = ""): DraftItem[] {
+    const best = new Map<string, (typeof tracked)[number]>();
+    for (const row of tracked) {
+      if (row.item.status === "done") continue;
+      if (excludeMeetingId && row.meeting.id === excludeMeetingId) continue;
+      const key = normalizeTopic(row.item.topic) || row.item.id;
+      const canonical = findSameTopicKey(best.keys(), key) ?? key;
+      const prev = best.get(canonical);
+      if (!prev || row.meeting.meetingDate > prev.meeting.meetingDate) {
+        best.set(canonical, row);
+      }
+    }
+    return [...best.values()]
+      .sort((a, b) => a.item.topic.localeCompare(b.item.topic, "id"))
+      .map((row) => ({
+        ...draftFromItem(row.item, staff, departments, companyWide),
+        continuedFromId: row.item.id,
+        sessionNote: "",
+      }));
+  }
+
+  function resetNewForm() {
     setAllDepartments(false);
     setDepartmentIds(departments[0] ? [departments[0].id] : []);
     setTitle("");
@@ -385,13 +597,59 @@ export function MeetingWorkspace({
     setExternalAttendees("");
     setAttendeeQuery("");
     setSummary("");
+    setContinued([]);
     setItems([emptyItem()]);
+    setBahasanDraft(null);
     setError(null);
-    setShowForm(true);
+    setMessage(null);
+  }
+
+  function openNew() {
+    resetNewForm();
+    loadedScreen.current = "new";
+    remember(new URLSearchParams({ new: "1" }).toString());
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+
+  function closeForm() {
+    setError(null);
+    window.history.back();
+  }
+
+  function openView(meeting: MeetingNote, item?: MeetingItem) {
+    setError(null);
+    setMessage(null);
+    const params = new URLSearchParams({ note: meeting.id });
+    if (item) params.set("focus", item.id);
+    loadedScreen.current = `view:${meeting.id}:${item?.id ?? ""}`;
+    remember(params.toString());
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+
+  function closeView() {
+    setError(null);
+    window.history.back();
+  }
+
+  function openBahasan(item: MeetingItem) {
+    if (!viewingId) return;
+    setBahasanDraft(draftFromItem(item, staff, departments, companyWide));
+    setError(null);
+    setMessage(null);
+    loadedScreen.current = `item:${viewingId}:${item.id}`;
+    remember(new URLSearchParams({ note: viewingId, item: item.id }).toString());
+    window.scrollTo({ top: 0, behavior: "auto" });
   }
 
   function openEdit(meeting: MeetingNote) {
-    setEditingId(meeting.id);
+    fillFromMeeting(meeting);
+    loadedScreen.current = `edit:${meeting.id}`;
+    remember(new URLSearchParams({ note: meeting.id, edit: "1" }).toString());
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+
+  function fillFromMeeting(meeting: MeetingNote) {
+    setBahasanDraft(null);
     if (meeting.departmentIds.includes("*")) {
       setAllDepartments(true);
       setDepartmentIds(departments.map((dept) => dept.id));
@@ -434,6 +692,17 @@ export function MeetingWorkspace({
     }
     setAttendeeQuery("");
     setSummary(meeting.summary);
+    setContinued(
+      (meeting.linkedItems ?? []).map((item) => {
+        const session = (item.sessions ?? []).find((row) => row.meetingId === meeting.id);
+        return {
+          ...draftFromItem(item, staff, departments, companyWide),
+          continuedFromId: item.id,
+          sessionNote: session?.note || "",
+          status: session?.status || item.status,
+        };
+      }),
+    );
     setItems(
       meeting.items.length > 0
         ? meeting.items.map((item) =>
@@ -442,50 +711,152 @@ export function MeetingWorkspace({
         : [emptyItem()],
     );
     setError(null);
-    setShowForm(true);
+    setMessage(null);
     setWeekAnchor(meeting.meetingDate);
   }
 
-  function pullOpenItems() {
-    const existing = new Set(
-      items.map((item) => normalizeTopic(item.topic)).filter(Boolean),
-    );
-    const pulled: DraftItem[] = [];
-    for (const row of tracked) {
-      if (row.track === "done") continue;
-      const key = normalizeTopic(row.item.topic);
-      if (!key || existing.has(key)) continue;
-      existing.add(key);
-      pulled.push({
-        key: crypto.randomUUID(),
-        topic: row.item.topic,
-        problemDetail: row.item.problemDetail || "",
-        detail: row.item.detail,
-        departmentIds: draftDepartmentIds(
-          row.item.departmentIds,
-          departments,
-          companyWide,
-        ),
-        ownerStaffIds: row.item.ownerStaffIds || [],
-        ownerName: row.item.ownerName,
-        startDate: row.item.startDate || "",
-        dueDate: row.item.dueDate,
-        status: row.item.status === "done" ? "open" : row.item.status,
-      });
-    }
-    if (pulled.length === 0) {
-      setError("Tidak ada bahasan terbuka untuk ditarik.");
+  useEffect(() => {
+    const key = isNew
+      ? "new"
+      : isEdit && noteParam
+        ? `edit:${noteParam}`
+        : onBahasan && viewingId && itemParam
+          ? `item:${viewingId}:${itemParam}`
+          : `view:${viewingId ?? ""}:${focusParam ?? ""}`;
+    if (loadedScreen.current === key) return;
+    if (isNew) {
+      loadedScreen.current = key;
+      resetNewForm();
+      window.scrollTo({ top: 0, behavior: "auto" });
       return;
     }
-    setItems((prev) => {
-      const filled = prev.filter((item) => item.topic.trim());
-      return [...filled, ...pulled];
-    });
+    if (isEdit && noteParam) {
+      const meeting = meetings.find((row) => row.id === noteParam);
+      if (!meeting) return;
+      loadedScreen.current = key;
+      fillFromMeeting(meeting);
+      window.scrollTo({ top: 0, behavior: "auto" });
+      return;
+    }
+    if (onBahasan && viewingId && itemParam) {
+      const meeting = meetings.find((row) => row.id === viewingId);
+      const item = meeting
+        ? [...meeting.items, ...(meeting.linkedItems ?? [])].find(
+            (row) => row.id === itemParam,
+          )
+        : undefined;
+      if (!item) return;
+      loadedScreen.current = key;
+      setBahasanDraft(draftFromItem(item, staff, departments, companyWide));
+      setError(null);
+      window.scrollTo({ top: 0, behavior: "auto" });
+      return;
+    }
+    loadedScreen.current = key;
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [
+    isNew,
+    isEdit,
+    onBahasan,
+    noteParam,
+    itemParam,
+    focusParam,
+    viewingId,
+    meetings,
+    staff,
+    departments,
+    companyWide,
+  ]);
+
+  async function markDiscussedToday(itemId: string): Promise<boolean> {
+    setMarkingDate(true);
     setError(null);
-    setMessage(`${pulled.length} bahasan terbuka disalin ke notulen ini.`);
+    const date = todayIso();
+    try {
+      const res = await fetch("/api/kpi/meetings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "mark-date", itemId, date }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "Gagal mencatat tanggal");
+        return false;
+      }
+      const saved = (Array.isArray(data.meetings) ? data.meetings : []) as MeetingNote[];
+      for (const meeting of saved) {
+        if (meeting?.id) upsertMeeting(meeting);
+      }
+      setMessage(`Tanggal ${formatIsoDateId(date)} ditambahkan.`);
+      return true;
+    } catch {
+      setError("Koneksi gagal. Coba lagi.");
+      return false;
+    } finally {
+      setMarkingDate(false);
+    }
   }
 
-  function upsertMeeting(meeting: MeetingNote) {
+  function openDateRevision(topic: string, date: string, preferredItemId?: string) {
+    const matches: MeetingItem[] = [];
+    for (const meeting of meetings) {
+      for (const item of [...meeting.items, ...(meeting.linkedItems ?? [])]) {
+        if (!sameTopic(item.topic, topic)) continue;
+        const sessions = item.sessions ?? [];
+        const visible = sessions.filter((session) => !session.hidden);
+        const hasDate = visible.some((session) => session.sessionDate.slice(0, 10) === date);
+        const bareMeetingDate =
+          visible.length === 0 &&
+          sessions.length === 0 &&
+          meeting.meetingDate.slice(0, 10) === date &&
+          item.meetingId === meeting.id;
+        if (hasDate || bareMeetingDate) matches.push(item);
+      }
+    }
+    const unique = [...new Map(matches.map((item) => [item.id, item])).values()];
+    const owner = unique.find((item) => item.id === preferredItemId) ?? unique[0];
+    if (!owner) {
+      setError("Tanggal pembahasan tidak ditemukan");
+      return;
+    }
+    setError(null);
+    setDateEdit({ itemId: owner.id, from: date, topic: owner.topic });
+  }
+
+  async function reviseDiscussionDate(itemId: string, from: string, to: string): Promise<string | null> {
+    setDateBusy(true);
+    try {
+      const res = await fetch("/api/kpi/meetings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "revise-date",
+          itemId,
+          fromDate: from,
+          toDate: to,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return data.error || "Gagal mengubah tanggal";
+      const saved = (Array.isArray(data.meetings) ? data.meetings : []) as MeetingNote[];
+      for (const meeting of saved) {
+        if (meeting?.id) upsertMeeting(meeting);
+      }
+      setMessage(
+        to
+          ? `Tanggal diubah menjadi ${formatIsoDateId(to)}.`
+          : `Tanggal ${formatIsoDateId(from)} dihapus.`,
+      );
+      setDateEdit(null);
+      return null;
+    } catch {
+      return "Koneksi gagal. Coba lagi.";
+    } finally {
+      setDateBusy(false);
+    }
+  }
+
+  async function upsertMeeting(meeting: MeetingNote) {
     setMeetings((prev) => {
       const exists = prev.some((row) => row.id === meeting.id);
       const next = exists
@@ -535,20 +906,37 @@ export function MeetingWorkspace({
           attendeeStaffIds,
           externalAttendees,
           summary,
-          items: items
-            .filter((item) => item.topic.trim())
-            .map((item) => ({
-              id: item.id,
-              topic: item.topic,
-              problemDetail: item.problemDetail,
-              detail: item.detail,
-              departmentIds: item.departmentIds,
-              ownerStaffIds: item.ownerStaffIds,
-              ownerName: item.ownerName,
-              startDate: item.startDate,
-              dueDate: item.dueDate,
-              status: item.status,
-            })),
+          items: [
+            ...items
+              .filter((item) => item.topic.trim())
+              .map((item) => ({
+                id: item.id,
+                topic: item.topic,
+                problemDetail: item.problemDetail,
+                detail: item.detail,
+                departmentIds: item.departmentIds,
+                ownerStaffIds: item.ownerStaffIds,
+                ownerName: item.ownerName,
+                startDate: item.startDate || meetingDate,
+                dueDate: item.dueDate,
+                status: item.status,
+              })),
+            ...continued
+              .filter((item) => item.continuedFromId && item.topic.trim())
+              .map((item) => ({
+                continuedFromId: item.continuedFromId,
+                topic: item.topic,
+                problemDetail: item.problemDetail,
+                detail: item.detail,
+                departmentIds: item.departmentIds,
+                ownerStaffIds: item.ownerStaffIds,
+                ownerName: item.ownerName,
+                startDate: item.startDate,
+                dueDate: item.dueDate,
+                status: item.status,
+                sessionNote: item.sessionNote || "",
+              })),
+          ],
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -556,11 +944,16 @@ export function MeetingWorkspace({
         setError(data.error || "Gagal menyimpan notulen");
         return;
       }
-      upsertMeeting(data.meeting as MeetingNote);
-      setShowForm(false);
+      const saved = (
+        Array.isArray(data.meetings) ? data.meetings : [data.meeting]
+      ) as MeetingNote[];
+      for (const meeting of saved) {
+        if (meeting?.id) upsertMeeting(meeting);
+      }
       setMessage("Notulen tersimpan.");
       setWeekAnchor(meetingDate);
       setView("week");
+      closeForm();
     } catch {
       setError("Koneksi gagal. Coba lagi.");
     } finally {
@@ -582,7 +975,7 @@ export function MeetingWorkspace({
       return;
     }
     setMeetings((prev) => prev.filter((row) => row.id !== meeting.id));
-    if (editingId === meeting.id) setShowForm(false);
+    if (noteParam === meeting.id) window.history.back();
     setMessage("Notulen dihapus.");
   }
 
@@ -598,12 +991,122 @@ export function MeetingWorkspace({
       setError(data.error || "Gagal mengubah status");
       return;
     }
-    upsertMeeting(data.meeting as MeetingNote);
+    const saved = (
+      Array.isArray(data.meetings)
+        ? data.meetings
+        : data.meeting
+          ? [data.meeting]
+          : []
+    ) as MeetingNote[];
+    for (const meeting of saved) {
+      if (meeting?.id) upsertMeeting(meeting);
+    }
+  }
+
+  async function saveBahasan(draft: DraftItem) {
+    if (!draft.id) return;
+    if (draft.startDate && draft.dueDate && draft.startDate > draft.dueDate) {
+      setError("Jadwal / Target selesai tidak boleh sebelum tanggal awal pembahasan.");
+      return;
+    }
+    setBahasanSaving(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/kpi/meetings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "item",
+          itemId: draft.id,
+          topic: draft.topic,
+          problemDetail: draft.problemDetail,
+          detail: draft.detail,
+          departmentIds: draft.departmentIds,
+          ownerStaffIds: draft.ownerStaffIds,
+          ownerName: draft.ownerName,
+          startDate: draft.startDate,
+          dueDate: draft.dueDate,
+          status: draft.status,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "Gagal menyimpan bahasan");
+        return;
+      }
+      const saved = (Array.isArray(data.meetings) ? data.meetings : []) as MeetingNote[];
+      for (const meeting of saved) {
+        if (meeting?.id) upsertMeeting(meeting);
+      }
+      setMessage("Bahasan tersimpan.");
+      if (itemParam) window.history.back();
+      else setBahasanDraft(null);
+    } catch {
+      setError("Koneksi gagal. Coba lagi.");
+    } finally {
+      setBahasanSaving(false);
+    }
   }
 
   function focusFilter(next: TrackFilter) {
     setFilter(next);
-    setView("follow");
+    setView("week");
+  }
+
+  function rowMatchesFilter(row: { bucket: MeetingBucket }) {
+    if (filter === "repeated") return row.bucket === "repeated";
+    if (filter === "in_progress") return row.bucket === "in_progress";
+    if (filter === "overdue") return row.bucket === "overdue";
+    if (filter === "open") return row.bucket === "open";
+    return row.bucket === "done";
+  }
+
+  function picDepartmentLabel(item: MeetingItem): string {
+    const assigned = itemDepartmentLabel(item.departmentIds, departments);
+    if (assigned) return assigned;
+    const ownerIds = item.ownerStaffIds?.length
+      ? item.ownerStaffIds
+      : item.ownerStaffId
+        ? [item.ownerStaffId]
+        : [];
+    const codes = ownerIds
+      .map((id) => staff.find((person) => person.id === id)?.departmentId)
+      .filter((id): id is string => Boolean(id))
+      .map((id) => departments.find((dept) => dept.id === id)?.code || "")
+      .filter(Boolean);
+    return [...new Set(codes)].sort((a, b) => a.localeCompare(b, "id")).join(", ");
+  }
+
+  function compareByPicDepartment<T extends { item: MeetingItem }>(a: T, b: T): number {
+    const deptA = picDepartmentLabel(a.item) || "\uffff";
+    const deptB = picDepartmentLabel(b.item) || "\uffff";
+    const byDept = deptA.localeCompare(deptB, "id");
+    if (byDept !== 0) return byDept;
+    const byPic = (a.item.ownerName || "").localeCompare(b.item.ownerName || "", "id");
+    if (byPic !== 0) return byPic;
+    return a.item.topic.localeCompare(b.item.topic, "id");
+  }
+
+  function meetingBahasanRows(meeting: MeetingNote) {
+    const own = tracked.filter(
+      (row) => row.meeting.id === meeting.id && rowMatchesFilter(row),
+    );
+    const linked = (meeting.linkedItems ?? [])
+      .map((item) => {
+        const repeat = repeats.get(normalizeTopic(item.topic));
+        const repeated = (repeat?.count ?? 0) >= 2;
+        const track = itemTrack(item.status, item.dueDate, today);
+        return {
+          item,
+          meeting,
+          track,
+          bucket: itemBucket(item.status, item.dueDate, repeated, today),
+          repeated,
+          repeat,
+        };
+      })
+      .filter((row) => rowMatchesFilter(row));
+    return [...own, ...linked].sort(compareByPicDepartment);
   }
 
   function openReminderChat(target: WaReminderTarget) {
@@ -760,19 +1263,21 @@ export function MeetingWorkspace({
         </p>
       ) : null}
 
+      {!showForm && !viewingId ? (
+      <>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="On progress"
           value={stats.progress}
           hint="Bahasan yang sedang dikerjakan"
-          active={view === "follow" && filter === "in_progress"}
+          active={view === "week" && filter === "in_progress"}
           onClick={() => focusFilter("in_progress")}
         />
         <StatCard
           label="Overdue"
           value={stats.overdue}
           hint="Lewat jatuh tempo dan belum selesai"
-          active={view === "follow" && filter === "overdue"}
+          active={view === "week" && filter === "overdue"}
           onClick={() => focusFilter("overdue")}
           tone="danger"
         />
@@ -780,7 +1285,7 @@ export function MeetingWorkspace({
           label="Repeated discussions"
           value={stats.repeated}
           hint="Topik yang muncul di 2 rapat atau lebih"
-          active={view === "follow" && filter === "repeated"}
+          active={view === "week" && filter === "repeated"}
           onClick={() => focusFilter("repeated")}
           tone="warn"
         />
@@ -795,7 +1300,7 @@ export function MeetingWorkspace({
 
       <div className="panel flex flex-col gap-3 p-3 sm:p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          {view === "week" ? (
+          {view === "week" || view === "follow" ? (
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -834,56 +1339,13 @@ export function MeetingWorkspace({
               >
                 Minggu ini
               </button>
-              {meetingDateOptions.length > 0 ? (
-                <div className="flex items-center gap-1.5 border-l border-line pl-2">
-                  <span className="hidden text-xs text-ink-muted sm:inline">Tanggal meeting:</span>
-                  <select
-                    value={
-                      allMeetingDates.includes(weekAnchor)
-                        ? weekAnchor
-                        : (weekMeetings[0]?.meetingDate || "")
-                    }
-                    onChange={(e) => {
-                      if (e.target.value) setWeekAnchor(e.target.value);
-                    }}
-                    className="max-w-[200px] truncate rounded-lg border border-line bg-bg-elevated px-2 py-1 text-xs font-medium"
-                    title="Pilih tanggal pelaksanaan weekly meeting"
-                  >
-                    <option value="" disabled>Pilih tanggal weekly meeting...</option>
-                    {meetingDateOptions.map((opt) => (
-                      <option key={opt.date} value={opt.date}>
-                        {formatIsoDateId(opt.date)} {opt.titles.length > 0 ? `· ${opt.titles.join(", ")}` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ) : null}
-              <input
-                type="date"
-                value={weekAnchor}
-                onChange={(e) => {
-                  if (e.target.value) setWeekAnchor(e.target.value);
-                }}
-                className="rounded-lg border border-line bg-bg-elevated px-2 py-1 text-xs"
-                title="Pilih tanggal dari kalender"
-              />
             </div>
           ) : view === "notes" ? (
             <div className="flex flex-wrap items-center gap-2">
               <div className="min-w-0">
                 <p className="text-sm font-medium">Semua Notulen</p>
                 <p className="text-[11px] text-ink-muted">
-                  {allMeetings.length} notulen ditemukan
-                  {dateFrom || dateTo ? " · Filter tanggal aktif" : " · Tanpa batasan tanggal"}
-                </p>
-              </div>
-            </div>
-          ) : view === "follow" ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="min-w-0">
-                <p className="text-sm font-medium">Tindak Lanjut Bahasan</p>
-                <p className="text-[11px] text-ink-muted">
-                  {followRows.length} bahasan terpantau
+                  {uniqueTopics.length} bahasan · tiap bahasan sekali · pembahasan berikutnya melanjutkan bahasan yang sama
                   {dateFrom || dateTo ? " · Filter tanggal aktif" : ""}
                 </p>
               </div>
@@ -953,7 +1415,6 @@ export function MeetingWorkspace({
         {(
           [
             ["week", "Weekly meeting"],
-            ["follow", "Tindak lanjut"],
             ["notes", "Semua notulen"],
             ["report", "Laporan"],
           ] as Array<[View, string]>
@@ -972,27 +1433,28 @@ export function MeetingWorkspace({
             {id === "notes" && (dateFrom || dateTo || selectedDeptId !== "all") ? (
               <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-warn align-middle" />
             ) : null}
-            {id === "follow" && (dateFrom || dateTo) ? (
-              <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-warn align-middle" />
-            ) : null}
           </button>
         ))}
       </div>
+      </>
+      ) : null}
 
       {showForm ? (
         <form onSubmit={save} className="panel space-y-3 p-4 sm:p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="font-semibold">
-              {editingId ? "Edit notulen" : "Notulen baru"}
-            </h2>
+            <div className="min-w-0">
             <button
               type="button"
-              onClick={pullOpenItems}
-              className="rounded-lg border border-line px-3 py-1.5 text-xs"
+              onClick={closeForm}
+              className="text-xs text-ink-muted hover:text-brand"
             >
-              Tarik bahasan yang belum selesai
+              {viewingId ? "← Kembali ke notulen" : "← Kembali ke daftar"}
             </button>
+            <h2 className="mt-1 font-semibold">
+              {editingId ? "Edit notulen" : "Notulen baru"}
+            </h2>
           </div>
+        </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-sm">
               <span className="text-xs text-ink-muted">Judul</span>
@@ -1160,9 +1622,103 @@ export function MeetingWorkspace({
             />
           </label>
 
+          {editingId && continued.length > 0 ? (
+          <div className="space-y-2">
+            <div>
+              <p className="text-sm font-medium">Bahasan yang dilanjutkan</p>
+              <p className="mt-1 text-[11px] text-ink-muted">
+                Tanggal pembahasan mengikuti tanggal notulen ini.
+              </p>
+            </div>
+            {continued.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-line px-3 py-3 text-xs text-ink-muted">
+                Tidak ada bahasan pending. Bahasan baru diisi di bagian bawah.
+              </p>
+            ) : (
+              <div className="max-h-[28rem] space-y-2 overflow-y-auto pr-1">
+              {continued.map((item) => (
+                <div
+                  key={item.key}
+                  className="space-y-2 rounded-xl border border-brand/20 bg-brand-soft/40 p-3"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">{item.topic}</p>
+                      {item.problemDetail ? (
+                        <p className="mt-1 whitespace-pre-wrap text-xs text-ink">
+                          {item.problemDetail}
+                        </p>
+                      ) : null}
+                      <p className="mt-1 text-[11px] text-ink-muted">
+                        {itemDepartmentLabel(item.departmentIds, departments)
+                          ? `${itemDepartmentLabel(item.departmentIds, departments)} · `
+                          : ""}
+                        {item.ownerName || "Tanpa PIC"}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setContinued((prev) => prev.filter((row) => row.key !== item.key))
+                      }
+                      className="rounded-lg border border-line bg-surface px-2.5 py-1 text-xs"
+                    >
+                      Tidak dibahas kali ini
+                    </button>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <label className="text-sm">
+                      <span className="text-xs text-ink-muted">Status sekarang</span>
+                      <select
+                        value={item.status}
+                        onChange={(e) =>
+                          setContinued((prev) =>
+                            prev.map((row) =>
+                              row.key === item.key
+                                ? { ...row, status: e.target.value as MeetingItemStatus }
+                                : row,
+                            ),
+                          )
+                        }
+                        className="mt-1 w-full rounded-lg border border-line bg-bg-elevated px-3 py-2 text-sm"
+                      >
+                        {(Object.keys(MEETING_STATUS_LABEL) as MeetingItemStatus[]).map(
+                          (status) => (
+                            <option key={status} value={status}>
+                              {MEETING_STATUS_LABEL[status]}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </label>
+                    <label className="text-sm">
+                      <span className="text-xs text-ink-muted">Catatan meeting ini</span>
+                      <input
+                        value={item.sessionNote || ""}
+                        onChange={(e) =>
+                          setContinued((prev) =>
+                            prev.map((row) =>
+                              row.key === item.key
+                                ? { ...row, sessionNote: e.target.value }
+                                : row,
+                            ),
+                          )
+                        }
+                        placeholder="Perkembangan pada tanggal ini"
+                        className="mt-1 w-full rounded-lg border border-line bg-bg-elevated px-3 py-2 text-sm"
+                      />
+                    </label>
+                  </div>
+                </div>
+              ))}
+              </div>
+            )}
+          </div>
+          ) : null}
+
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-medium">Bahasan & tindak lanjut</p>
+              <p className="text-sm font-medium">{editingId ? "Bahasan baru" : "Bahasan"}</p>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -1223,7 +1779,7 @@ export function MeetingWorkspace({
                         ),
                       )
                     }
-                    rows={3}
+                    rows={10}
                     placeholder="Uraian masalah yang dibahas"
                     className="mt-1 w-full rounded-lg border border-line bg-bg-elevated px-3 py-2 text-sm"
                   />
@@ -1367,6 +1923,9 @@ export function MeetingWorkspace({
                     }
                     className="mt-1 w-full rounded-lg border border-line bg-bg-elevated px-3 py-2 text-sm"
                   />
+                  <p className="mt-1 text-[11px] text-ink-muted">
+                    Kosongkan untuk memakai tanggal notulen.
+                  </p>
                 </label>
                 <label className="text-sm">
                   <span className="text-xs text-ink-muted">
@@ -1440,10 +1999,7 @@ export function MeetingWorkspace({
             </button>
             <button
               type="button"
-              onClick={() => {
-                setShowForm(false);
-                setError(null);
-              }}
+              onClick={closeForm}
               className="rounded-xl border border-line px-4 py-2 text-sm"
             >
               Batal
@@ -1452,56 +2008,228 @@ export function MeetingWorkspace({
         </form>
       ) : null}
 
-      {view === "week" ? (
+      {!showForm && onBahasan && bahasanDraft ? (
+        <BahasanEditor
+          draft={bahasanDraft}
+          departments={departments}
+          staff={staff}
+          companyWide={companyWide}
+          saving={bahasanSaving}
+          marking={markingDate}
+          discussedOn={discussionDates(
+            repeats.get(normalizeTopic(bahasanDraft.topic)),
+            meetings.find((row) => row.id === viewingId)?.meetingDate,
+          )}
+          error={error}
+          onCancel={() => {
+            setError(null);
+            window.history.back();
+          }}
+          onSave={saveBahasan}
+          onMarkToday={() =>
+            bahasanDraft.id ? markDiscussedToday(bahasanDraft.id) : Promise.resolve(false)
+          }
+          onPickDate={(date) =>
+            openDateRevision(bahasanDraft.topic, date, bahasanDraft.id)
+          }
+        />
+      ) : null}
+
+      {!showForm && viewingId && !onBahasan ? (
+        <MeetingNoteView
+          meeting={meetings.find((row) => row.id === viewingId) ?? null}
+          departments={departments}
+          staff={staff}
+          repeats={repeats}
+          focusItemId={focusParam}
+          onBack={closeView}
+          onEdit={(meeting) => openEdit(meeting)}
+          onEditBahasan={openBahasan}
+          onStatus={changeStatus}
+          onPickDate={(topic, date, itemId) => openDateRevision(topic, date, itemId)}
+        />
+      ) : null}
+
+      {!showForm && !viewingId && (view === "week" || view === "follow") ? (
         <div className="space-y-3">
-          {carryOver.length > 0 ? (
-            <div className="panel p-4">
-              <h2 className="font-semibold">Masih berjalan di luar minggu ini</h2>
-              <p className="mt-1 text-xs text-ink-muted">
-                On progress dan overdue dari notulen minggu lain, supaya tidak
-                hilang dari pantauan.
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                ["overdue", "Overdue"],
+                ["repeated", "Repeated"],
+                ["in_progress", "On progress"],
+                ["open", "Belum mulai"],
+                ["done", "Selesai"],
+              ] as Array<[TrackFilter, string]>
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setFilter(id)}
+                className={`rounded-full px-3 py-1 text-xs font-medium ${
+                  filter === id
+                    ? "bg-brand text-white"
+                    : "border border-line text-ink-muted"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {filter === "done" ? (
+            finishedRows.length === 0 ? (
+              <p className="panel px-4 py-8 text-center text-sm text-ink-muted">
+                Belum ada bahasan selesai.
               </p>
-              <div className="mt-3 space-y-2">
-                {carryOver.map((row) => (
-                  <FollowRow
-                    key={row.item.id}
-                    row={row}
-                    departments={departments}
-                    onOpen={() => openEdit(row.meeting)}
-                    onStatus={(status) => changeStatus(row.item.id, status)}
-                    onRemind={() =>
-                      remindRows([{ item: row.item, meeting: row.meeting }], true)
-                    }
-                    busy={waBusy}
-                  />
-                ))}
-              </div>
-            </div>
-          ) : null}
-          {weekMeetings.length === 0 ? (
+            ) : (
+              <section className="panel p-4">
+                <h2 className="font-semibold">Selesai</h2>
+                <p className="mt-1 text-xs text-ink-muted">
+                  Semua bahasan yang statusnya selesai, dari meeting mana pun.
+                </p>
+                <div className="mt-3 space-y-2">
+                  {finishedRows.map((row) => (
+                    <FollowRow
+                      key={row.key}
+                      row={row}
+                      departments={departments}
+                      staff={staff}
+                      onOpen={() => openView(row.meeting, row.item)}
+                      onStatus={(status) => changeStatus(row.item.id, status)}
+                      onPickDate={(date) => openDateRevision(row.item.topic, date, row.item.id)}
+                      onRemind={() =>
+                        remindRows([{ item: row.item, meeting: row.meeting }], true)
+                      }
+                      busy={waBusy}
+                    />
+                  ))}
+                </div>
+              </section>
+            )
+          ) : weekMeetings.length === 0 ? (
             <p className="panel px-4 py-8 text-center text-sm text-ink-muted">
               Belum ada notulen pada minggu ini.
             </p>
           ) : (
-            weekMeetings.map((meeting) => (
-              <MeetingCard
-                key={meeting.id}
-                meeting={meeting}
-                departments={departments}
-                today={today}
-                repeats={repeats}
-                onEdit={() => openEdit(meeting)}
-                onDelete={() => removeMeeting(meeting)}
-                onStatus={changeStatus}
-                onRemind={(item) => remindRows([{ item, meeting }], true)}
-                busy={waBusy}
-              />
-            ))
+            weekMeetings.map((meeting) => {
+              const rows = meetingBahasanRows(meeting);
+              const pending =
+                weekMeetings.length === 1
+                  ? carryOver.filter((row) => rowMatchesFilter(row))
+                  : [];
+              return (
+                <section key={meeting.id} className="panel p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs text-ink-muted">
+                        {formatIsoDateId(meeting.meetingDate)}
+                        {meeting.meetingTime ? ` · ${meeting.meetingTime}` : ""}
+                        {` · ${meetingDepartmentLabel(meeting, departments)}`}
+                      </p>
+                      <h2 className="mt-0.5 text-lg font-semibold">{meeting.title}</h2>
+                    </div>
+                    <div className="flex shrink-0 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openView(meeting)}
+                        className="rounded-lg border border-line px-2.5 py-1 text-xs"
+                      >
+                        View
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeMeeting(meeting)}
+                        className="rounded-lg border border-danger/30 bg-danger-soft px-2.5 py-1 text-xs text-danger"
+                      >
+                        Hapus
+                      </button>
+                    </div>
+                  </div>
+                  <h3 className="mt-4 text-sm font-semibold">Daftar bahasan</h3>
+                  {rows.length === 0 ? (
+                    <p className="mt-2 text-sm text-ink-muted">
+                      Tidak ada bahasan pada filter ini.
+                    </p>
+                  ) : (
+                    <div className="mt-3 space-y-2">
+                      {rows.map((row) => (
+                        <FollowRow
+                          key={row.item.id}
+                          row={row}
+                          departments={departments}
+                          staff={staff}
+                          onOpen={() => openView(row.meeting, row.item)}
+                          onStatus={(status) => changeStatus(row.item.id, status)}
+                      onPickDate={(date) => openDateRevision(row.item.topic, date, row.item.id)}
+                          onRemind={() =>
+                            remindRows([{ item: row.item, meeting: row.meeting }], true)
+                          }
+                          busy={waBusy}
+                        />
+                      ))}
+                    </div>
+                  )}
+                  {pending.length > 0 ? (
+                    <div className="mt-5 border-t border-line pt-4">
+                      <h3 className="text-sm font-semibold">Masih berjalan</h3>
+                      <p className="mt-1 text-xs text-ink-muted">
+                        Bahasan dari meeting sebelumnya yang belum selesai.
+                      </p>
+                      <div className="mt-3 space-y-2">
+                        {pending.map((row) => (
+                          <FollowRow
+                            key={row.item.id}
+                            row={row}
+                            departments={departments}
+                            staff={staff}
+                            onOpen={() => openView(row.meeting, row.item)}
+                            onStatus={(status) => changeStatus(row.item.id, status)}
+                      onPickDate={(date) => openDateRevision(row.item.topic, date, row.item.id)}
+                            onRemind={() =>
+                              remindRows([{ item: row.item, meeting: row.meeting }], true)
+                            }
+                            busy={waBusy}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </section>
+              );
+            })
           )}
+          {weekMeetings.length !== 1 &&
+          carryOver.filter((row) => rowMatchesFilter(row)).length > 0 ? (
+            <section className="panel p-4">
+              <h2 className="font-semibold">Masih berjalan</h2>
+              <p className="mt-1 text-xs text-ink-muted">
+                Bahasan dari meeting sebelumnya yang belum selesai.
+              </p>
+              <div className="mt-3 space-y-2">
+                {carryOver
+                  .filter((row) => rowMatchesFilter(row))
+                  .map((row) => (
+                    <FollowRow
+                      key={row.item.id}
+                      row={row}
+                      departments={departments}
+                      staff={staff}
+                      onOpen={() => openView(row.meeting, row.item)}
+                      onStatus={(status) => changeStatus(row.item.id, status)}
+                      onPickDate={(date) => openDateRevision(row.item.topic, date, row.item.id)}
+                      onRemind={() =>
+                        remindRows([{ item: row.item, meeting: row.meeting }], true)
+                      }
+                      busy={waBusy}
+                    />
+                  ))}
+              </div>
+            </section>
+          ) : null}
         </div>
       ) : null}
 
-      {view === "notes" ? (
+      {!showForm && !viewingId && view === "notes" ? (
         <div className="space-y-3">
           <div className="panel space-y-3 p-3 sm:p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1652,7 +2380,7 @@ export function MeetingWorkspace({
                 )}
               </div>
               <span>
-                Menampilkan <strong>{allMeetings.length}</strong> dari {meetings.length} notulen
+                Menampilkan <strong>{uniqueTopics.length}</strong> bahasan dari {meetings.length} notulen
                 {dateFrom || dateTo ? (
                   <span>
                     {" "}· Periode: {dateFrom ? formatIsoDateId(dateFrom) : "Awal"} s/d{" "}
@@ -1663,7 +2391,7 @@ export function MeetingWorkspace({
             </div>
           </div>
 
-          {allMeetings.length === 0 ? (
+          {uniqueTopics.length === 0 ? (
             <div className="panel space-y-3 px-4 py-8 text-center text-sm text-ink-muted">
               <p>Tidak ada notulen yang cocok dengan filter tanggal atau pencarian.</p>
               {(dateFrom || dateTo || selectedDeptId !== "all" || search) && (
@@ -1682,119 +2410,16 @@ export function MeetingWorkspace({
               )}
             </div>
           ) : (
-            allMeetings.map((meeting) => (
-              <MeetingCard
-                key={meeting.id}
-                meeting={meeting}
-                departments={departments}
-                today={today}
-                repeats={repeats}
-                onEdit={() => openEdit(meeting)}
-                onDelete={() => removeMeeting(meeting)}
-                onStatus={changeStatus}
-                onRemind={(item) => remindRows([{ item, meeting }], true)}
-                busy={waBusy}
-              />
-            ))
-          )}
-        </div>
-      ) : null}
-
-      {view === "follow" ? (
-        <div className="panel p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap gap-2">
-              {(
-                [
-                  ["all", "Belum selesai"],
-                  ["in_progress", "On progress"],
-                  ["overdue", "Overdue"],
-                  ["open", "Belum mulai"],
-                  ["done", "Selesai"],
-                  ["repeated", "Repeated"],
-                ] as Array<[TrackFilter, string]>
-              ).map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setFilter(id)}
-                  className={`rounded-full px-3 py-1 text-xs font-medium ${
-                    filter === id
-                      ? "bg-brand text-white"
-                      : "border border-line text-ink-muted"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            {(dateFrom || dateTo) && (
-              <div className="flex items-center gap-2 text-xs text-ink-muted">
-                <span>
-                  Periode notulen: {dateFrom ? formatIsoDateId(dateFrom) : "Awal"} s/d{" "}
-                  {dateTo ? formatIsoDateId(dateTo) : "Sekarang"}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDateFrom("");
-                    setDateTo("");
-                  }}
-                  className="text-brand hover:underline"
-                >
-                  Hapus filter tanggal
-                </button>
-              </div>
-            )}
-          </div>
-          {filter === "repeated" ? (
-            <div className="mt-4 space-y-3">
-              {visibleRepeats.length === 0 ? (
-                <p className="py-6 text-center text-sm text-ink-muted">
-                  Belum ada topik yang dibahas di lebih dari satu rapat.
-                </p>
-              ) : (
-                visibleRepeats.map(([key, info]) => (
-                  <div key={key} className="rounded-xl border border-line p-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-medium capitalize">{key}</p>
-                      <span className="rounded-md bg-warn-soft px-2 py-0.5 text-[11px] text-warn">
-                        {info.count}x rapat
-                      </span>
-                    </div>
-                    <ul className="mt-2 space-y-1 text-xs text-ink-muted">
-                      {info.meetings.map((meeting) => (
-                        <li key={meeting.id}>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const found = meetings.find((row) => row.id === meeting.id);
-                              if (found) openEdit(found);
-                            }}
-                            className="text-left hover:text-brand"
-                          >
-                            {formatIsoDateId(meeting.date)} · {meeting.title}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))
-              )}
-            </div>
-          ) : followRows.length === 0 ? (
-            <p className="py-6 text-center text-sm text-ink-muted">
-              Tidak ada bahasan pada filter ini.
-            </p>
-          ) : (
-            <div className="mt-4 space-y-2">
-              {followRows.map((row) => (
+            <div className="panel space-y-2 p-4">
+              {[...uniqueTopics].sort(compareByPicDepartment).map((row) => (
                 <FollowRow
-                  key={row.item.id}
+                  key={row.key}
                   row={row}
                   departments={departments}
-                  onOpen={() => openEdit(row.meeting)}
+                  staff={staff}
+                  onOpen={() => openView(row.meeting, row.item)}
                   onStatus={(status) => changeStatus(row.item.id, status)}
+                      onPickDate={(date) => openDateRevision(row.item.topic, date, row.item.id)}
                   onRemind={() =>
                     remindRows([{ item: row.item, meeting: row.meeting }], true)
                   }
@@ -1806,12 +2431,12 @@ export function MeetingWorkspace({
         </div>
       ) : null}
 
-      {view === "report" ? (
+      {!showForm && !viewingId && view === "report" ? (
         <MeetingReportPanel
           meetings={meetings}
           departments={departments}
           query={search}
-          onOpen={openEdit}
+          onOpen={openView}
         />
       ) : null}
 
@@ -1825,6 +2450,17 @@ export function MeetingWorkspace({
           onClose={() => {
             if (!waBusy) setWaTargets(null);
           }}
+        />
+      ) : null}
+      {dateEdit ? (
+        <DateRevisionDialog
+          topic={dateEdit.topic}
+          from={dateEdit.from}
+          busy={dateBusy}
+          onClose={() => {
+            if (!dateBusy) setDateEdit(null);
+          }}
+          onConfirm={(to) => reviseDiscussionDate(dateEdit.itemId, dateEdit.from, to)}
         />
       ) : null}
     </div>
@@ -1935,174 +2571,540 @@ function DepartmentChecks({
   );
 }
 
-function MeetingCard({
+function discussionDates(repeat: RepeatInfo | undefined, fallback = ""): string[] {
+  if (repeat) {
+    return [
+      ...new Set(
+        repeat.meetings
+          .map((row) => row.date.slice(0, 10))
+          .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)),
+      ),
+    ].sort();
+  }
+  const day = fallback.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? [day] : [];
+}
+
+function DiscussedOn({
+  dates,
+  onPick,
+}: {
+  dates: string[];
+  onPick?: (date: string) => void;
+}) {
+  if (dates.length === 0) return null;
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1">
+      <span className="text-[11px] text-ink-muted">
+        {dates.length > 1 ? `Dibahas ${dates.length} kali` : "Dibahas"}
+      </span>
+      {dates.map((date) =>
+        onPick ? (
+          <button
+            key={date}
+            type="button"
+            onClick={() => onPick(date)}
+            title="Ubah atau hapus tanggal"
+            className="rounded-md border border-line bg-bg-elevated px-1.5 py-0.5 text-[11px] text-ink hover:border-brand hover:text-brand"
+          >
+            {formatIsoDateId(date)}
+          </button>
+        ) : (
+          <span
+            key={date}
+            className="rounded-md border border-line bg-bg-elevated px-1.5 py-0.5 text-[11px] text-ink"
+          >
+            {formatIsoDateId(date)}
+          </span>
+        ),
+      )}
+    </div>
+  );
+}
+
+function MeetingNoteView({
   meeting,
   departments,
-  today,
+  staff,
   repeats,
+  focusItemId,
+  onBack,
   onEdit,
-  onDelete,
+  onEditBahasan,
   onStatus,
-  onRemind,
-  busy,
+  onPickDate,
 }: {
-  meeting: MeetingNote;
+  meeting: MeetingNote | null;
   departments: Department[];
-  today: string;
+  staff: StaffOption[];
   repeats: Map<string, RepeatInfo>;
-  onEdit: () => void;
-  onDelete: () => void;
+  focusItemId: string | null;
+  onBack: () => void;
+  onEdit: (meeting: MeetingNote) => void;
+  onEditBahasan: (item: MeetingItem) => void;
   onStatus: (itemId: string, status: MeetingItemStatus) => void;
-  onRemind: (item: MeetingItem) => void;
-  busy: boolean;
+  onPickDate: (topic: string, date: string, itemId: string) => void;
 }) {
+  if (!meeting) {
+    return (
+      <div className="panel p-4">
+        <button
+          type="button"
+          onClick={onBack}
+          className="text-xs text-ink-muted hover:text-brand"
+        >
+          ← Kembali ke daftar
+        </button>
+        <p className="mt-3 text-sm text-ink-muted">Notulen tidak ditemukan.</p>
+      </div>
+    );
+  }
+
+  const bahasan = [
+    ...meeting.items.map((item) => ({ item, linked: false })),
+    ...(meeting.linkedItems ?? []).map((item) => ({ item, linked: true })),
+  ].filter(({ item }) => !focusItemId || item.id === focusItemId);
+
   return (
-    <article className="panel p-4">
+    <article className="panel space-y-4 p-4 sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-xs text-ink-muted">
+          {focusItemId ? null : (
+            <button
+              type="button"
+              onClick={onBack}
+              className="text-xs text-ink-muted hover:text-brand"
+            >
+              ← Kembali ke daftar
+            </button>
+          )}
+          <h2 className={`text-lg font-semibold ${focusItemId ? "" : "mt-1"}`}>{meeting.title}</h2>
+          <p className="mt-1 text-xs text-ink-muted">
             {formatIsoDateId(meeting.meetingDate)}
             {meeting.meetingTime ? ` · ${meeting.meetingTime}` : ""}
             {` · ${meetingDepartmentLabel(meeting, departments)}`}
           </p>
-          <h2 className="mt-0.5 font-semibold">{meeting.title}</h2>
-          {meeting.attendees ? (
-            <p className="mt-1 text-xs text-ink-muted">
-              Peserta: {meeting.attendees}
-            </p>
+          {focusItemId ? null : meeting.attendees ? (
+            <p className="mt-1 text-xs text-ink-muted">Peserta: {meeting.attendees}</p>
           ) : null}
-          {meeting.externalAttendees ? (
-            <p className="text-xs text-ink-muted">
-              Pihak luar: {meeting.externalAttendees}
-            </p>
+          {focusItemId ? null : meeting.externalAttendees ? (
+            <p className="text-xs text-ink-muted">Pihak luar: {meeting.externalAttendees}</p>
           ) : null}
-          {meeting.createdByName ? (
+          {focusItemId ? null : meeting.createdByName ? (
             <p className="text-[11px] text-ink-muted">Dicatat {meeting.createdByName}</p>
           ) : null}
         </div>
-        <div className="flex shrink-0 gap-2">
+        {focusItemId ? null : (
           <button
             type="button"
-            onClick={onEdit}
-            className="rounded-lg border border-line px-2.5 py-1 text-xs"
+            onClick={() => onEdit(meeting)}
+            className="rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white"
           >
             Edit
           </button>
-          <button
-            type="button"
-            onClick={onDelete}
-            className="rounded-lg border border-danger/30 bg-danger-soft px-2.5 py-1 text-xs text-danger"
-          >
-            Hapus
-          </button>
-        </div>
+        )}
       </div>
-      {meeting.summary ? (
-        <p className="mt-3 whitespace-pre-wrap text-sm text-ink">{meeting.summary}</p>
+      {!focusItemId && meeting.summary ? (
+        <p className="whitespace-pre-wrap text-sm text-ink">{meeting.summary}</p>
       ) : null}
-      {meeting.items.length > 0 ? (
-        <ul className="mt-3 space-y-2">
-          {meeting.items.map((item) => {
-            const track = itemTrack(item.status, item.dueDate, today);
-            const repeat = repeats.get(normalizeTopic(item.topic));
-            const repeated = (repeat?.count ?? 0) >= 2;
-            return (
-              <li
-                key={item.id}
-                className="flex flex-wrap items-start justify-between gap-2 rounded-xl border border-line px-3 py-2"
-              >
-                <div className="min-w-0">
+      <div>
+        <h3 className="text-sm font-semibold">
+          {focusItemId ? "Bahasan" : "Daftar bahasan"}
+        </h3>
+        {bahasan.length === 0 ? (
+          <p className="mt-2 text-sm text-ink-muted">
+            {focusItemId
+              ? "Bahasan tidak ditemukan pada notulen ini."
+              : "Belum ada bahasan pada notulen ini."}
+          </p>
+        ) : (
+          <ul className="mt-3 space-y-2">
+            {bahasan.map(({ item, linked }) => {
+              const departmentName = bahasanDepartmentName(item, departments, staff);
+              return (
+                <li
+                  key={item.id}
+                  className={`flex flex-wrap items-start justify-between gap-3 rounded-xl border px-3 py-2 ${
+                    linked ? "border-brand/20 bg-brand-soft/30" : "border-line"
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium">{item.topic}</p>
+                  {departmentName ? (
+                    <p className="text-xs font-medium text-brand">{departmentName}</p>
+                  ) : null}
+                  {linked ? (
+                    <p className="text-[11px] text-ink-muted">Lanjutan dari meeting sebelumnya</p>
+                  ) : null}
                   {item.problemDetail ? (
-                    <p className="whitespace-pre-wrap text-xs text-ink">
-                      {item.problemDetail}
-                    </p>
+                    <p className="mt-1 whitespace-pre-wrap text-xs text-ink">{item.problemDetail}</p>
                   ) : null}
                   {item.detail ? (
-                    <p className="text-xs text-ink-muted">{item.detail}</p>
+                    <p className="mt-1 whitespace-pre-wrap text-xs text-ink-muted">{item.detail}</p>
                   ) : null}
+                  {(item.sessions ?? [])
+                    .filter((row) => {
+                      const note = row.note.trim();
+                      if (!note) return false;
+                      const body = `${item.problemDetail}\n${item.detail}`;
+                      return !body.includes(note);
+                    })
+                    .map((row) => (
+                      <p key={row.id} className="mt-1 whitespace-pre-wrap text-xs text-ink-muted">
+                        {formatIsoDateId(row.sessionDate)}: {row.note}
+                      </p>
+                    ))}
+                  <DiscussedOn
+                    dates={discussionDates(
+                      repeats.get(normalizeTopic(item.topic)),
+                      meeting.meetingDate,
+                    )}
+                    onPick={(date) => onPickDate(item.topic, date, item.id)}
+                  />
                   <p className="mt-1 text-[11px] text-ink-muted">
                     {itemDepartmentLabel(item.departmentIds, departments)
                       ? `${itemDepartmentLabel(item.departmentIds, departments)} · `
                       : ""}
                     {item.ownerName || "Tanpa PIC"}
-                    {item.startDate
-                      ? ` · mulai ${formatIsoDateId(item.startDate)}`
-                      : ""}
-                    {item.dueDate
-                      ? ` · selesai ${formatIsoDateId(item.dueDate)}`
-                      : ""}
+                    {item.startDate ? ` · mulai ${formatIsoDateId(item.startDate)}` : ""}
+                    {item.dueDate ? ` · selesai ${formatIsoDateId(item.dueDate)}` : ""}
                   </p>
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    <span className={`rounded-md px-2 py-0.5 text-[11px] ${TRACK_CLASS[track]}`}>
-                      {MEETING_TRACK_LABEL[track]}
-                    </span>
-                    {repeated ? (
-                      <span className="rounded-md bg-warn-soft px-2 py-0.5 text-[11px] text-warn">
-                        Repeated · {repeat?.count}x
-                      </span>
-                    ) : null}
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <select
+                      value={item.status}
+                      onChange={(e) =>
+                        onStatus(item.id, e.target.value as MeetingItemStatus)
+                      }
+                      className="rounded-lg border border-line bg-bg-elevated px-2 py-1 text-xs"
+                    >
+                      {(Object.keys(MEETING_STATUS_LABEL) as MeetingItemStatus[]).map(
+                        (status) => (
+                          <option key={status} value={status}>
+                            {MEETING_STATUS_LABEL[status]}
+                          </option>
+                        ),
+                      )}
+                    </select>
                   </div>
-                </div>
-                <div className="flex shrink-0 flex-col items-end gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => onRemind(item)}
-                    className="rounded-lg border border-ok/30 bg-ok-soft px-2 py-1 text-xs text-ok disabled:opacity-50"
-                    disabled={busy}
-                  >
-                    WA PIC
-                  </button>
-                  <select
-                    value={item.status}
-                    onChange={(e) =>
-                      onStatus(item.id, e.target.value as MeetingItemStatus)
-                    }
-                    className="rounded-lg border border-line bg-bg-elevated px-2 py-1 text-xs"
-                  >
-                    {(Object.keys(MEETING_STATUS_LABEL) as MeetingItemStatus[]).map(
-                      (status) => (
-                        <option key={status} value={status}>
-                          {MEETING_STATUS_LABEL[status]}
-                        </option>
-                      ),
-                    )}
-                  </select>
-                </div>
-              </li>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    {focusItemId ? (
+                      <button
+                        type="button"
+                        onClick={onBack}
+                        className="rounded-lg bg-[#d5ddd8] px-2.5 py-1 text-xs font-medium text-ink"
+                      >
+                        ← Kembali ke daftar
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => onEditBahasan(item)}
+                      className="rounded-lg bg-brand px-2.5 py-1 text-xs font-medium text-white"
+                    >
+                      Edit bahasan
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function BahasanEditor({
+  draft,
+  departments,
+  staff,
+  companyWide,
+  saving,
+  marking,
+  discussedOn,
+  error,
+  onCancel,
+  onSave,
+  onMarkToday,
+  onPickDate,
+}: {
+  draft: DraftItem;
+  departments: Department[];
+  staff: StaffOption[];
+  companyWide: boolean;
+  saving: boolean;
+  marking: boolean;
+  discussedOn: string[];
+  error: string | null;
+  onCancel: () => void;
+  onSave: (draft: DraftItem) => void;
+  onMarkToday: () => Promise<boolean>;
+  onPickDate: (date: string) => void;
+}) {
+  const [item, setItem] = useState(draft);
+  const [ownerQuery, setOwnerQuery] = useState("");
+  const [showAssignment, setShowAssignment] = useState(false);
+  const [dates, setDates] = useState(discussedOn);
+  const discussedKey = discussedOn.join("|");
+  useEffect(() => {
+    setDates((prev) =>
+      prev.join("|") === discussedKey ? prev : discussedKey.split("|").filter(Boolean),
+    );
+  }, [discussedKey]);
+  const today = todayIso();
+  const alreadyToday = dates.includes(today);
+  const deptSummary = item.departmentIds.includes("*")
+    ? "Semua departemen"
+    : item.departmentIds.length === 0
+      ? "Belum pilih departemen"
+      : itemDepartmentLabel(item.departmentIds, departments) ||
+        `${item.departmentIds.length} departemen`;
+  const picSummary = item.ownerName || "Belum pilih PIC";
+  const people = [...staff].sort((a, b) => a.name.localeCompare(b.name, "id"));
+  const needle = ownerQuery.trim().toLowerCase();
+  const visiblePeople = people.filter((person) => {
+    const limited = item.departmentIds.length > 0 && !item.departmentIds.includes("*");
+    if (
+      limited &&
+      !item.departmentIds.includes(person.departmentId) &&
+      !item.ownerStaffIds.includes(person.id)
+    ) {
+      return false;
+    }
+    if (!needle) return true;
+    const dept = departments.find((row) => row.id === person.departmentId);
+    return `${person.name} ${dept?.code ?? ""}`.toLowerCase().includes(needle);
+  });
+
+  return (
+    <form
+      className="panel space-y-3 p-4 sm:p-5"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSave(item);
+      }}
+    >
+      <div>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-lg bg-[#d5ddd8] px-2.5 py-1 text-xs font-medium text-ink"
+        >
+          ← Kembali ke notulen
+        </button>
+        <h2 className="mt-1 font-semibold">Edit bahasan</h2>
+      </div>
+      <div className="rounded-xl border border-line px-3 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-medium">Tanggal pembahasan</p>
+          <button
+            type="button"
+            disabled={marking || alreadyToday || !draft.id}
+            onClick={() => {
+              void onMarkToday().then((ok) => {
+                if (!ok) return;
+                setDates((prev) =>
+                  prev.includes(today) ? prev : [...prev, today].sort(),
+                );
+              });
+            }}
+            className="rounded-lg border border-brand/30 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand disabled:opacity-60"
+          >
+            {alreadyToday
+              ? "Tanggal hari ini sudah tercatat"
+              : marking
+                ? "Mencatat..."
+                : `Catat tanggal hari ini · ${formatIsoDateId(today)}`}
+          </button>
+        </div>
+        <DiscussedOn dates={dates} onPick={onPickDate} />
+        <p className="mt-1 text-[11px] text-ink-muted">
+          Tanggal hari ini ditambahkan setelah tanggal pembahasan sebelumnya.
+        </p>
+      </div>
+      <label className="block text-sm">
+        <span className="text-xs text-ink-muted">Topik</span>
+        <input
+          required
+          value={item.topic}
+          onChange={(e) => setItem((row) => ({ ...row, topic: e.target.value }))}
+          className="mt-1 w-full rounded-lg border border-line bg-bg-elevated px-3 py-2 text-sm"
+        />
+      </label>
+      <label className="block text-sm">
+        <span className="text-xs text-ink-muted">Topik detail permasalahan</span>
+        <textarea
+          value={item.problemDetail}
+          onChange={(e) => setItem((row) => ({ ...row, problemDetail: e.target.value }))}
+          rows={10}
+          className="mt-1 w-full rounded-lg border border-line bg-bg-elevated px-3 py-2 text-sm"
+        />
+      </label>
+      <label className="block text-sm">
+        <span className="text-xs text-ink-muted">Detail / keputusan</span>
+        <input
+          value={item.detail}
+          onChange={(e) => setItem((row) => ({ ...row, detail: e.target.value }))}
+          className="mt-1 w-full rounded-lg border border-line bg-bg-elevated px-3 py-2 text-sm"
+        />
+      </label>
+      <div className="rounded-xl border border-line">
+        <button
+          type="button"
+          onClick={() => setShowAssignment((open) => !open)}
+          className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
+        >
+          <span className="min-w-0">
+            <span className="block text-xs font-medium">Departemen &amp; penanggung jawab</span>
+            <span className="block truncate text-[11px] text-ink-muted">
+              {deptSummary} · {picSummary}
+            </span>
+          </span>
+          <span className="shrink-0 text-xs text-brand">
+            {showAssignment ? "Sembunyikan" : "Tampilkan"}
+          </span>
+        </button>
+        {showAssignment ? (
+          <div className="space-y-3 border-t border-line px-3 py-3">
+      <DepartmentChecks
+        departmentIds={item.departmentIds}
+        departments={departments}
+        companyWide={companyWide}
+        onChange={(departmentIds) => setItem((row) => ({ ...row, departmentIds }))}
+      />
+      <div className="text-sm">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-ink-muted">Penanggung jawab</span>
+          <span className="text-[11px] text-ink-muted">{item.ownerStaffIds.length} karyawan</span>
+        </div>
+        <input
+          value={ownerQuery}
+          onChange={(e) => setOwnerQuery(e.target.value)}
+          placeholder="Cari karyawan"
+          className="mt-1 w-full rounded-lg border border-line bg-bg-elevated px-3 py-2 text-sm"
+        />
+        <div className="mt-2 max-h-36 space-y-1.5 overflow-y-auto rounded-lg border border-line bg-bg-elevated px-3 py-2">
+          {visiblePeople.map((person) => {
+            const dept = departments.find((row) => row.id === person.departmentId);
+            return (
+              <label key={person.id} className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={item.ownerStaffIds.includes(person.id)}
+                  onChange={(e) => {
+                    const ownerStaffIds = e.target.checked
+                      ? [...item.ownerStaffIds, person.id]
+                      : item.ownerStaffIds.filter((id) => id !== person.id);
+                    const ownerName = ownerStaffIds
+                      .map((id) => people.find((row) => row.id === id)?.name)
+                      .filter((name): name is string => Boolean(name))
+                      .join(", ");
+                    setItem((row) => ({ ...row, ownerStaffIds, ownerName }));
+                  }}
+                />
+                <span>
+                  {person.name}
+                  {dept ? <span className="text-ink-muted"> · {dept.code}</span> : null}
+                </span>
+              </label>
             );
           })}
-        </ul>
-      ) : null}
-    </article>
+        </div>
+      </div>
+          </div>
+        ) : null}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="text-sm">
+          <span className="text-xs text-ink-muted">Tanggal awal pembahasan</span>
+          <input
+            type="date"
+            value={item.startDate}
+            max={item.dueDate || undefined}
+            onChange={(e) => setItem((row) => ({ ...row, startDate: e.target.value }))}
+            className="mt-1 w-full rounded-lg border border-line bg-bg-elevated px-3 py-2 text-sm"
+          />
+        </label>
+        <label className="text-sm">
+          <span className="text-xs text-ink-muted">Jadwal / Target selesai pekerjaan</span>
+          <input
+            type="date"
+            value={item.dueDate}
+            min={item.startDate || undefined}
+            onChange={(e) => setItem((row) => ({ ...row, dueDate: e.target.value }))}
+            className="mt-1 w-full rounded-lg border border-line bg-bg-elevated px-3 py-2 text-sm"
+          />
+        </label>
+      </div>
+      <select
+        value={item.status}
+        onChange={(e) =>
+          setItem((row) => ({ ...row, status: e.target.value as MeetingItemStatus }))
+        }
+        className="w-full rounded-lg border border-line bg-bg-elevated px-3 py-2 text-sm sm:max-w-xs"
+      >
+        {(Object.keys(MEETING_STATUS_LABEL) as MeetingItemStatus[]).map((status) => (
+          <option key={status} value={status}>
+            {MEETING_STATUS_LABEL[status]}
+          </option>
+        ))}
+      </select>
+      {error ? <p className="text-sm text-danger">{error}</p> : null}
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={saving}
+          className="rounded-xl bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+        >
+          {saving ? "Menyimpan..." : "Simpan bahasan"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-xl border border-line px-4 py-2 text-sm"
+        >
+          Batal
+        </button>
+      </div>
+    </form>
   );
 }
 
 function FollowRow({
   row,
   departments,
+  staff,
   onOpen,
   onStatus,
   onRemind,
+  onPickDate,
   busy,
 }: {
   row: {
     item: MeetingItem;
     meeting: MeetingNote;
     track: MeetingTrack;
+    bucket: MeetingBucket;
     repeated: boolean;
     repeat?: RepeatInfo;
   };
   departments: Department[];
+  staff: StaffOption[];
   onOpen: () => void;
   onStatus: (status: MeetingItemStatus) => void;
   onRemind: () => void;
+  onPickDate: (date: string) => void;
   busy: boolean;
 }) {
+  const departmentName = bahasanDepartmentName(row.item, departments, staff);
   return (
-    <div className="flex flex-wrap items-start justify-between gap-2 rounded-xl border border-line px-3 py-2">
+    <div className="rounded-xl border border-line px-3 py-2">
       <div className="min-w-0">
         <p className="text-sm font-medium">{row.item.topic}</p>
+        {departmentName ? (
+          <p className="text-xs font-medium text-brand">{departmentName}</p>
+        ) : null}
         {row.item.problemDetail ? (
           <p className="line-clamp-2 text-xs text-ink">{row.item.problemDetail}</p>
         ) : null}
@@ -2113,6 +3115,10 @@ function FollowRow({
         >
           {formatIsoDateId(row.meeting.meetingDate)} · {row.meeting.title}
         </button>
+        <DiscussedOn
+          dates={discussionDates(row.repeat, row.meeting.meetingDate)}
+          onPick={onPickDate}
+        />
         <p className="text-[11px] text-ink-muted">
           {itemDepartmentLabel(row.item.departmentIds, departments)
             ? `${itemDepartmentLabel(row.item.departmentIds, departments)} · `
@@ -2126,25 +3132,12 @@ function FollowRow({
             : ""}
         </p>
         <div className="mt-1.5 flex flex-wrap gap-1.5">
-          <span className={`rounded-md px-2 py-0.5 text-[11px] ${TRACK_CLASS[row.track]}`}>
-            {MEETING_TRACK_LABEL[row.track]}
+          <span className={`rounded-md px-2 py-0.5 text-[11px] ${BUCKET_CLASS[row.bucket]}`}>
+            {MEETING_BUCKET_LABEL[row.bucket]}
           </span>
-          {row.repeated ? (
-            <span className="rounded-md bg-warn-soft px-2 py-0.5 text-[11px] text-warn">
-              Repeated · {row.repeat?.count}x
-            </span>
-          ) : null}
         </div>
       </div>
-      <div className="flex shrink-0 flex-col items-end gap-1.5">
-        <button
-          type="button"
-          onClick={onRemind}
-          className="rounded-lg border border-ok/30 bg-ok-soft px-2 py-1 text-xs text-ok disabled:opacity-50"
-          disabled={busy}
-        >
-          WA PIC
-        </button>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
         <select
           value={row.item.status}
           onChange={(e) => onStatus(e.target.value as MeetingItemStatus)}
@@ -2156,6 +3149,147 @@ function FollowRow({
             </option>
           ))}
         </select>
+        <button
+          type="button"
+          onClick={onOpen}
+          className="rounded-lg border border-line px-2.5 py-1 text-xs"
+        >
+          View notulen
+        </button>
+        <button
+          type="button"
+          onClick={onRemind}
+          className="rounded-lg border border-ok/30 bg-ok-soft px-2.5 py-1 text-xs text-ok disabled:opacity-50"
+          disabled={busy}
+        >
+          WA PIC
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DateRevisionDialog({
+  topic,
+  from,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  topic: string;
+  from: string;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: (to: string) => Promise<string | null>;
+}) {
+  const [nextDate, setNextDate] = useState(from);
+  const [confirming, setConfirming] = useState<"" | "edit" | "delete">("");
+  const [localError, setLocalError] = useState<string | null>(null);
+  const removing = confirming === "delete";
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="date-revision-title"
+        className="panel w-full max-w-sm p-4"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <h2 id="date-revision-title" className="font-semibold">
+          Tanggal pembahasan
+        </h2>
+        <p className="mt-1 text-xs text-ink-muted">{topic}</p>
+        {confirming ? (
+          <div className="mt-4 space-y-3">
+            <p className="text-sm">
+              {removing
+                ? `Yakin mau menghapus tanggal ${formatIsoDateId(from)}?`
+                : `Yakin mau mengubah tanggal ${formatIsoDateId(from)} menjadi ${formatIsoDateId(nextDate)}?`}
+            </p>
+            {localError ? <p className="text-sm text-danger">{localError}</p> : null}
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  void onConfirm(removing ? "" : nextDate).then((message) => {
+                    if (message) setLocalError(message);
+                  });
+                }}
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60 ${
+                  removing ? "bg-danger" : "bg-brand"
+                }`}
+              >
+                {busy ? "Menyimpan..." : removing ? "Ya, hapus" : "Ya, ubah"}
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setConfirming("");
+                  setLocalError(null);
+                }}
+                className="rounded-lg border border-line px-3 py-1.5 text-xs"
+              >
+                Batal
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-4 space-y-3">
+            <label className="block text-sm">
+              <span className="text-xs text-ink-muted">Tanggal</span>
+              <input
+                type="date"
+                value={nextDate}
+                onChange={(event) => setNextDate(event.target.value)}
+                className="mt-1 w-full rounded-lg border border-line bg-bg-elevated px-3 py-2 text-sm"
+              />
+            </label>
+            {localError ? <p className="text-sm text-danger">{localError}</p> : null}
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (!/^\d{4}-\d{2}-\d{2}$/.test(nextDate)) {
+                    setLocalError("Tanggal tidak valid");
+                    return;
+                  }
+                  if (nextDate === from) {
+                    setLocalError("Tanggal tidak berubah");
+                    return;
+                  }
+                  setLocalError(null);
+                  setConfirming("edit");
+                }}
+                className="rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white"
+              >
+                Simpan
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLocalError(null);
+                  setConfirming("delete");
+                }}
+                className="rounded-lg border border-danger/30 bg-danger-soft px-3 py-1.5 text-xs font-medium text-danger"
+              >
+                Hapus
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg border border-line px-3 py-1.5 text-xs"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

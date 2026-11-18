@@ -6,6 +6,7 @@ import {
   formatDisciplinePeriodLabel,
 } from "@/lib/discipline-period";
 import { buildIndividualScoreReport } from "@/lib/individual-score-report";
+import { compareByMaju, majuGroup, type MajuGroup } from "@/lib/kpi-maju";
 import type {
   Agent,
   AttendancePeriodSummary,
@@ -45,6 +46,7 @@ export function IndividualScoreReportClient({
   lockedDepartmentId,
   lockedStaffId,
   initialPeriod,
+  majuGroups,
 }: {
   departments: Department[];
   staff: StaffMember[];
@@ -62,6 +64,7 @@ export function IndividualScoreReportClient({
   lockedDepartmentId: string | null;
   lockedStaffId: string | null;
   initialPeriod: string;
+  majuGroups: MajuGroup[];
 }) {
   const periodOptions = useMemo(() => {
     const fromData = [
@@ -118,6 +121,7 @@ export function IndividualScoreReportClient({
         allStaff: staff,
         itTeam,
         managerUserStaffIds: managerStaffIds,
+        majuGroups,
       }),
     [
       deptStaff,
@@ -134,6 +138,7 @@ export function IndividualScoreReportClient({
       staff,
       itTeam,
       managerStaffIds,
+      majuGroups,
     ],
   );
 
@@ -151,8 +156,8 @@ export function IndividualScoreReportClient({
   const functionColumns = useMemo(() => {
     return functions
       .filter((f) => f.departmentId === deptId && f.active)
-      .sort((a, b) => a.sortOrder - b.sortOrder);
-  }, [functions, deptId]);
+      .sort((a, b) => compareByMaju(a, b, majuGroups));
+  }, [functions, deptId, majuGroups]);
 
   const avgOverall = useMemo(() => {
     const withScore = filtered.filter((r) => r.overall != null);
@@ -224,8 +229,8 @@ export function IndividualScoreReportClient({
           ) : null}
         </p>
         <p className="text-[11px] text-ink-muted">
-          Prioritas: indikator → manual → absensi / kegiatan. Total = skor
-          tertimbang atas semua fungsi (yang kosong = 0).
+          Prioritas: indikator → manual → absensi / kegiatan. Total = bobot grup
+          MAJU. Grup yang belum punya fungsi tidak dihitung. Fungsi kosong = 0.
         </p>
       </div>
 
@@ -239,7 +244,7 @@ export function IndividualScoreReportClient({
                   <th key={f.id} className="px-3 py-2.5 font-medium">
                     {f.name}
                     <span className="mt-0.5 block font-normal normal-case text-[10px]">
-                      {f.weightPercent}%
+                      {majuGroup(f.groupCode, majuGroups).code} · {f.weightPercent}%
                     </span>
                   </th>
                 ))}

@@ -302,7 +302,7 @@ function bahasanColumns(total: number): Col[] {
 }
 
 function statusText(row: MeetingReportItemRow) {
-  return row.repeated ? `${row.trackLabel}\n${row.repeatCount}x` : row.trackLabel;
+  return row.trackLabel;
 }
 
 function statusColor(row: MeetingReportItemRow) {
@@ -370,7 +370,11 @@ function itemCells(row: MeetingReportItemRow, index: number, fill?: string): Cel
   const base = fill ? { fill } : {};
   return [
     { text: String(index + 1), align: "center", ...base },
-    { text: row.topic, bold: true, ...base },
+    {
+      text: row.touchLabel ? `${row.topic}\n${row.touchLabel}` : row.topic,
+      bold: true,
+      ...base,
+    },
     { text: row.problemDetail || "-", ...base },
     { text: row.detail || "-", ...base },
     { text: row.departmentLabel, ...base },
