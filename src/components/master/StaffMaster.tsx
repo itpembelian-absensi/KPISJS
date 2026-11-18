@@ -1,11 +1,14 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Department, JabatanRecord, StaffMember } from "@/lib/types";
 
 type SortKey = "name" | "employeeCode" | "department" | "position";
 type SortDir = "asc" | "desc";
+
+/** Jumlah staf per halaman di daftar kanan */
+const LIST_PAGE_SIZE = 8;
 
 export function StaffMaster({
   initial,
@@ -35,6 +38,7 @@ export function StaffMaster({
   );
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [listPage, setListPage] = useState(1);
 
   function deptName(id: string) {
     return departments.find((d) => d.id === id)?.name ?? "—";
@@ -100,6 +104,17 @@ export function StaffMaster({
 
     return list;
   }, [items, query, deptFilter, jabatanFilter, statusFilter, sortKey, sortDir, departments]);
+
+  const totalListPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
+  const currentListPage = Math.min(listPage, totalListPages);
+  const paged = useMemo(() => {
+    const start = (currentListPage - 1) * LIST_PAGE_SIZE;
+    return filtered.slice(start, start + LIST_PAGE_SIZE);
+  }, [filtered, currentListPage]);
+
+  useEffect(() => {
+    setListPage(1);
+  }, [query, deptFilter, jabatanFilter, statusFilter, sortKey, sortDir]);
 
   async function reloadLists() {
     const res = await fetch("/api/master/staff");
@@ -434,13 +449,13 @@ export function StaffMaster({
               </div>
           </div>
 
-          <div className="max-h-[70vh] overflow-y-auto">
+          <div>
             {filtered.length === 0 ? (
               <p className="px-4 py-8 text-center text-sm text-ink-muted">
                 Tidak ada staf yang cocok dengan pencarian.
               </p>
             ) : (
-              filtered.map((s) => (
+              paged.map((s) => (
                 <div
                   key={s.id}
                   className={`flex flex-col gap-2 border-b border-line px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4 ${
@@ -485,6 +500,77 @@ export function StaffMaster({
                 </div>
               ))
             )}
+            {totalListPages > 1 ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+                <p className="text-xs text-ink-muted">
+                  Halaman {currentListPage} dari {totalListPages}
+                  {" · "}
+                  {(currentListPage - 1) * LIST_PAGE_SIZE + 1}–
+                  {Math.min(currentListPage * LIST_PAGE_SIZE, filtered.length)} dari{" "}
+                  {filtered.length}
+                </p>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={currentListPage <= 1}
+                    onClick={() => setListPage(1)}
+                    className="rounded-lg border border-line px-2.5 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+                    aria-label="Halaman awal"
+                    title="Halaman awal"
+                  >
+                    «
+                  </button>
+                  <button
+                    type="button"
+                    disabled={currentListPage <= 1}
+                    onClick={() => setListPage((page) => Math.max(1, page - 1))}
+                    className="rounded-lg border border-line px-2.5 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+                    aria-label="Halaman sebelumnya"
+                    title="Halaman sebelumnya"
+                  >
+                    ‹
+                  </button>
+                  {Array.from({ length: totalListPages }, (_, index) => index + 1).map(
+                    (page) => (
+                      <button
+                        key={page}
+                        type="button"
+                        onClick={() => setListPage(page)}
+                        className={`min-w-8 rounded-lg px-2 py-1.5 text-xs font-medium ${
+                          page === currentListPage
+                            ? "bg-brand text-white"
+                            : "border border-line hover:bg-bg"
+                        }`}
+                      >
+                        {page}
+                      </button>
+                    ),
+                  )}
+                  <button
+                    type="button"
+                    disabled={currentListPage >= totalListPages}
+                    onClick={() =>
+                      setListPage((page) => Math.min(totalListPages, page + 1))
+                    }
+                    className="rounded-lg border border-line px-2.5 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+                    aria-label="Halaman berikutnya"
+                    title="Halaman berikutnya"
+                  >
+                    ›
+                  </button>
+                  <button
+                    type="button"
+                    disabled={currentListPage >= totalListPages}
+                    onClick={() => setListPage(totalListPages)}
+                    className="rounded-lg border border-line px-2.5 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+                    aria-label="Halaman akhir"
+                    title="Halaman akhir"
+                  >
+                    »
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
