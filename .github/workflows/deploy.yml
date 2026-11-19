@@ -9,41 +9,10 @@ jobs:
     runs-on: [self-hosted, kpisjs]
 
     steps:
-      - name: Deploy in Production Directory
+      - name: Run Deployment Script
         run: |
-          echo "🚀 Starting deployment..."
           cd /srv/docker/KPISJS
-          
-          # Tarik kode terbaru
-          echo "📥 Pulling latest code..."
           git fetch origin master
-          git reset --hard origin/master
-          
-          # Install dependensi di host
-          echo "📦 Installing dependencies..."
-          npm install
-          
-          # Rebuild image & restart container
-          echo "🐳 Rebuilding Docker image..."
-          docker compose up -d --build
-          
-          # Hapus image lama (dangling) agar disk tidak penuh
-          docker image prune -f
-
-      - name: Health check
-        run: |
-          echo "🏥 Running health check..."
-          sleep 5
-          for i in 1 2 3 4 5 6; do
-            if curl -sf http://localhost:7101/login > /dev/null 2>&1; then
-              echo "✅ Application is healthy and running on port 7101!"
-              exit 0
-            fi
-            echo "⏳ Waiting for app to start... ($i/6)"
-            sleep 5
-          done
-          
-          echo "❌ Health check failed! Container logs:"
-          cd /srv/docker/KPISJS
-          docker compose logs --tail=80
-          exit 1
+          git checkout origin/master -- deploy.sh
+          chmod +x deploy.sh
+          ./deploy.sh

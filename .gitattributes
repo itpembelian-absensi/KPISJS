@@ -1,0 +1,2 @@
+# Pastikan file script shell selalu menggunakan LF
+*.sh text eol=lf

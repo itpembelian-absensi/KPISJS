@@ -1,8 +1,9 @@
+# syntax=docker/dockerfile:1
 # Stage 1: Build Next.js (node_modules from host)
 FROM node:22-slim AS builder
 WORKDIR /app
 COPY . .
-RUN npm run build
+RUN --mount=type=cache,target=/app/.next/cache npm run build
 
 # Stage 2: Production runtime (minimal image)
 FROM node:22-slim AS runner

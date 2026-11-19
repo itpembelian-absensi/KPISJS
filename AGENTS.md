@@ -229,24 +229,13 @@ Seed data goes in `src/lib/store.ts` in the `seedIfEmpty()` or related functions
 ### Deployment Architecture
 
 - **GitHub Actions** with self-hosted runner (label: `kpisjs`)
-- **Docker** with standalone Next.js build
-- **Smart rebuild detection**: only rebuilds Docker image when Docker environment files change
-
-### Docker Environment Files (trigger full rebuild)
-
-Changes to these files trigger a full `docker compose build --no-cache`:
-- `Dockerfile`
-- `docker-compose.yml`
-- `package.json`
-- `package-lock.json`
-- `next.config.ts`
-
-### Quick Deploy (no rebuild)
-
-Changes to any other files (e.g., `src/`, `public/`) trigger a quick deploy:
-1. Copy source into running container
-2. `npm run build` inside container
-3. Restart container
+- **Deployment Script**: Terpusat di `deploy.sh` (dapat dijalankan manual via SSH: `./deploy.sh` atau `./deploy.sh --force`)
+- **Docker** dengan standalone Next.js build + Docker BuildKit cache (`--mount=type=cache,target=/app/.next/cache`)
+- **Smart Change Detection**:
+  - `deploy.sh` mengecek `git diff` antara commit saat ini dan commit target.
+  - Jika `package.json` / `package-lock.json` tidak berubah, `npm install` di host **dilewati (skip)**.
+  - Incremental build cache Next.js dipertahankan antar-build Docker via BuildKit cache mount.
+  - Health check otomatis memeriksa ketersediaan endpoint `/login` di port 7101.
 
 ### Persistent Data (Docker Volumes)
 
