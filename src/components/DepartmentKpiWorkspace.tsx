@@ -29,7 +29,14 @@ import {
   LATENESS_SCALE_LABEL,
   VIOLATION_SCALE_LABEL,
 } from "@/lib/discipline-score";
-import { computeFunctionScoreFromIndicators } from "@/lib/kpi-score-compute";
+import {
+  computeFunctionScoreFromIndicators,
+  computeIndicatorScore,
+  indicatorAppliesToJabatan,
+  indicatorScoreCounts,
+} from "@/lib/kpi-score-compute";
+import { formatScore, kpiGrade } from "@/lib/kpi-grade";
+import { KpiAmbangPanel } from "@/components/KpiAmbangPanel";
 import {
   groupKpiFunctions,
   majuContributionPoints,
@@ -276,6 +283,7 @@ export function DepartmentKpiWorkspace({
   assessorHomeDepartmentId = null,
   assessmentExtraStaffIds = [],
   majuGroups,
+  jabatanScoreMethods = {},
 }: {
   departments: Department[];
   functions: KpiFunction[];
@@ -315,6 +323,7 @@ export function DepartmentKpiWorkspace({
   /** Staf dept lain yang diizinkan dinilai */
   assessmentExtraStaffIds?: string[];
   majuGroups: MajuGroup[];
+  jabatanScoreMethods?: Record<string, "" | "bobot" | "rata-rata">;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -361,6 +370,7 @@ export function DepartmentKpiWorkspace({
   const [indicatorActuals, setIndicatorActuals] = useState(initialActuals);
   /** Draft capaian: indicatorId → string input */
   const [actualDrafts, setActualDrafts] = useState<Record<string, string>>({});
+  const [targetDrafts, setTargetDrafts] = useState<Record<string, string>>({});
   const [openSourceFormula, setOpenSourceFormula] =
     useState<ScoreSourceKey | null>(null);
 
@@ -681,6 +691,12 @@ export function DepartmentKpiWorkspace({
       /kedisiplinan|kehadiran/i.test(name);
 
     const staffFilter = scoreStaffId !== "all" ? scoreStaffId : null;
+    const staffById = new Map(staff.map((member) => [member.id, member]));
+    const methodFor = (sid: string): "" | "bobot" | "rata-rata" => {
+      const jabatanId = staffById.get(sid)?.jabatanId;
+      if (!jabatanId) return "";
+      return jabatanScoreMethods[jabatanId] ?? "";
+    };
 
     let activeActs = deptActivities.filter((a) => a.status !== "cancelled");
     activeActs = activeActs.filter(
@@ -926,9 +942,14 @@ export function DepartmentKpiWorkspace({
     };
 
     const rows = functions.map((fn) => {
-      const fnIndicators = deptIndicators.filter(
-        (i) => i.kpiFunctionId === fn.id,
-      );
+      const fnIndicators = deptIndicators.filter((i) => {
+        if (i.kpiFunctionId !== fn.id) return false;
+        if (!staffFilter) return true;
+        return indicatorAppliesToJabatan(
+          i.jabatanId,
+          staffById.get(staffFilter)?.jabatanId,
+        );
+      });
 
       if (hasScoreRules && fnIndicators.length > 0 && periodForRules) {
         const scores: number[] = [];
@@ -961,7 +982,12 @@ export function DepartmentKpiWorkspace({
           activityCountUsed = Math.max(activityCountUsed, activityPool.length);
           const result = computeFunctionScoreFromIndicators(
             fn.id,
-            fnIndicators,
+            fnIndicators.filter((ind) =>
+              indicatorAppliesToJabatan(
+                ind.jabatanId,
+                staffById.get(sid)?.jabatanId,
+              ),
+            ),
             (ind) =>
               resolveActualForIndicator(
                 ind,
@@ -970,6 +996,7 @@ export function DepartmentKpiWorkspace({
                 ticketMetrics,
                 activityPool,
               ),
+            { scoreMethod: methodFor(sid) },
           );
           if (result.filledCount > 0) {
             scores.push(result.score);
@@ -1007,8 +1034,8 @@ export function DepartmentKpiWorkspace({
         if (scores.length > 0) {
           const score =
             Math.round(
-              (scores.reduce((s, v) => s + v, 0) / scores.length) * 10,
-            ) / 10;
+              (scores.reduce((s, v) => s + v, 0) / scores.length) * 10000,
+            ) / 10000;
           const ticketHint =
             usesTicket && ticketCountUsed > 0
               ? ` · tiket ${ticketCountUsed}`
@@ -1061,6 +1088,26 @@ export function DepartmentKpiWorkspace({
           percent: manual.score,
           score: manual.score,
           detail: manual.detail,
+        };
+      }
+
+      if (
+        periodForRules &&
+        fnIndicators.some((ind) => ind.metricType === "ratio")
+      ) {
+        return {
+          id: fn.id,
+          name: fn.name,
+          focus: fn.focus,
+          weight: fn.weightPercent,
+          source: "indikator" as ScoreSource,
+          total: fnIndicators.length,
+          done: 0,
+          inProgress: 0,
+          planned: 0,
+          percent: 0,
+          score: null as number | null,
+          detail: "belum ada nilai, tidak dihitung",
         };
       }
 
@@ -1180,6 +1227,8 @@ export function DepartmentKpiWorkspace({
     hasScoreRules,
     initialTickets,
     initialAgents,
+    staff,
+    jabatanScoreMethods,
   ]);
 
   const scorePeriods = useMemo(() => {
@@ -1211,9 +1260,13 @@ export function DepartmentKpiWorkspace({
       setActualDrafts((prev) =>
         Object.keys(prev).length === 0 ? prev : {},
       );
+      setTargetDrafts((prev) =>
+        Object.keys(prev).length === 0 ? prev : {},
+      );
       return;
     }
     const drafts: Record<string, string> = {};
+    const targets: Record<string, string> = {};
     const { assigneeIds } = assigneeIdsForTicketScore({
       staffId: scoreStaffId,
       agents: initialAgents,
@@ -1272,7 +1325,23 @@ export function DepartmentKpiWorkspace({
         drafts[ind.id] =
           existing?.actualValue != null ? String(existing.actualValue) : "";
       }
+      const targetValue =
+        existing?.targetOverride != null
+          ? existing.targetOverride
+          : ind.config.defaultTarget;
+      targets[ind.id] = targetValue != null ? String(targetValue) : "";
     }
+    setTargetDrafts((prev) => {
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(targets);
+      if (
+        prevKeys.length === nextKeys.length &&
+        nextKeys.every((k) => prev[k] === targets[k])
+      ) {
+        return prev;
+      }
+      return targets;
+    });
     setActualDrafts((prev) => {
       const prevKeys = Object.keys(prev);
       const nextKeys = Object.keys(drafts);
@@ -1313,9 +1382,16 @@ export function DepartmentKpiWorkspace({
         )
         .map((ind) => {
           const raw = actualDrafts[ind.id]?.trim();
+          const rawTarget = targetDrafts[ind.id]?.trim();
           return {
             indicatorId: ind.id,
             actualValue: raw === "" || raw == null ? null : Number(raw),
+            targetOverride:
+              ind.metricType === "ratio"
+                ? rawTarget === "" || rawTarget == null
+                  ? null
+                  : Number(rawTarget)
+                : undefined,
           };
         })
         .filter(
@@ -2795,10 +2871,18 @@ export function DepartmentKpiWorkspace({
                     Capaian tertimbang · {autoScores.scopeLabel}
                   </p>
                   <p className="text-2xl font-semibold text-brand">
-                    {autoScores.overallPercent}%
+                    {autoScores.weightUsed > 0
+                      ? formatScore(autoScores.overallPercent)
+                      : "—"}
+                    {autoScores.weightUsed > 0 &&
+                    kpiGrade(autoScores.overallPercent) ? (
+                      <span className="ml-2 text-lg">
+                        {kpiGrade(autoScores.overallPercent)?.letter}
+                      </span>
+                    ) : null}
                   </p>
                   <p className="text-xs text-ink-muted">
-                    Bobot grup MAJU {autoScores.weightUsed}%
+                    Sebelum syarat ambang · bobot terpakai {autoScores.weightUsed}%
                     {autoScores.total > 0
                       ? ` · kegiatan ${autoScores.done}/${autoScores.total}`
                       : ""}
@@ -2916,8 +3000,16 @@ export function DepartmentKpiWorkspace({
                   </div>
                   <div className="space-y-4">
                     {functions.map((fn) => {
+                      const scoreStaff = staff.find(
+                        (member) => member.id === scoreStaffId,
+                      );
                       const inds = deptIndicators.filter(
-                        (i) => i.kpiFunctionId === fn.id,
+                        (i) =>
+                          i.kpiFunctionId === fn.id &&
+                          indicatorAppliesToJabatan(
+                            i.jabatanId,
+                            scoreStaff?.jabatanId,
+                          ),
                       );
                       if (inds.length === 0) return null;
                       return (
@@ -2939,10 +3031,13 @@ export function DepartmentKpiWorkspace({
                                     Bobot
                                   </th>
                                   <th className="px-3 py-2 font-medium">
-                                    Target
+                                    Target angka
                                   </th>
                                   <th className="px-3 py-2 font-medium">
-                                    Capaian
+                                    Realisasi
+                                  </th>
+                                  <th className="px-3 py-2 font-medium">
+                                    Skor
                                   </th>
                                 </tr>
                               </thead>
@@ -2989,7 +3084,30 @@ export function DepartmentKpiWorkspace({
                                         {ind.weightPercent}%
                                       </td>
                                       <td className="px-3 py-2 text-ink-muted">
-                                        {target != null ? target : "—"}
+                                        {ind.metricType === "ratio" ? (
+                                          <input
+                                            type="number"
+                                            step="any"
+                                            disabled={readonly || saving}
+                                            className="w-24 rounded-lg border border-line bg-bg px-2 py-1.5 text-sm disabled:opacity-70"
+                                            value={targetDrafts[ind.id] ?? ""}
+                                            placeholder={
+                                              ind.config.defaultTarget != null
+                                                ? String(ind.config.defaultTarget)
+                                                : "wajib"
+                                            }
+                                            onChange={(e) =>
+                                              setTargetDrafts((prev) => ({
+                                                ...prev,
+                                                [ind.id]: e.target.value,
+                                              }))
+                                            }
+                                          />
+                                        ) : target != null ? (
+                                          target
+                                        ) : (
+                                          "—"
+                                        )}
                                       </td>
                                       <td className="px-3 py-2">
                                         <input
@@ -3011,6 +3129,43 @@ export function DepartmentKpiWorkspace({
                                           }
                                         />
                                       </td>
+                                      <td className="px-3 py-2 font-medium">
+                                        {(() => {
+                                          const rawActual = actualDrafts[ind.id]?.trim();
+                                          const actual =
+                                            rawActual === "" || rawActual == null
+                                              ? null
+                                              : Number(rawActual);
+                                          const rawTarget = targetDrafts[ind.id]?.trim();
+                                          const targetOverride =
+                                            rawTarget === "" || rawTarget == null
+                                              ? null
+                                              : Number(rawTarget);
+                                          if (
+                                            !indicatorScoreCounts(
+                                              ind,
+                                              actual,
+                                              targetOverride,
+                                            )
+                                          ) {
+                                            return (
+                                              <span className="text-xs font-normal text-ink-muted">
+                                                {actual != null &&
+                                                ind.metricType === "ratio"
+                                                  ? "isi target"
+                                                  : "—"}
+                                              </span>
+                                            );
+                                          }
+                                          return formatScore(
+                                            computeIndicatorScore(
+                                              ind,
+                                              actual,
+                                              targetOverride,
+                                            ),
+                                          );
+                                        })()}
+                                      </td>
                                     </tr>
                                   );
                                 })}
@@ -3022,6 +3177,14 @@ export function DepartmentKpiWorkspace({
                     })}
                   </div>
                 </div>
+              ) : null}
+
+              {canInputActuals ? (
+                <KpiAmbangPanel
+                  staffId={scoreStaffId}
+                  periodLabel={scorePeriod}
+                  checkedBy={assessorName}
+                />
               ) : null}
 
               {autoScores.rows.length === 0 ? (
@@ -3099,7 +3262,7 @@ export function DepartmentKpiWorkspace({
                       </div>
                     ) : null}
                     <p className="mt-2 border-t border-line pt-2 font-medium text-ink">
-                      Skor grup = Σ (skor fungsi × bobot fungsi) ÷ Σ bobot fungsi dalam grup. Skor akhir = Σ (skor grup × bobot MAJU) ÷ Σ bobot grup yang punya fungsi.
+                      Skor indikator = realisasi ÷ target × 100, maksimal 100. Skor fungsi = rata-rata indikator yang sudah ada nilainya. Nilai akhir = Σ (skor fungsi × bobot MAJU) ÷ Σ bobot yang terpakai. Huruf: A ≥ 90, B ≥ 80, C ≥ 70, D ≥ 60, E di bawah 60.
                     </p>
                   </div>
                   <div className="overflow-x-auto rounded-xl border border-line bg-surface">
@@ -3201,35 +3364,47 @@ export function DepartmentKpiWorkspace({
                             {r.detail}
                           </td>
                           <td className="px-3 py-2.5">
-                            <div className="flex items-center gap-2">
-                              <div className="h-1.5 w-16 overflow-hidden rounded-full bg-line">
-                                <div
-                                  className="h-full rounded-full bg-brand"
-                                  style={{
-                                    width: `${Math.min(100, r.percent)}%`,
-                                  }}
-                                />
+                            {r.score == null ? (
+                              <span className="text-ink-muted">—</span>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <div className="h-1.5 w-16 overflow-hidden rounded-full bg-line">
+                                  <div
+                                    className="h-full rounded-full bg-brand"
+                                    style={{
+                                      width: `${Math.min(100, r.percent)}%`,
+                                    }}
+                                  />
+                                </div>
+                                <span className="font-medium">
+                                  {formatScore(r.percent)}
+                                </span>
                               </div>
-                              <span className="font-medium">{r.percent}%</span>
-                            </div>
+                            )}
                           </td>
                           <td className="px-3 py-2.5">
-                            <span
-                              className={`font-semibold ${
-                                r.score >= 80
-                                  ? "text-ok"
-                                  : r.score >= 50
-                                    ? "text-warn"
-                                    : r.total === 0 && r.score === 0
-                                      ? "text-ink-muted"
-                                      : "text-danger"
-                              }`}
-                            >
-                              {r.contribution}
-                            </span>
-                            <span className="mt-0.5 block text-[10px] text-ink-muted">
-                              dari capaian {r.score}
-                            </span>
+                            {r.score == null ? (
+                              <span className="text-ink-muted">—</span>
+                            ) : (
+                              <>
+                                <span
+                                  className={`font-semibold ${
+                                    r.score >= 80
+                                      ? "text-ok"
+                                      : r.score >= 50
+                                        ? "text-warn"
+                                        : r.total === 0 && r.score === 0
+                                          ? "text-ink-muted"
+                                          : "text-danger"
+                                  }`}
+                                >
+                                  {formatScore(r.contribution, 2)}
+                                </span>
+                                <span className="mt-0.5 block text-[10px] text-ink-muted">
+                                  dari capaian {formatScore(r.score)}
+                                </span>
+                              </>
+                            )}
                           </td>
                         </tr>
                         );
@@ -3242,7 +3417,7 @@ export function DepartmentKpiWorkspace({
                         <td className="py-3 pr-3 pl-4 font-semibold">
                           Total tertimbang
                           <p className="mt-0.5 text-xs font-normal text-ink-muted normal-case">
-                            Σ poin grup MAJU · fungsi kosong = 0 ·{" "}
+                            Indikator atau fungsi tanpa nilai tidak dihitung ·{" "}
                             {autoScores.scopeLabel}
                           </p>
                         </td>

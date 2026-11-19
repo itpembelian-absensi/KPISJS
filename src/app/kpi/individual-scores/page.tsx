@@ -23,6 +23,7 @@ import {
 } from "@/lib/store";
 import { IndividualScoreReportClient } from "@/components/IndividualScoreReportClient";
 import { listMajuGroups } from "@/lib/kpi-maju-ops";
+import { listJabatan } from "@/lib/jabatan-ops";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -110,6 +111,9 @@ export default async function IndividualScoresPage() {
           new Date().toISOString().slice(0, 10),
         )}
         majuGroups={listMajuGroups()}
+        jabatanScoreMethods={Object.fromEntries(
+          listJabatan(true, false).map((item) => [item.id, item.scoreMethod]),
+        )}
       />
     </div>
   );

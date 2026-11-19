@@ -1041,6 +1041,37 @@ function createSchema(db: Database.Database) {
     "CREATE INDEX IF NOT EXISTS idx_staff_jabatan ON staff(jabatan_id)",
   );
 
+  const indicatorCols = db
+    .prepare("PRAGMA table_info(kpi_score_indicators)")
+    .all() as Array<{ name: string }>;
+  const indicatorColNames = new Set(indicatorCols.map((col) => col.name));
+  if (!indicatorColNames.has("jabatan_id")) {
+    db.exec(
+      "ALTER TABLE kpi_score_indicators ADD COLUMN jabatan_id TEXT",
+    );
+  }
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_kpi_score_ind_jabatan ON kpi_score_indicators(jabatan_id)",
+  );
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS kpi_threshold_checks (
+      id TEXT PRIMARY KEY,
+      staff_id TEXT NOT NULL,
+      period_label TEXT NOT NULL,
+      kehadiran TEXT NOT NULL DEFAULT '',
+      alpa TEXT NOT NULL DEFAULT '',
+      sp TEXT NOT NULL DEFAULT '',
+      integritas TEXT NOT NULL DEFAULT '',
+      k3 TEXT NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT '',
+      checked_by TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(staff_id, period_label)
+    );
+  `);
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS jenis_data (
       id TEXT PRIMARY KEY,

@@ -59,6 +59,15 @@ function indicatorFormulaLine(ind: KpiScoreIndicator): string {
     else how = "skor absensi 0–100";
   } else if (ind.metricType === "weighted_leaf") {
     how = "nilai 0–100";
+  } else if (ind.metricType === "ratio") {
+    const lower = ind.config.direction === "lower";
+    how = lower
+      ? target === 0
+        ? "0 kejadian = 100, ada kejadian = 0"
+        : `makin kecil makin baik, target ${target ?? "—"}`
+      : target != null
+        ? `realisasi ÷ target ${target} × 100, maksimal 100`
+        : "realisasi ÷ target × 100. Target wajib diisi atasan, kalau kosong tidak dihitung";
   }
 
   if (source === "ticket") {
@@ -121,6 +130,22 @@ export function buildFunctionScoreFormula(input: {
         `Keterlambatan (25%): target 0 kali. ${LATENESS_SCALE_LABEL}`,
         `Laporan kerja harian (25%): Lapor WhatsApp, satu laporan per tanggal periode 21–20 kecuali hari libur. Target 100%. ${DAILY_REPORT_SCALE_LABEL}`,
         `Pelanggaran aturan (25%): diisi di Master Absensi. ${VIOLATION_SCALE_LABEL}`,
+        contrib,
+      ],
+    };
+  }
+
+  if (
+    activeInds.length > 0 &&
+    activeInds.every((ind) => ind.metricType === "ratio")
+  ) {
+    return {
+      summary:
+        "Skor indikator = realisasi ÷ target × 100 (maksimal 100). Skor fungsi = rata-rata indikator yang sudah ada nilainya.",
+      lines: [
+        "Indikator tanpa realisasi, atau tanpa target angka, tidak dihitung.",
+        "Skor fungsi = rata-rata skor indikator terisi. Bobot antar indikator tidak dipakai.",
+        ...activeInds.map(indicatorFormulaLine),
         contrib,
       ],
     };

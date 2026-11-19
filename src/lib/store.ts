@@ -347,7 +347,7 @@ export function ensureDepartmentKpiTemplates() {
           dept.id,
           item.name,
           item.weightPercent,
-          inferMajuGroup(item.name),
+          item.groupCode || inferMajuGroup(item.name),
           item.focus,
           item.sortOrder,
         );

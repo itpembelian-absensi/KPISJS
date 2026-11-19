@@ -2,6 +2,7 @@ import {
   DISCIPLINE_FOCUS,
   DISCIPLINE_INDICATOR_TEMPLATES,
 } from "./discipline-score";
+import { MARKOM_SCORE_TEMPLATE } from "./kpi-markom-template";
 import type {
   KpiScoreBand,
   KpiScoreDataSource,
@@ -38,6 +39,8 @@ export type ScoreFunctionTemplate = {
   weightPercent: number;
   focus: string;
   sortOrder: number;
+  /** Grup MAJU. Kosong = ditebak dari nama. */
+  groupCode?: string;
   indicators: ScoreIndicatorTemplate[];
 };
 
@@ -559,6 +562,7 @@ export const IT_SCORE_TEMPLATE: ScoreFunctionTemplate[] = [
 export const SCORE_TEMPLATE_BY_CODE: Record<string, ScoreFunctionTemplate[]> = {
   MTR: MEKANIK_SCORE_TEMPLATE,
   IT: IT_SCORE_TEMPLATE,
+  MKT: MARKOM_SCORE_TEMPLATE,
 };
 
 export function scoreTemplateForDepartmentCode(
@@ -572,6 +576,7 @@ export const METRIC_TYPE_LABEL: Record<KpiScoreMetricType, string> = {
   scale_percent: "Skala % vs target",
   weighted_leaf: "Nilai tertimbang (0–100)",
   attendance: "Dari absensi",
+  ratio: "Realisasi ÷ target × 100",
 };
 
 export const DATA_SOURCE_LABEL: Record<KpiScoreDataSource, string> = {

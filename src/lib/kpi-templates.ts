@@ -4,7 +4,7 @@ import type { KpiFunction } from "./types";
 export type KpiTemplateItem = Omit<
   KpiFunction,
   "id" | "departmentId" | "active" | "groupCode"
-> & { active?: boolean };
+> & { active?: boolean; groupCode?: string };
 
 /** Template standar fungsi KPI per kode departemen */
 export const DEPT_KPI_TEMPLATES: Record<string, KpiTemplateItem[]> = {
@@ -124,27 +124,31 @@ export const DEPT_KPI_TEMPLATES: Record<string, KpiTemplateItem[]> = {
   ],
   MKT: [
     {
-      name: "Lead Generation",
-      weightPercent: 30,
-      focus: "Leads berkualitas, campaign ROI, pipeline marketing",
+      name: "Mutu",
+      weightPercent: 25,
+      groupCode: "M",
+      focus: "Konten, brand, dan kepatuhan anggaran iklan",
       sortOrder: 1,
     },
     {
-      name: "Brand & Content",
-      weightPercent: 25,
-      focus: "Konten, awareness, engagement channel",
+      name: "Andal",
+      weightPercent: 10,
+      groupCode: "A",
+      focus: "Kehadiran, ketepatan waktu, dan laporan harian",
       sortOrder: 2,
     },
     {
-      name: "Demand Conversion",
-      weightPercent: 25,
-      focus: "Conversion rate, dukungan sales, nurturing",
+      name: "Jalin Kerja Sama",
+      weightPercent: 15,
+      groupCode: "J",
+      focus: "Respons ke Sales dan koordinasi dengan Graphic Design",
       sortOrder: 3,
     },
     {
-      name: "Market Insight",
-      weightPercent: 20,
-      focus: "Riset pasar, competitor analysis, insight bisnis",
+      name: "Unjuk Kerja",
+      weightPercent: 50,
+      groupCode: "U",
+      focus: "Engagement, prospek, campaign, dan materi sales",
       sortOrder: 4,
     },
   ],

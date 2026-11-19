@@ -9,6 +9,7 @@ import { listMajuGroups } from "./kpi-maju-ops";
 import {
   computeFunctionScoreFromIndicators,
   computeIndicatorScore,
+  indicatorAppliesToJabatan,
 } from "./kpi-score-compute";
 import { listKpiScoreIndicators } from "./kpi-score-ops";
 import { listKpiActivities, upsertKpiAssessment } from "./kpi-ops";
@@ -54,6 +55,27 @@ type ActualRow = {
   created_at: string;
   updated_at: string;
 };
+
+function staffScoreContext(staffId: string): {
+  jabatanId: string | null;
+  scoreMethod: "" | "bobot" | "rata-rata";
+} {
+  const row = getDb()
+    .prepare(
+      `SELECT s.jabatan_id AS jabatan_id, j.score_method AS score_method
+       FROM staff s
+       LEFT JOIN jabatan j ON j.id = s.jabatan_id
+       WHERE s.id = ?`,
+    )
+    .get(staffId) as
+    | { jabatan_id: string | null; score_method: string | null }
+    | undefined;
+  const method = row?.score_method;
+  return {
+    jabatanId: row?.jabatan_id || null,
+    scoreMethod: method === "bobot" || method === "rata-rata" ? method : "",
+  };
+}
 
 function mapActual(row: ActualRow): KpiIndicatorActual {
   return {
@@ -311,9 +333,13 @@ export function upsertKpiIndicatorActualsBatch(input: {
 
   const functions = listKpiFunctions(true, departmentId);
   const functionScores: Array<{ kpiFunctionId: string; score: number }> = [];
+  const scoreContext = staffScoreContext(staffId);
+  const staffIndicators = indicators.filter((ind) =>
+    indicatorAppliesToJabatan(ind.jabatanId, scoreContext.jabatanId),
+  );
 
   for (const fn of functions) {
-    const fnInds = indicators.filter((i) => i.kpiFunctionId === fn.id);
+    const fnInds = staffIndicators.filter((i) => i.kpiFunctionId === fn.id);
     if (fnInds.length === 0) continue;
     const result = computeFunctionScoreFromIndicators(
       fn.id,
@@ -326,6 +352,7 @@ export function upsertKpiIndicatorActualsBatch(input: {
           targetOverride: a.targetOverride,
         };
       },
+      { scoreMethod: scoreContext.scoreMethod },
     );
     if (result.filledCount === 0) continue;
     functionScores.push({ kpiFunctionId: fn.id, score: result.score });
@@ -395,6 +422,10 @@ export function scoreStaffPeriodFromIndicators(input: {
       periodLabel: input.periodLabel,
     });
   const actualMap = buildActualLookup(actuals);
+  const scoreContext = staffScoreContext(input.staffId);
+  const scopedIndicators = indicators.filter((ind) =>
+    indicatorAppliesToJabatan(ind.jabatanId, scoreContext.jabatanId),
+  );
   const functions = listKpiFunctions(true, input.departmentId);
   const byFunction = new Map<
     string,
@@ -437,7 +468,7 @@ export function scoreStaffPeriodFromIndicators(input: {
   let hasAny = false;
 
   for (const fn of functions) {
-    const fnInds = indicators.filter((i) => i.kpiFunctionId === fn.id);
+    const fnInds = scopedIndicators.filter((i) => i.kpiFunctionId === fn.id);
     if (fnInds.length === 0) continue;
 
     const result = computeFunctionScoreFromIndicators(
@@ -496,6 +527,7 @@ export function scoreStaffPeriodFromIndicators(input: {
           targetOverride: a.targetOverride,
         };
       },
+      { scoreMethod: scoreContext.scoreMethod },
     );
     byFunction.set(fn.id, result);
     if (result.filledCount > 0) {

@@ -36,6 +36,11 @@ function formatBands(
   if (c.notes) return c.notes;
   if (ind.metricType === "attendance") return "Dari modul absensi";
   if (ind.metricType === "weighted_leaf") return "Input nilai 0–100";
+  if (ind.metricType === "ratio") {
+    return c.direction === "lower"
+      ? "Kejadian: 0 = 100, ada kejadian = 0"
+      : "Realisasi ÷ target × 100, maks 100";
+  }
   return "—";
 }
 
@@ -107,7 +112,8 @@ export function KpiScoreRulesMaster({
     const metricType = String(fd.get("metricType")) as KpiScoreMetricType;
     const pickedSource = String(fd.get("dataSource") || "manual") as KpiScoreDataSource;
     const disciplinePart = editing?.config.disciplinePart;
-    const defaultTarget = Number(fd.get("defaultTarget") || 0);
+    const rawTarget = String(fd.get("defaultTarget") ?? "").trim();
+    const direction = String(fd.get("direction") || "higher");
     const dataSource: KpiScoreDataSource =
       disciplinePart === "daily_report"
         ? "wa_report"
@@ -118,9 +124,13 @@ export function KpiScoreRulesMaster({
       ...(editing?.config || {}),
       notes: String(fd.get("notes") || ""),
       dataSource,
+      direction: direction === "lower" ? "lower" : "higher",
     };
-    if (defaultTarget > 0) config.defaultTarget = defaultTarget;
-    else delete config.defaultTarget;
+    if (rawTarget === "") delete config.defaultTarget;
+    else {
+      const parsedTarget = Number(rawTarget);
+      if (Number.isFinite(parsedTarget)) config.defaultTarget = parsedTarget;
+    }
 
     try {
       const res = await fetch("/api/master/kpi-score-rules", {
@@ -302,6 +312,17 @@ export function KpiScoreRulesMaster({
                     </option>
                   ),
                 )}
+              </select>
+            </label>
+            <label className="block text-sm">
+              <span className="text-xs text-ink-muted">Arah skor rasio</span>
+              <select
+                name="direction"
+                defaultValue={editing?.config.direction || "higher"}
+                className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2.5"
+              >
+                <option value="higher">Makin besar makin baik</option>
+                <option value="lower">Makin kecil makin baik (kejadian)</option>
               </select>
             </label>
             <label className="block text-sm">

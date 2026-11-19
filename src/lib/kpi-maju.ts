@@ -81,7 +81,7 @@ export function majuLabel(code: MajuCode, groups?: MajuGroup[]): string {
 /** Kelompokkan fungsi yang sudah ada ke grup terdekat, berdasarkan nama. */
 export function inferMajuGroup(name: string): MajuCode {
   const text = name.toLowerCase();
-  if (/kedisiplinan|kehadiran|disiplin/.test(text)) return "A";
+  if (/^andal\b|keandalan|kedisiplinan|kehadiran|disiplin/.test(text)) return "A";
   if (/kolaborasi|kerja sama|kerjasama|engagement/.test(text)) return "J";
   if (
     /mutu|kualitas|quality|kepatuhan|compliance|audit|governance|security|keamanan|safety|akurasi|accuracy/.test(
@@ -163,7 +163,10 @@ export function rollupMaju(
     .filter((group) => group.active)
     .map((group) => {
     const kids = items.filter(
-      (item) => item.groupCode === group.code && item.weightPercent > 0,
+      (item) =>
+        item.groupCode === group.code &&
+        item.weightPercent > 0 &&
+        item.score != null,
     );
     let functionWeight = 0;
     let weighted = 0;
@@ -173,7 +176,7 @@ export function rollupMaju(
     }
     const score =
       kids.length > 0 && functionWeight > 0
-        ? Math.round((weighted / functionWeight) * 10) / 10
+        ? Math.round((weighted / functionWeight) * 10000) / 10000
         : null;
     return {
       ...group,
@@ -218,7 +221,5 @@ export function majuContributionPoints(
   }
   const within = item.weightPercent / group.functionWeight;
   const share = group.weightPercent / rolled.weightUsed;
-  return (
-    Math.round((item.score ?? 0) * within * share * 10) / 10
-  );
+  return Math.round((item.score ?? 0) * within * share * 100) / 100;
 }

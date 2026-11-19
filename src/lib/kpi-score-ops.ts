@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { ensureDisciplineScoreIndicators } from "./attendance-ops";
-import { getDb, boolToInt, intToBool } from "./db";
+import { getDb, boolToInt, getMeta, intToBool, setMeta } from "./db";
 import {
   METRIC_TYPE_LABEL,
   scoreTemplateForDepartmentCode,
@@ -36,6 +36,7 @@ type IndicatorRow = {
   config_json: string;
   sort_order: number;
   active: number;
+  jabatan_id?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -62,6 +63,7 @@ function mapIndicator(row: IndicatorRow): KpiScoreIndicator {
     config: parseConfig(row.config_json),
     sortOrder: Number(row.sort_order),
     active: intToBool(row.active),
+    jabatanId: row.jabatan_id || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -95,6 +97,7 @@ export function upsertKpiScoreIndicator(
     kpiFunctionId: string;
     name: string;
     metricType: KpiScoreMetricType;
+    jabatanId?: string | null;
   },
 ): KpiScoreIndicator | { error: string } {
   const name = input.name.trim();
@@ -105,12 +108,16 @@ export function upsertKpiScoreIndicator(
   if (input.id) {
     const existing = getKpiScoreIndicator(input.id);
     if (!existing) return { error: "Indikator tidak ditemukan" };
+    const jabatanId =
+      input.jabatanId !== undefined
+        ? input.jabatanId || null
+        : existing.jabatanId;
     getDb()
       .prepare(
         `UPDATE kpi_score_indicators SET
           department_id = ?, kpi_function_id = ?, name = ?, description = ?,
           weight_percent = ?, metric_type = ?, config_json = ?,
-          sort_order = ?, active = ?, updated_at = ?
+          sort_order = ?, active = ?, jabatan_id = ?, updated_at = ?
          WHERE id = ?`,
       )
       .run(
@@ -123,6 +130,7 @@ export function upsertKpiScoreIndicator(
         configJson,
         input.sortOrder ?? existing.sortOrder,
         boolToInt(input.active ?? existing.active),
+        jabatanId,
         now,
         input.id,
       );
@@ -135,8 +143,8 @@ export function upsertKpiScoreIndicator(
       `INSERT INTO kpi_score_indicators (
         id, department_id, kpi_function_id, name, description,
         weight_percent, metric_type, config_json, sort_order, active,
-        created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        jabatan_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -149,6 +157,7 @@ export function upsertKpiScoreIndicator(
       configJson,
       input.sortOrder ?? 0,
       boolToInt(input.active ?? true),
+      input.jabatanId || null,
       now,
       now,
     );
@@ -164,6 +173,15 @@ export function deleteKpiScoreIndicator(
   return { ok: true };
 }
 
+function jabatanIdForName(name: string | undefined): string | null {
+  const trimmed = (name || "").trim();
+  if (!trimmed) return null;
+  const row = getDb()
+    .prepare("SELECT id FROM jabatan WHERE lower(name) = lower(?) LIMIT 1")
+    .get(trimmed) as { id: string } | undefined;
+  return row?.id ?? null;
+}
+
 function upsertFunctionForTemplate(
   departmentId: string,
   item: ScoreFunctionTemplate,
@@ -176,12 +194,13 @@ function upsertFunctionForTemplate(
     )
     .get(departmentId, item.name) as { id: string } | undefined;
 
+  const groupCode = item.groupCode || inferMajuGroup(item.name);
   if (existing) {
     db.prepare(
       `UPDATE kpi_functions SET
-        weight_percent = ?, focus = ?, sort_order = ?, active = 1
+        weight_percent = ?, group_code = ?, focus = ?, sort_order = ?, active = 1
        WHERE id = ?`,
-    ).run(item.weightPercent, item.focus, item.sortOrder, existing.id);
+    ).run(item.weightPercent, groupCode, item.focus, item.sortOrder, existing.id);
     return existing.id;
   }
 
@@ -195,7 +214,7 @@ function upsertFunctionForTemplate(
     departmentId,
     item.name,
     item.weightPercent,
-    inferMajuGroup(item.name),
+    groupCode,
     item.focus,
     item.sortOrder,
   );
@@ -255,8 +274,8 @@ export function applyScoreTemplateToDepartment(
           `INSERT INTO kpi_score_indicators (
             id, department_id, kpi_function_id, name, description,
             weight_percent, metric_type, config_json, sort_order, active,
-            created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+            jabatan_id, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
         ).run(
           randomUUID(),
           departmentId,
@@ -267,6 +286,7 @@ export function applyScoreTemplateToDepartment(
           ind.metricType,
           JSON.stringify(ind.config),
           ind.sortOrder,
+          jabatanIdForName(ind.config.jabatanName),
           now,
           now,
         );
@@ -352,13 +372,124 @@ function ensureActivityIndicatorSources() {
   }
 }
 
+const MARKOM_RULES_VERSION = "1";
+
+/** Pasang 4 fungsi MAJU + 14 indikator Markom. Fungsi Marketing lama dinonaktifkan. */
+export function ensureMarkomScoreRules() {
+  ensureBuiltInScoreTemplates();
+  const versionKey = "kpi_markom_rules_version";
+  const depts = listDepartments(true).filter(
+    (dept) => dept.code.toUpperCase() === "MKT",
+  );
+  if (depts.length === 0) return;
+  const template = scoreTemplateForDepartmentCode("MKT");
+  if (!template) return;
+  const jabatanId = jabatanIdForName("Marketing & Communication");
+  const db = getDb();
+  const now = new Date().toISOString();
+  const refresh = getMeta(versionKey) !== MARKOM_RULES_VERSION;
+
+  const tx = db.transaction(() => {
+    for (const dept of depts) {
+      const kept = new Set<string>();
+      for (const fn of template) {
+        const fnId = upsertFunctionForTemplate(dept.id, fn);
+        kept.add(fnId);
+        for (const ind of fn.indicators) {
+          const code = ind.config.code || "";
+          const rows = db
+            .prepare(
+              `SELECT id, config_json FROM kpi_score_indicators
+               WHERE department_id = ? AND kpi_function_id = ?`,
+            )
+            .all(dept.id, fnId) as Array<{ id: string; config_json: string }>;
+          const existing = rows.find((row) => {
+            try {
+              const parsed = JSON.parse(row.config_json) as { code?: string };
+              return code !== "" && parsed.code === code;
+            } catch {
+              return false;
+            }
+          });
+          if (existing && !refresh) continue;
+          const config = { ...ind.config };
+          if (existing) {
+            db.prepare(
+              `UPDATE kpi_score_indicators SET
+                name = ?, description = ?, weight_percent = ?, metric_type = ?,
+                config_json = ?, sort_order = ?, active = 1, jabatan_id = ?,
+                updated_at = ?
+               WHERE id = ?`,
+            ).run(
+              ind.name,
+              ind.description,
+              ind.weightPercent,
+              ind.metricType,
+              JSON.stringify(config),
+              ind.sortOrder,
+              jabatanId,
+              now,
+              existing.id,
+            );
+          } else if (!existing) {
+            db.prepare(
+              `INSERT INTO kpi_score_indicators (
+                id, department_id, kpi_function_id, name, description,
+                weight_percent, metric_type, config_json, sort_order, active,
+                jabatan_id, created_at, updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+            ).run(
+              randomUUID(),
+              dept.id,
+              fnId,
+              ind.name,
+              ind.description,
+              ind.weightPercent,
+              ind.metricType,
+              JSON.stringify(config),
+              ind.sortOrder,
+              jabatanId,
+              now,
+              now,
+            );
+          }
+        }
+      }
+      const placeholders = [...kept].map(() => "?").join(", ");
+      db.prepare(
+        `UPDATE kpi_functions SET active = 0
+         WHERE department_id = ? AND id NOT IN (${placeholders})`,
+      ).run(dept.id, ...kept);
+    }
+  });
+  tx();
+  setMeta(versionKey, MARKOM_RULES_VERSION);
+}
+
+/** Andal Markom sudah memuat kehadiran sendiri, jadi fungsi kedisiplinan gabungan disembunyikan. */
+function hideCombinedDisciplineWhereAndalExists() {
+  getDb()
+    .prepare(
+      `UPDATE kpi_functions
+       SET active = 0
+       WHERE lower(name) = lower('Kedisiplinan & Kehadiran')
+         AND department_id IN (
+           SELECT department_id FROM kpi_functions
+           WHERE active = 1 AND lower(name) = 'andal'
+         )`,
+    )
+    .run();
+}
+
 /** Pastikan template skor dept yang sudah didukung terisi */
 export function ensureDepartmentScoreRules() {
   ensureBuiltInScoreTemplates();
   ensureMekanikScoreRules();
   ensureITScoreRules();
+  ensureMarkomScoreRules();
   ensureDisciplineScoreIndicators();
   ensureActivityIndicatorSources();
+  hideCombinedDisciplineWhereAndalExists();
 }
 
 export function listScoreTemplateCodes(): Array<{

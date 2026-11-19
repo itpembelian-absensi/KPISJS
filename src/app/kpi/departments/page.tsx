@@ -31,6 +31,7 @@ import {
   listKpiScoreIndicators,
 } from "@/lib/kpi-score-ops";
 import { listMajuGroups } from "@/lib/kpi-maju-ops";
+import { listJabatan } from "@/lib/jabatan-ops";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
@@ -134,6 +135,9 @@ export default async function DepartmentKpiPage() {
           managerStaffIds={managerStaffIds}
           adminStaffIds={adminStaffIds}
           majuGroups={listMajuGroups()}
+          jabatanScoreMethods={Object.fromEntries(
+            listJabatan(true, false).map((item) => [item.id, item.scoreMethod]),
+          )}
           assessmentUnrestricted={isAssessmentUnrestricted(user.role)}
           assessorHomeDepartmentId={user.departmentId}
           assessmentExtraStaffIds={user.assessmentStaffIds ?? []}

@@ -63,7 +63,45 @@ export function computeIndicatorScore(
     return scoreFromBands(pct, config.bandsPercent);
   }
 
+  if (metricType === "ratio") {
+    const target = resolveTarget(config, targetOverride);
+    const lower = config.direction === "lower";
+    if (lower && target === 0) {
+      return actual <= 0 ? 100 : 0;
+    }
+    if (target == null || target <= 0) return 0;
+    const raw = lower
+      ? actual <= target
+        ? 100
+        : (target / actual) * 100
+      : (actual / target) * 100;
+    return Math.max(0, Math.min(100, Math.round(raw * 10) / 10));
+  }
+
   return 0;
+}
+
+/**
+ * Indikator ratio tanpa target (selain kejadian target 0) tidak masuk rata-rata,
+ * walaupun realisasi sudah diisi.
+ */
+export function indicatorAppliesToJabatan(
+  jabatanIdOnIndicator: string | null | undefined,
+  staffJabatanId: string | null | undefined,
+): boolean {
+  return !jabatanIdOnIndicator || jabatanIdOnIndicator === staffJabatanId;
+}
+
+export function indicatorScoreCounts(
+  indicator: KpiScoreIndicator,
+  actualValue: number | null | undefined,
+  targetOverride?: number | null,
+): boolean {
+  if (actualValue == null || !Number.isFinite(actualValue)) return false;
+  if (indicator.metricType !== "ratio") return true;
+  const target = resolveTarget(indicator.config, targetOverride);
+  if (indicator.config.direction === "lower" && target === 0) return true;
+  return target != null && target > 0;
 }
 
 export type FunctionIndicatorScore = {
@@ -83,13 +121,14 @@ export type FunctionIndicatorScore = {
   }>;
 };
 
-/** Rata-rata tertimbang skor anak indikator dalam satu fungsi */
+/** Rata-rata skor anak indikator dalam satu fungsi. Metode rata-rata mengabaikan bobot. */
 export function computeFunctionScoreFromIndicators(
   kpiFunctionId: string,
   indicators: KpiScoreIndicator[],
   getActual: (
     indicator: KpiScoreIndicator,
   ) => { actualValue: number | null; targetOverride?: number | null } | null,
+  options?: { scoreMethod?: "" | "bobot" | "rata-rata" },
 ): FunctionIndicatorScore {
   const kids = indicators
     .filter((i) => i.kpiFunctionId === kpiFunctionId && i.active)
@@ -97,6 +136,7 @@ export function computeFunctionScoreFromIndicators(
 
   let weighted = 0;
   let usedW = 0;
+  let filledCount = 0;
   const indicatorScores: FunctionIndicatorScore["indicatorScores"] = [];
 
   for (const ind of kids) {
@@ -112,11 +152,26 @@ export function computeFunctionScoreFromIndicators(
       });
       continue;
     }
+    if (
+      !indicatorScoreCounts(ind, raw.actualValue, raw.targetOverride)
+    ) {
+      indicatorScores.push({
+        indicatorId: ind.id,
+        name: ind.name,
+        weightPercent: ind.weightPercent,
+        actualValue: raw.actualValue,
+        computedScore: 0,
+        metricType: ind.metricType,
+      });
+      continue;
+    }
     const computed = computeIndicatorScore(
       ind,
       raw.actualValue,
       raw.targetOverride,
     );
+    const weight =
+      options?.scoreMethod === "rata-rata" ? 1 : ind.weightPercent;
     indicatorScores.push({
       indicatorId: ind.id,
       name: ind.name,
@@ -125,19 +180,16 @@ export function computeFunctionScoreFromIndicators(
       computedScore: computed,
       metricType: ind.metricType,
     });
-    if (ind.weightPercent > 0) {
-      weighted += computed * ind.weightPercent;
-      usedW += ind.weightPercent;
+    if (weight > 0) {
+      weighted += computed * weight;
+      usedW += weight;
+      filledCount += 1;
     }
   }
 
-  const filledCount = indicatorScores.filter(
-    (x) => x.actualValue != null,
-  ).length;
-
   return {
     kpiFunctionId,
-    score: usedW > 0 ? Math.round((weighted / usedW) * 10) / 10 : 0,
+    score: usedW > 0 ? Math.round((weighted / usedW) * 10000) / 10000 : 0,
     filledCount,
     weightUsed: usedW,
     indicatorScores,

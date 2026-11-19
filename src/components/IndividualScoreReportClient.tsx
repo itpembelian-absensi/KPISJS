@@ -6,6 +6,7 @@ import {
   formatDisciplinePeriodLabel,
 } from "@/lib/discipline-period";
 import { buildIndividualScoreReport } from "@/lib/individual-score-report";
+import { formatScore, kpiGrade } from "@/lib/kpi-grade";
 import { compareByMaju, majuGroup, type MajuGroup } from "@/lib/kpi-maju";
 import type {
   Agent,
@@ -47,6 +48,7 @@ export function IndividualScoreReportClient({
   lockedStaffId,
   initialPeriod,
   majuGroups,
+  jabatanScoreMethods = {},
 }: {
   departments: Department[];
   staff: StaffMember[];
@@ -65,6 +67,7 @@ export function IndividualScoreReportClient({
   lockedStaffId: string | null;
   initialPeriod: string;
   majuGroups: MajuGroup[];
+  jabatanScoreMethods?: Record<string, "" | "bobot" | "rata-rata">;
 }) {
   const periodOptions = useMemo(() => {
     const fromData = [
@@ -122,6 +125,7 @@ export function IndividualScoreReportClient({
         itTeam,
         managerUserStaffIds: managerStaffIds,
         majuGroups,
+        scoreMethodByJabatan: jabatanScoreMethods,
       }),
     [
       deptStaff,
@@ -139,6 +143,7 @@ export function IndividualScoreReportClient({
       itTeam,
       managerStaffIds,
       majuGroups,
+      jabatanScoreMethods,
     ],
   );
 
@@ -229,8 +234,8 @@ export function IndividualScoreReportClient({
           ) : null}
         </p>
         <p className="text-[11px] text-ink-muted">
-          Prioritas: indikator → manual → absensi / kegiatan. Total = bobot grup
-          MAJU. Grup yang belum punya fungsi tidak dihitung. Fungsi kosong = 0.
+          Skor fungsi = rata-rata indikator yang ada nilainya. Total = bobot MAJU.
+          Indikator atau fungsi tanpa nilai tidak dihitung. Huruf sebelum syarat ambang.
         </p>
       </div>
 
@@ -282,7 +287,7 @@ export function IndividualScoreReportClient({
                             {cell?.score != null ? (
                               <>
                                 <span className="font-semibold text-brand">
-                                  {cell.score}
+                                  {formatScore(cell.score)}
                                 </span>
                                 {cell.source ? (
                                   <span className="mt-0.5 block text-[10px] text-ink-muted">
@@ -299,7 +304,10 @@ export function IndividualScoreReportClient({
                       <td className="px-3 py-3">
                         {r.overall != null ? (
                           <span className="text-base font-semibold text-brand">
-                            {r.overall}
+                            {formatScore(r.overall)}
+                            {kpiGrade(r.overall) ? (
+                              <span className="ml-1">{kpiGrade(r.overall)?.letter}</span>
+                            ) : null}
                           </span>
                         ) : (
                           <span className="text-ink-muted">—</span>

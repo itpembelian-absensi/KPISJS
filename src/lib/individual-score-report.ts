@@ -5,7 +5,10 @@ import {
   isActivitySourcedIndicator,
 } from "./activity-score-metrics";
 import { attendanceIndicatorActual } from "./discipline-score";
-import { computeFunctionScoreFromIndicators } from "./kpi-score-compute";
+import {
+  computeFunctionScoreFromIndicators,
+  indicatorAppliesToJabatan,
+} from "./kpi-score-compute";
 import { rollupMaju, type MajuCode, type MajuGroup } from "./kpi-maju";
 import {
   assigneeIdsForTicketScore,
@@ -72,6 +75,7 @@ export function computeIndividualScore(input: {
   itTeam?: ItMember[];
   managerUserStaffIds?: string[];
   majuGroups?: MajuGroup[];
+  scoreMethod?: "" | "bobot" | "rata-rata";
 }): IndividualScoreRow {
   const {
     staff,
@@ -123,7 +127,10 @@ export function computeIndividualScore(input: {
 
   const fnScores: IndividualFunctionScore[] = deptFns.map((fn) => {
     const fnIndicators = indicators.filter(
-      (i) => i.kpiFunctionId === fn.id && i.active,
+      (i) =>
+        i.kpiFunctionId === fn.id &&
+        i.active &&
+        indicatorAppliesToJabatan(i.jabatanId, staff.jabatanId),
     );
 
     if (fnIndicators.length > 0) {
@@ -177,6 +184,7 @@ export function computeIndividualScore(input: {
             targetOverride: a.targetOverride,
           };
         },
+        { scoreMethod: input.scoreMethod ?? "" },
       );
       if (result.filledCount > 0) {
         return {
@@ -209,6 +217,17 @@ export function computeIndividualScore(input: {
         weightPercent: fn.weightPercent,
         score: manual.score,
         source: "manual",
+      };
+    }
+
+    if (fnIndicators.some((ind) => ind.metricType === "ratio")) {
+      return {
+        functionId: fn.id,
+        functionName: fn.name,
+        groupCode: fn.groupCode,
+        weightPercent: fn.weightPercent,
+        score: null,
+        source: null,
       };
     }
 
@@ -295,6 +314,7 @@ export function buildIndividualScoreReport(input: {
   itTeam?: ItMember[];
   managerUserStaffIds?: string[];
   majuGroups?: MajuGroup[];
+  scoreMethodByJabatan?: Record<string, "" | "bobot" | "rata-rata">;
 }): IndividualScoreRow[] {
   const adminSet = new Set(input.adminStaffIds ?? []);
   const functions = input.functions;
@@ -316,6 +336,9 @@ export function buildIndividualScoreReport(input: {
         activities: input.activities.filter(
           (a) => a.departmentId === staff.departmentId,
         ),
+        scoreMethod: staff.jabatanId
+          ? input.scoreMethodByJabatan?.[staff.jabatanId] ?? ""
+          : "",
         tickets: input.tickets,
         agents: input.agents,
         allStaff: input.allStaff ?? input.staffList,

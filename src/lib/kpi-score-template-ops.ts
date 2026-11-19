@@ -31,6 +31,7 @@ function parseFunctions(raw: string | null | undefined): KpiScoreTemplateFunctio
       weightPercent: Number(fn.weightPercent ?? 0),
       focus: String(fn.focus || ""),
       sortOrder: Number(fn.sortOrder ?? fi + 1),
+      groupCode: fn.groupCode ? String(fn.groupCode).trim().toUpperCase() : undefined,
       indicators: Array.isArray(fn.indicators)
         ? fn.indicators.map((ind, ii) => normalizeIndicator(ind, ii))
         : [],
@@ -137,6 +138,9 @@ export function upsertKpiScoreTemplate(
     weightPercent: Number(fn.weightPercent ?? 0),
     focus: String(fn.focus || ""),
     sortOrder: Number(fn.sortOrder ?? fi + 1),
+    groupCode: fn.groupCode
+      ? String(fn.groupCode).trim().toUpperCase()
+      : undefined,
     indicators: (fn.indicators || []).map((ind, ii) =>
       normalizeIndicator(ind, ii),
     ),
@@ -277,28 +281,28 @@ export function createTemplateFromDepartment(input: {
     };
   }
 
-  const templateFns: KpiScoreTemplateFunction[] = functions
-    .map((fn) => {
-      const inds = indicatorRows
-        .filter((i) => i.kpi_function_id === fn.id)
-        .map((i, idx) => ({
-          name: i.name,
-          description: i.description,
-          weightPercent: Number(i.weight_percent),
-          metricType: i.metric_type as KpiScoreMetricType,
-          config: parseConfig(i.config_json),
-          sortOrder: Number(i.sort_order) || idx + 1,
-        }));
-      if (!inds.length) return null;
-      return {
-        name: fn.name,
-        weightPercent: fn.weightPercent,
-        focus: fn.focus,
-        sortOrder: fn.sortOrder,
-        indicators: inds,
-      };
-    })
-    .filter((x): x is KpiScoreTemplateFunction => x != null);
+  const templateFns: KpiScoreTemplateFunction[] = [];
+  for (const fn of functions) {
+    const inds = indicatorRows
+      .filter((i) => i.kpi_function_id === fn.id)
+      .map((i, idx) => ({
+        name: i.name,
+        description: i.description,
+        weightPercent: Number(i.weight_percent),
+        metricType: i.metric_type as KpiScoreMetricType,
+        config: parseConfig(i.config_json),
+        sortOrder: Number(i.sort_order) || idx + 1,
+      }));
+    if (!inds.length) continue;
+    templateFns.push({
+      name: fn.name,
+      weightPercent: fn.weightPercent,
+      focus: fn.focus,
+      sortOrder: fn.sortOrder,
+      groupCode: fn.groupCode,
+      indicators: inds,
+    });
+  }
 
   if (!templateFns.length) {
     return { error: "Tidak ada fungsi yang punya indikator" };
@@ -335,6 +339,12 @@ export function ensureBuiltInScoreTemplates() {
         code: "MTR",
         label: "Mekanik (indikator terukur)",
         description: "Template bawaan skor KPI Mekanik / perawatan unit",
+      },
+      {
+        code: "MKT",
+        label: "Marketing & Communication",
+        description:
+          "14 indikator Markom. Skor = realisasi ÷ target × 100. Fungsi = rata-rata indikator terisi, lalu bobot MAJU.",
       },
     ];
 

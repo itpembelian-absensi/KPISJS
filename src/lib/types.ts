@@ -80,12 +80,14 @@ export interface KpiFunction {
  * - scale_percent: % terhadap target → skor dari bandsPercent
  * - weighted_leaf: nilai manual 0–100, lalu ditimbang di induk
  * - attendance: pakai modul absensi
+ * - ratio: skor = realisasi ÷ target × 100, maksimal 100
  */
 export type KpiScoreMetricType =
   | "scale_count"
   | "scale_percent"
   | "weighted_leaf"
-  | "attendance";
+  | "attendance"
+  | "ratio";
 
 /**
  * Sumber capaian indikator:
@@ -129,6 +131,14 @@ export type KpiScoreIndicatorConfig = {
   dataSource?: KpiScoreDataSource;
   /** Komponen fungsi Kedisiplinan (empat bagian sama rata) */
   disciplinePart?: "attendance" | "lateness" | "daily_report" | "violation";
+  /** ratio: higher = makin besar makin baik. lower = kejadian, makin kecil makin baik. */
+  direction?: "higher" | "lower";
+  /** Kode baris di lembar KPI, mis. M1 */
+  code?: string;
+  /** Satuan tampilan: %, skor, kejadian */
+  unit?: string;
+  /** Jabatan pemilik indikator ini saat disalin dari template */
+  jabatanName?: string;
 };
 
 /** Indikator terukur di bawah fungsi KPI (aturan skor per dept) */
@@ -144,6 +154,8 @@ export interface KpiScoreIndicator {
   config: KpiScoreIndicatorConfig;
   sortOrder: number;
   active: boolean;
+  /** Kosong = berlaku untuk semua jabatan di departemen */
+  jabatanId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -164,6 +176,8 @@ export type KpiScoreTemplateFunction = {
   weightPercent: number;
   focus: string;
   sortOrder: number;
+  /** Grup MAJU. Kosong = ditebak dari nama. */
+  groupCode?: string;
   indicators: KpiScoreTemplateIndicator[];
 };
 
