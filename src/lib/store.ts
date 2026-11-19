@@ -1215,8 +1215,11 @@ function seedWaGatewayMenuIfMissing() {
   }
 }
 
+let seededConnection: ReturnType<typeof getDb> | null = null;
+
 function ensureDb() {
-  getDb();
+  const db = getDb();
+  if (seededConnection === db) return;
   ensureGowaConfig();
   seedIfEmpty();
   migrateOrphanKpiFunctions();
@@ -1237,6 +1240,7 @@ function ensureDb() {
   seedJabatan();
   seedJabatanMenuIfMissing();
   backfillCustomersFromSubmissions();
+  seededConnection = db;
 }
 
 export function readData(): AppData {
@@ -1303,6 +1307,14 @@ export function listDepartments(activeOnly = false): Department[] {
     )
     .all() as DeptRow[];
   return rows.map(mapDepartment);
+}
+
+export function getDepartment(id: string): Department | null {
+  ensureDb();
+  const row = getDb()
+    .prepare("SELECT * FROM departments WHERE id = ?")
+    .get(id) as DeptRow | undefined;
+  return row ? mapDepartment(row) : null;
 }
 
 export function listKpiFunctions(
@@ -1506,6 +1518,19 @@ export function listStaff(activeOnly = false): StaffMember[] {
     )
     .all() as StaffRow[];
   return rows.map(mapStaff);
+}
+
+export function getStaff(id: string): StaffMember | null {
+  ensureDb();
+  const row = getDb()
+    .prepare(
+      `SELECT s.*, j.name AS jabatan_name
+       FROM staff s
+       LEFT JOIN jabatan j ON j.id = s.jabatan_id
+       WHERE s.id = ?`,
+    )
+    .get(id) as StaffRow | undefined;
+  return row ? mapStaff(row) : null;
 }
 
 /** Nomor telepon staf yang akunnya Manager dan masih aktif. */

@@ -11,6 +11,7 @@ function ratio(input: {
   unit: string;
   defaultTarget?: number;
   direction?: "higher" | "lower";
+  rule?: "ratio" | "kejadian" | "batas";
   notes?: string;
 }) {
   return {
@@ -23,6 +24,7 @@ function ratio(input: {
       code: input.code,
       unit: input.unit,
       direction: input.direction ?? "higher",
+      ...(input.rule ? { rule: input.rule } : {}),
       dataSource: "manual" as const,
       jabatanName: JABATAN,
       ...(input.defaultTarget != null
@@ -70,13 +72,13 @@ export const MARKOM_SCORE_TEMPLATE: ScoreFunctionTemplate[] = [
         code: "M3",
         name: "Biaya iklan di luar persetujuan",
         description:
-          "Target 0 kejadian. Realisasi 0 = skor 100. Ada kejadian = skor 0. Bukti: laporan Ads Manager dibanding anggaran yang disetujui.",
+          "Biaya iklan di luar persetujuan. 0 kejadian = 100, 1 = 70, 2 = 40, 3 atau lebih = 0. Bukti: laporan Ads Manager dibanding anggaran yang disetujui.",
         weightPercent: 25,
         sortOrder: 3,
         unit: "kejadian",
         defaultTarget: 0,
-        direction: "lower",
-        notes: "Target 0 tidak dibagi. 0 kejadian = 100, lebih dari 0 = 0.",
+        rule: "kejadian",
+        notes: "0 kejadian = 100, 1 = 70, 2 = 40, 3 atau lebih = 0.",
       }),
       ratio({
         code: "M4",

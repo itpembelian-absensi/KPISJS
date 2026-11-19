@@ -4,12 +4,16 @@ import {
   attendanceIndicatorActual,
   type DisciplineBreakdown,
 } from "./discipline-score";
-import { rollupMaju, type MajuWeightedScore } from "./kpi-maju";
+import {
+  majuGroupsWeightedByItems,
+  rollupMaju,
+  type MajuWeightedScore,
+} from "./kpi-maju";
 import { listMajuGroups } from "./kpi-maju-ops";
 import {
   computeFunctionScoreFromIndicators,
   computeIndicatorScore,
-  indicatorAppliesToJabatan,
+  indicatorsForStaffScore,
 } from "./kpi-score-compute";
 import { listKpiScoreIndicators } from "./kpi-score-ops";
 import { listKpiActivities, upsertKpiAssessment } from "./kpi-ops";
@@ -334,8 +338,9 @@ export function upsertKpiIndicatorActualsBatch(input: {
   const functions = listKpiFunctions(true, departmentId);
   const functionScores: Array<{ kpiFunctionId: string; score: number }> = [];
   const scoreContext = staffScoreContext(staffId);
-  const staffIndicators = indicators.filter((ind) =>
-    indicatorAppliesToJabatan(ind.jabatanId, scoreContext.jabatanId),
+  const staffIndicators = indicatorsForStaffScore(
+    indicators,
+    scoreContext.jabatanId,
   );
 
   for (const fn of functions) {
@@ -423,8 +428,9 @@ export function scoreStaffPeriodFromIndicators(input: {
     });
   const actualMap = buildActualLookup(actuals);
   const scoreContext = staffScoreContext(input.staffId);
-  const scopedIndicators = indicators.filter((ind) =>
-    indicatorAppliesToJabatan(ind.jabatanId, scoreContext.jabatanId),
+  const scopedIndicators = indicatorsForStaffScore(
+    indicators,
+    scoreContext.jabatanId,
   );
   const functions = listKpiFunctions(true, input.departmentId);
   const byFunction = new Map<
@@ -532,17 +538,27 @@ export function scoreStaffPeriodFromIndicators(input: {
     byFunction.set(fn.id, result);
     if (result.filledCount > 0) {
       hasAny = true;
-      if (fn.weightPercent > 0) {
+      const weight =
+        scoreContext.scoreMethod === "bobot"
+          ? result.weightUsed
+          : fn.weightPercent;
+      if (weight > 0) {
         majuItems.push({
           groupCode: fn.groupCode,
-          weightPercent: fn.weightPercent,
+          weightPercent: weight,
           score: result.score,
         });
       }
     }
   }
 
-  const maju = rollupMaju(majuItems, listMajuGroups());
+  const catalog = listMajuGroups();
+  const maju = rollupMaju(
+    majuItems,
+    scoreContext.scoreMethod === "bobot"
+      ? majuGroupsWeightedByItems(majuItems, catalog)
+      : catalog,
+  );
   return {
     byFunction,
     overall: maju.overall ?? 0,
@@ -698,6 +714,22 @@ export function syncTicketScoreActuals(opts?: {
   }
 
   return { departments, periods, staffSynced, itemsWritten };
+}
+
+let autoScoreSyncAt = 0;
+
+/** Sinkron tiket dan kegiatan paling sering sekali semenit, supaya buka menu tidak menghitung ulang semuanya. */
+export function syncAutoScoreActualsIfStale(maxAgeMs = 60_000) {
+  const now = Date.now();
+  if (now - autoScoreSyncAt < maxAgeMs) return;
+  autoScoreSyncAt = now;
+  try {
+    syncTicketScoreActuals();
+    syncActivityScoreActuals();
+  } catch (error) {
+    autoScoreSyncAt = 0;
+    throw error;
+  }
 }
 
 /**

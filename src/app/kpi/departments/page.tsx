@@ -25,7 +25,7 @@ import {
   listKpiProjects,
 } from "@/lib/kpi-ops";
 import { listKpiWaReports } from "@/lib/wa-report-ops";
-import { listKpiIndicatorActuals, syncActivityScoreActuals, syncTicketScoreActuals } from "@/lib/kpi-indicator-actuals-ops";
+import { listKpiIndicatorActuals, syncAutoScoreActualsIfStale } from "@/lib/kpi-indicator-actuals-ops";
 import {
   ensureDepartmentScoreRules,
   listKpiScoreIndicators,
@@ -47,8 +47,7 @@ export default async function DepartmentKpiPage() {
   if (!staffLimited) {
     ensureDisciplineKpiFunctions();
     ensureDepartmentScoreRules();
-    syncTicketScoreActuals();
-    syncActivityScoreActuals();
+    syncAutoScoreActualsIfStale();
   }
 
   const allDepartments = listDepartments(true);

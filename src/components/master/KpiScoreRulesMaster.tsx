@@ -33,6 +33,12 @@ function formatBands(
   if (c.penalties?.length) {
     return c.penalties.map((p) => `${p.label} ${p.points}`).join(" · ");
   }
+  if (c.rule === "kejadian") {
+    return "0 kejadian = 100, 1 = 70, 2 = 40, 3 atau lebih = 0";
+  }
+  if (c.rule === "batas") {
+    return "Di bawah atau sama dengan batas = 100. Di atas batas = batas ÷ realisasi × 100";
+  }
   if (c.notes) return c.notes;
   if (ind.metricType === "attendance") return "Dari modul absensi";
   if (ind.metricType === "weighted_leaf") return "Input nilai 0–100";
@@ -476,23 +482,39 @@ export function KpiScoreRulesMaster({
             atau terapkan template.
           </p>
         ) : (
-          grouped.map(({ fn, inds, indWeight }) => (
+          grouped.map(({ fn, inds }) => {
+            const sheets = new Map<string, typeof inds>();
+            for (const ind of inds) {
+              const label = ind.config.jabatanName?.trim() || "Semua jabatan";
+              const list = sheets.get(label) ?? [];
+              list.push(ind);
+              sheets.set(label, list);
+            }
+            const sheetRows = [...sheets.entries()];
+            return (
             <section key={fn.id} className="panel overflow-hidden">
               <div className="flex flex-wrap items-end justify-between gap-2 border-b border-line px-4 py-3">
                 <div>
                   <h2 className="font-semibold">{fn.name}</h2>
                   <p className="text-xs text-ink-muted">
-                    Bobot fungsi {fn.weightPercent}% · indikator{" "}
-                    {inds.length} · Σ bobot indikator{" "}
-                    <span
-                      className={
-                        inds.length === 0 || Math.abs(indWeight - 100) < 0.01
-                          ? "text-ok"
-                          : "text-warn"
-                      }
-                    >
-                      {indWeight.toFixed(indWeight % 1 ? 1 : 0)}%
-                    </span>
+                    Bobot fungsi {fn.weightPercent}% · indikator {inds.length}
+                    {sheetRows.map(([label, rows]) => {
+                      const weight = rows.reduce(
+                        (sum, row) => sum + row.weightPercent,
+                        0,
+                      );
+                      const ok =
+                        rows.length === 0 || Math.abs(weight - 100) < 0.01;
+                      return (
+                        <span key={label}>
+                          {" "}
+                          · {label}{" "}
+                          <span className={ok ? "text-ok" : "text-warn"}>
+                            Σ {weight.toFixed(weight % 1 ? 1 : 0)}%
+                          </span>
+                        </span>
+                      );
+                    })}
                   </p>
                 </div>
               </div>
@@ -508,14 +530,23 @@ export function KpiScoreRulesMaster({
                   .
                 </p>
               ) : (
-                <div className="divide-y divide-line">
-                  {inds.map((ind) => (
+                <div>
+                  {sheetRows.map(([label, rows]) => (
+                    <div key={label} className="border-t border-line first:border-t-0">
+                      {label !== "Semua jabatan" ? (
+                        <p className="bg-bg-elevated/60 px-4 py-2 text-xs font-semibold text-brand">
+                          {label}
+                        </p>
+                      ) : null}
+                      <div className="divide-y divide-line">
+                  {rows.map((ind) => (
                     <div
                       key={ind.id}
                       className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"
                     >
                       <div className="min-w-0">
                         <p className="font-medium">
+                          {ind.config.code ? `${ind.config.code} · ` : ""}
                           {ind.name}{" "}
                           <span className="text-xs font-normal text-ink-muted">
                             ({ind.weightPercent}%)
@@ -586,10 +617,14 @@ export function KpiScoreRulesMaster({
                       </div>
                     </div>
                   ))}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </section>
-          ))
+            );
+          })
         )}
       </div>
     </div>

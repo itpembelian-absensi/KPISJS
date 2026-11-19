@@ -11,6 +11,12 @@ import {
   getKpiScoreTemplateByCode,
   listKpiScoreTemplates,
 } from "./kpi-score-template-ops";
+import { GRAPHIC_DESIGN_SCORE_TEMPLATE } from "./kpi-graphic-design-template";
+import { MAJU_WORKBOOK } from "./kpi-maju-workbook";
+import {
+  IT_MANAGER_SCORE_TEMPLATE,
+  IT_SUPPORT_SCORE_TEMPLATE,
+} from "./kpi-it-maju-template";
 import { inferMajuGroup } from "./kpi-maju";
 import {
   ensureDepartmentKpiTemplates,
@@ -372,101 +378,271 @@ function ensureActivityIndicatorSources() {
   }
 }
 
-const MARKOM_RULES_VERSION = "1";
+const MARKOM_RULES_VERSION = "3";
+const GRAPHIC_DESIGN_RULES_VERSION = "1";
+const MARKOM_FUNCTION_NAMES = [
+  "Mutu",
+  "Andal",
+  "Jalin Kerja Sama",
+  "Unjuk Kerja",
+];
 
-/** Pasang 4 fungsi MAJU + 14 indikator Markom. Fungsi Marketing lama dinonaktifkan. */
-export function ensureMarkomScoreRules() {
-  ensureBuiltInScoreTemplates();
-  const versionKey = "kpi_markom_rules_version";
-  const depts = listDepartments(true).filter(
-    (dept) => dept.code.toUpperCase() === "MKT",
-  );
-  if (depts.length === 0) return;
-  const template = scoreTemplateForDepartmentCode("MKT");
-  if (!template) return;
-  const jabatanId = jabatanIdForName("Marketing & Communication");
+/** Fungsi yang sudah ada tidak ditimpa teksnya. Dipakai lembar jabatan kedua di departemen yang sama. */
+function ensureFunctionRow(
+  departmentId: string,
+  item: ScoreFunctionTemplate,
+  updateText: boolean,
+): string {
+  if (updateText) return upsertFunctionForTemplate(departmentId, item);
+  const existing = getDb()
+    .prepare(
+      `SELECT id FROM kpi_functions
+       WHERE department_id = ? AND lower(name) = lower(?)`,
+    )
+    .get(departmentId, item.name) as { id: string } | undefined;
+  if (!existing) return upsertFunctionForTemplate(departmentId, item);
+  getDb()
+    .prepare(`UPDATE kpi_functions SET active = 1 WHERE id = ?`)
+    .run(existing.id);
+  return existing.id;
+}
+
+/** Indikator milik satu jabatan. Kode yang sama boleh dipakai jabatan lain di fungsi yang sama. */
+function upsertJabatanIndicators(
+  departmentId: string,
+  jabatanId: string,
+  template: ScoreFunctionTemplate[],
+  refresh: boolean,
+  updateFunctionText: boolean,
+) {
   const db = getDb();
   const now = new Date().toISOString();
-  const refresh = getMeta(versionKey) !== MARKOM_RULES_VERSION;
-
   const tx = db.transaction(() => {
-    for (const dept of depts) {
-      const kept = new Set<string>();
-      for (const fn of template) {
-        const fnId = upsertFunctionForTemplate(dept.id, fn);
-        kept.add(fnId);
-        for (const ind of fn.indicators) {
-          const code = ind.config.code || "";
-          const rows = db
-            .prepare(
-              `SELECT id, config_json FROM kpi_score_indicators
-               WHERE department_id = ? AND kpi_function_id = ?`,
-            )
-            .all(dept.id, fnId) as Array<{ id: string; config_json: string }>;
-          const existing = rows.find((row) => {
-            try {
-              const parsed = JSON.parse(row.config_json) as { code?: string };
-              return code !== "" && parsed.code === code;
-            } catch {
-              return false;
-            }
-          });
-          if (existing && !refresh) continue;
-          const config = { ...ind.config };
-          if (existing) {
-            db.prepare(
-              `UPDATE kpi_score_indicators SET
-                name = ?, description = ?, weight_percent = ?, metric_type = ?,
-                config_json = ?, sort_order = ?, active = 1, jabatan_id = ?,
-                updated_at = ?
-               WHERE id = ?`,
-            ).run(
-              ind.name,
-              ind.description,
-              ind.weightPercent,
-              ind.metricType,
-              JSON.stringify(config),
-              ind.sortOrder,
-              jabatanId,
-              now,
-              existing.id,
-            );
-          } else if (!existing) {
-            db.prepare(
-              `INSERT INTO kpi_score_indicators (
-                id, department_id, kpi_function_id, name, description,
-                weight_percent, metric_type, config_json, sort_order, active,
-                jabatan_id, created_at, updated_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
-            ).run(
-              randomUUID(),
-              dept.id,
-              fnId,
-              ind.name,
-              ind.description,
-              ind.weightPercent,
-              ind.metricType,
-              JSON.stringify(config),
-              ind.sortOrder,
-              jabatanId,
-              now,
-              now,
-            );
+    for (const fn of template) {
+      const fnId = ensureFunctionRow(departmentId, fn, updateFunctionText);
+      const rows = db
+        .prepare(
+          `SELECT id, jabatan_id, config_json FROM kpi_score_indicators
+           WHERE department_id = ? AND kpi_function_id = ?`,
+        )
+        .all(departmentId, fnId) as Array<{
+        id: string;
+        jabatan_id: string | null;
+        config_json: string;
+      }>;
+      for (const ind of fn.indicators) {
+        const code = ind.config.code || "";
+        const existing = rows.find((row) => {
+          if ((row.jabatan_id || "") !== jabatanId) return false;
+          if (!code) return false;
+          try {
+            const parsed = JSON.parse(row.config_json) as { code?: string };
+            return parsed.code === code;
+          } catch {
+            return false;
           }
+        });
+        if (existing && !refresh) continue;
+        const config = { ...ind.config };
+        if (existing) {
+          db.prepare(
+            `UPDATE kpi_score_indicators SET
+              name = ?, description = ?, weight_percent = ?, metric_type = ?,
+              config_json = ?, sort_order = ?, active = 1, jabatan_id = ?,
+              updated_at = ?
+             WHERE id = ?`,
+          ).run(
+            ind.name,
+            ind.description,
+            ind.weightPercent,
+            ind.metricType,
+            JSON.stringify(config),
+            ind.sortOrder,
+            jabatanId,
+            now,
+            existing.id,
+          );
+        } else {
+          db.prepare(
+            `INSERT INTO kpi_score_indicators (
+              id, department_id, kpi_function_id, name, description,
+              weight_percent, metric_type, config_json, sort_order, active,
+              jabatan_id, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+          ).run(
+            randomUUID(),
+            departmentId,
+            fnId,
+            ind.name,
+            ind.description,
+            ind.weightPercent,
+            ind.metricType,
+            JSON.stringify(config),
+            ind.sortOrder,
+            jabatanId,
+            now,
+            now,
+          );
         }
       }
-      const placeholders = [...kept].map(() => "?").join(", ");
+    }
+  });
+  tx();
+}
+
+/** Pasang lembar Markom di departemen jabatan Marketing & Communication. */
+export function ensureMarkomScoreRules() {
+  const versionKey = "kpi_markom_rules_version";
+  if (getMeta(versionKey) === MARKOM_RULES_VERSION) return;
+  ensureBuiltInScoreTemplates();
+  listDepartments(true);
+  const jabatan = getDb()
+    .prepare(
+      `SELECT id, department_id FROM jabatan WHERE lower(name) = lower(?)`,
+    )
+    .get("Marketing & Communication") as
+    | { id: string; department_id: string | null }
+    | undefined;
+  const departmentId = jabatan?.department_id?.trim() || "";
+  if (!jabatan || !departmentId) return;
+  const template = scoreTemplateForDepartmentCode("MKT");
+  if (!template) return;
+  const db = getDb();
+  const mkt = listDepartments(true).find(
+    (dept) => dept.code.toUpperCase() === "MKT",
+  );
+
+  upsertJabatanIndicators(departmentId, jabatan.id, template, true, true);
+
+  const tx = db.transaction(() => {
+    if (mkt && mkt.id !== departmentId) {
+      const placeholders = MARKOM_FUNCTION_NAMES.map(() => "?").join(", ");
       db.prepare(
         `UPDATE kpi_functions SET active = 0
-         WHERE department_id = ? AND id NOT IN (${placeholders})`,
-      ).run(dept.id, ...kept);
+         WHERE department_id = ? AND name IN (${placeholders})`,
+      ).run(mkt.id, ...MARKOM_FUNCTION_NAMES);
+      db.prepare(
+        `UPDATE kpi_score_indicators SET active = 0
+         WHERE department_id = ? AND kpi_function_id IN (
+           SELECT id FROM kpi_functions
+           WHERE department_id = ? AND name IN (${placeholders})
+         )`,
+      ).run(mkt.id, mkt.id, ...MARKOM_FUNCTION_NAMES);
+      const previous = [
+        "Lead Generation",
+        "Brand & Content",
+        "Demand Conversion",
+        "Market Insight",
+      ];
+      const previousPlaceholders = previous.map(() => "?").join(", ");
+      db.prepare(
+        `UPDATE kpi_functions SET active = 1
+         WHERE department_id = ? AND name IN (${previousPlaceholders})`,
+      ).run(mkt.id, ...previous);
     }
   });
   tx();
   setMeta(versionKey, MARKOM_RULES_VERSION);
 }
 
-/** Andal Markom sudah memuat kehadiran sendiri, jadi fungsi kedisiplinan gabungan disembunyikan. */
+/** Pasang lembar Graphic Design di departemen jabatan itu, terpisah dari Markom. */
+export function ensureGraphicDesignScoreRules() {
+  const versionKey = "kpi_graphic_design_rules_version";
+  if (getMeta(versionKey) === GRAPHIC_DESIGN_RULES_VERSION) return;
+  if (getMeta("kpi_maju_sheet_graphic_design") === "1") return;
+  listDepartments(true);
+  const jabatan = getDb()
+    .prepare(
+      `SELECT id, department_id FROM jabatan WHERE lower(name) = lower(?)`,
+    )
+    .get("Graphic Design") as
+    | { id: string; department_id: string | null }
+    | undefined;
+  const departmentId = jabatan?.department_id?.trim() || "";
+  if (!jabatan || !departmentId) return;
+  upsertJabatanIndicators(
+    departmentId,
+    jabatan.id,
+    GRAPHIC_DESIGN_SCORE_TEMPLATE,
+    true,
+    false,
+  );
+  const count = GRAPHIC_DESIGN_SCORE_TEMPLATE.reduce(
+    (sum, fn) => sum + fn.indicators.length,
+    0,
+  );
+  getDb()
+    .prepare(
+      `UPDATE jabatan SET indicator_count = ?, updated_at = ? WHERE id = ?`,
+    )
+    .run(count, new Date().toISOString(), jabatan.id);
+  setMeta(versionKey, GRAPHIC_DESIGN_RULES_VERSION);
+}
+
+const IT_ROLE_SHEETS: Array<{
+  jabatanName: string;
+  versionKey: string;
+  version: string;
+  template: ScoreFunctionTemplate[];
+  updateFunctionText: boolean;
+}> = [
+  {
+    jabatanName: "IT Support",
+    versionKey: "kpi_it_support_rules_version",
+    version: "1",
+    template: IT_SUPPORT_SCORE_TEMPLATE,
+    updateFunctionText: true,
+  },
+  {
+    jabatanName: "IT Manager",
+    versionKey: "kpi_it_manager_rules_version",
+    version: "2",
+    template: IT_MANAGER_SCORE_TEMPLATE,
+    updateFunctionText: false,
+  },
+];
+
+/** Pasang lembar IT Support dan IT Manager di departemen masing-masing jabatan. */
+export function ensureItRoleScoreRules() {
+  const pending = IT_ROLE_SHEETS.filter(
+    (sheet) =>
+      getMeta(sheet.versionKey) !== sheet.version &&
+      getMeta(
+        `kpi_maju_sheet_${sheet.jabatanName.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`,
+      ) !== "1",
+  );
+  if (pending.length === 0) return;
+  listDepartments(true);
+  const db = getDb();
+  for (const sheet of pending) {
+    const jabatan = db
+      .prepare(
+        `SELECT id, department_id FROM jabatan WHERE lower(name) = lower(?)`,
+      )
+      .get(sheet.jabatanName) as
+      | { id: string; department_id: string | null }
+      | undefined;
+    const departmentId = jabatan?.department_id?.trim() || "";
+    if (!jabatan || !departmentId) continue;
+    upsertJabatanIndicators(
+      departmentId,
+      jabatan.id,
+      sheet.template,
+      true,
+      sheet.updateFunctionText,
+    );
+    const count = sheet.template.reduce(
+      (sum, fn) => sum + fn.indicators.length,
+      0,
+    );
+    db.prepare(
+      `UPDATE jabatan SET indicator_count = ?, updated_at = ? WHERE id = ?`,
+    ).run(count, new Date().toISOString(), jabatan.id);
+    setMeta(sheet.versionKey, sheet.version);
+  }
+}
+
+/** Andal umum departemen sudah memuat kehadiran. Andal khusus satu jabatan tidak menyembunyikan kedisiplinan jabatan lain. */
 function hideCombinedDisciplineWhereAndalExists() {
   getDb()
     .prepare(
@@ -474,11 +650,101 @@ function hideCombinedDisciplineWhereAndalExists() {
        SET active = 0
        WHERE lower(name) = lower('Kedisiplinan & Kehadiran')
          AND department_id IN (
-           SELECT department_id FROM kpi_functions
-           WHERE active = 1 AND lower(name) = 'andal'
+           SELECT f.department_id
+           FROM kpi_functions f
+           JOIN kpi_score_indicators i
+             ON i.kpi_function_id = f.id AND i.active = 1
+           WHERE f.active = 1
+             AND lower(f.name) = 'andal'
+             AND (i.jabatan_id IS NULL OR trim(i.jabatan_id) = '')
          )`,
     )
     .run();
+}
+
+function majuSheetVersionKey(jabatanName: string): string {
+  return `kpi_maju_sheet_${jabatanName.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`;
+}
+
+function retireJabatanIndicatorsNotInSheet(
+  departmentId: string,
+  jabatanId: string,
+  template: ScoreFunctionTemplate[],
+) {
+  const wanted = new Set(
+    template.flatMap((fn) =>
+      fn.indicators.map((ind) => ind.config.code || ""),
+    ),
+  );
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT id, config_json FROM kpi_score_indicators
+       WHERE department_id = ? AND jabatan_id = ? AND active = 1`,
+    )
+    .all(departmentId, jabatanId) as Array<{
+    id: string;
+    config_json: string;
+  }>;
+  const now = new Date().toISOString();
+  for (const row of rows) {
+    let code = "";
+    try {
+      code = String(
+        (JSON.parse(row.config_json) as { code?: string }).code || "",
+      );
+    } catch {
+      code = "";
+    }
+    if (wanted.has(code)) continue;
+    db.prepare(
+      `UPDATE kpi_score_indicators SET active = 0, updated_at = ? WHERE id = ?`,
+    ).run(now, row.id);
+  }
+}
+
+/** Pasang lembar KPI MAJU per jabatan. Jabatan tanpa departemen ditunda. */
+export function ensureMajuWorkbookRules() {
+  const pending = MAJU_WORKBOOK.filter(
+    (sheet) => getMeta(majuSheetVersionKey(sheet.jabatanName)) !== "1",
+  );
+  if (pending.length === 0) return;
+  listDepartments(true);
+  const db = getDb();
+  const now = new Date().toISOString();
+  for (const sheet of pending) {
+    const jabatan = db
+      .prepare(
+        `SELECT id, department_id FROM jabatan WHERE lower(name) = lower(?)`,
+      )
+      .get(sheet.jabatanName) as
+      | { id: string; department_id: string | null }
+      | undefined;
+    const departmentId = jabatan?.department_id?.trim() || "";
+    if (!jabatan || !departmentId) continue;
+    upsertJabatanIndicators(
+      departmentId,
+      jabatan.id,
+      sheet.functions,
+      true,
+      false,
+    );
+    retireJabatanIndicatorsNotInSheet(
+      departmentId,
+      jabatan.id,
+      sheet.functions,
+    );
+    const count = sheet.functions.reduce(
+      (sum, fn) => sum + fn.indicators.length,
+      0,
+    );
+    db.prepare(
+      `UPDATE jabatan
+       SET indicator_count = ?, score_method = ?, updated_at = ?
+       WHERE id = ?`,
+    ).run(count, sheet.scoreMethod, now, jabatan.id);
+    setMeta(majuSheetVersionKey(sheet.jabatanName), "1");
+  }
 }
 
 /** Pastikan template skor dept yang sudah didukung terisi */
@@ -486,7 +752,10 @@ export function ensureDepartmentScoreRules() {
   ensureBuiltInScoreTemplates();
   ensureMekanikScoreRules();
   ensureITScoreRules();
+  ensureItRoleScoreRules();
   ensureMarkomScoreRules();
+  ensureGraphicDesignScoreRules();
+  ensureMajuWorkbookRules();
   ensureDisciplineScoreIndicators();
   ensureActivityIndicatorSources();
   hideCombinedDisciplineWhereAndalExists();

@@ -355,11 +355,21 @@ export function ensureBuiltInScoreTemplates() {
     if (!built) continue;
     const existing = db
       .prepare(
-        "SELECT id FROM kpi_score_templates WHERE upper(code) = ? LIMIT 1",
+        `SELECT id, label, description, functions_json
+         FROM kpi_score_templates WHERE upper(code) = ? LIMIT 1`,
       )
-      .get(meta.code) as { id: string } | undefined;
+      .get(meta.code) as
+      | { id: string; label: string; description: string; functions_json: string }
+      | undefined;
     const functionsJson = JSON.stringify(built);
     if (existing) {
+      if (
+        existing.label === meta.label &&
+        existing.description === meta.description &&
+        existing.functions_json === functionsJson
+      ) {
+        continue;
+      }
       db.prepare(
         `UPDATE kpi_score_templates SET
           label = ?, description = ?, functions_json = ?, active = 1, updated_at = ?

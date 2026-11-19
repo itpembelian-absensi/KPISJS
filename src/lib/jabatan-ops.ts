@@ -5,6 +5,7 @@ import type { JabatanRecord } from "./types";
 type JabatanRow = {
   id: string;
   name: string;
+  department_id: string | null;
   kelompok: string;
   score_method: string;
   indicator_count: number;
@@ -29,7 +30,7 @@ type CatalogItem = {
 /** 32 jabatan paket MAJU Revisi 02, 18 November 2026. */
 const KPI_JABATAN: CatalogItem[] = [
   { name: "Marketing & Communication", kelompok: "Marketing & Sales", scoreMethod: "rata-rata", indicatorCount: 14, sortOrder: 10 },
-  { name: "Graphic Design", kelompok: "Marketing & Sales", scoreMethod: "rata-rata", indicatorCount: 12, sortOrder: 20 },
+  { name: "Graphic Design", kelompok: "Marketing & Sales", scoreMethod: "rata-rata", indicatorCount: 9, sortOrder: 20 },
   { name: "Sales Manager", kelompok: "Marketing & Sales", scoreMethod: "rata-rata", indicatorCount: 13, sortOrder: 30 },
   { name: "Senior Marketing", kelompok: "Marketing & Sales", scoreMethod: "rata-rata", indicatorCount: 13, sortOrder: 40 },
   { name: "Sales", kelompok: "Marketing & Sales", scoreMethod: "rata-rata", indicatorCount: 14, sortOrder: 50 },
@@ -58,7 +59,7 @@ const KPI_JABATAN: CatalogItem[] = [
   { name: "Messenger", kelompok: "HRD, GA, Purchasing, IT", scoreMethod: "rata-rata", indicatorCount: 2, sortOrder: 440 },
   { name: "Office Boy", kelompok: "HRD, GA, Purchasing, IT", scoreMethod: "rata-rata", indicatorCount: 2, sortOrder: 450 },
   { name: "Purchasing Stock", kelompok: "HRD, GA, Purchasing, IT", scoreMethod: "rata-rata", indicatorCount: 13, sortOrder: 460 },
-  { name: "IT Manager", kelompok: "HRD, GA, Purchasing, IT", scoreMethod: "rata-rata", indicatorCount: 14, sortOrder: 470 },
+  { name: "IT Manager", kelompok: "HRD, GA, Purchasing, IT", scoreMethod: "rata-rata", indicatorCount: 12, sortOrder: 470 },
   { name: "IT Support", kelompok: "HRD, GA, Purchasing, IT", scoreMethod: "rata-rata", indicatorCount: 12, sortOrder: 480 },
 ];
 
@@ -113,6 +114,92 @@ const KELOMPOK_BY_DEPT: Record<string, string> = {
   MGT: "Lainnya",
 };
 
+/** Kode departemen tempat skor jabatan paket dihitung. Mengikuti departemen pemegangnya. */
+const DEPARTMENT_CODE_BY_JABATAN: Record<string, string> = {
+  "Marketing & Communication": "DGM",
+  "Graphic Design": "DGM",
+  "Sales Manager": "MKT",
+  "Senior Marketing": "MKT",
+  Sales: "MKT",
+  "Admin Marketing": "MKT",
+  "General Manager": "MGT",
+  "Tax Manager": "TAX",
+  "Staff Pajak": "TAX",
+  "Inventory Controller": "ACC",
+  "GL Accounting": "ACC",
+  "Finance Manager": "FIN",
+  "Supervisor Finance": "ACC",
+  "AR Collection": "FIN",
+  "Admin Invoicing": "FIN",
+  "Admin Finance": "FIN",
+  Cashier: "FIN",
+  Collector: "COL",
+  "Warehouse Controller": "WH",
+  "Pengawas Produksi": "PRD",
+  "Admin Warehouse": "WH",
+  Mekanik: "MTR",
+  "Pembina Security": "SEC",
+  "Komandan Security": "SEC",
+  "HR Manager": "HRD",
+  "HR Staff": "HRD",
+  Procurement: "PUR",
+  Messenger: "KUR",
+  "Office Boy": "HRD",
+  "Purchasing Stock": "PUR",
+  "IT Manager": "IT",
+  "IT Support": "IT",
+};
+
+function departmentIdForCode(code: string): string | null {
+  const trimmed = code.trim();
+  if (!trimmed) return null;
+  const row = getDb()
+    .prepare("SELECT id FROM departments WHERE lower(code) = lower(?)")
+    .get(trimmed) as { id: string } | undefined;
+  return row?.id ?? null;
+}
+
+function departmentNameById(id: string | null): string {
+  if (!id) return "";
+  const row = getDb()
+    .prepare("SELECT name FROM departments WHERE id = ?")
+    .get(id) as { name: string } | undefined;
+  return row?.name ?? "";
+}
+
+/** Isi department_id yang masih kosong. Jabatan yang sudah diubah pengguna tidak ditimpa. */
+function assignJabatanDepartments() {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const setDept = db.prepare(
+    `UPDATE jabatan SET department_id = ?, updated_at = ?
+     WHERE id = ? AND (department_id IS NULL OR trim(department_id) = '')`,
+  );
+  for (const [name, code] of Object.entries(DEPARTMENT_CODE_BY_JABATAN)) {
+    const row = findJabatanByName(name);
+    const departmentId = departmentIdForCode(code);
+    if (!row || !departmentId) continue;
+    setDept.run(departmentId, now, row.id);
+  }
+  const loose = db
+    .prepare(
+      `SELECT id FROM jabatan
+       WHERE department_id IS NULL OR trim(department_id) = ''`,
+    )
+    .all() as Array<{ id: string }>;
+  const staffDepts = db.prepare(
+    `SELECT DISTINCT department_id FROM staff
+     WHERE jabatan_id = ?
+       AND department_id IS NOT NULL
+       AND trim(department_id) != ''`,
+  );
+  for (const row of loose) {
+    const depts = staffDepts.all(row.id) as Array<{ department_id: string }>;
+    if (depts.length !== 1) continue;
+    setDept.run(depts[0].department_id, now, row.id);
+  }
+}
+
 function normalizeTitle(position: string): string {
   return position
     .replace(/\s*\((staff|manager|supervisor|naker)\)\s*/gi, " ")
@@ -152,8 +239,9 @@ export function ensureKpiJabatanCatalog() {
   const now = new Date().toISOString();
   const insert = db.prepare(
     `INSERT INTO jabatan (
-      id, name, kelompok, score_method, indicator_count, origin, sort_order, active, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, 'kpi', ?, 1, ?, ?)`,
+      id, name, kelompok, score_method, indicator_count, origin, sort_order, active,
+      department_id, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, 'kpi', ?, 1, ?, ?, ?)`,
   );
   for (const item of KPI_JABATAN) {
     if (findJabatanByName(item.name)) continue;
@@ -164,6 +252,7 @@ export function ensureKpiJabatanCatalog() {
       item.scoreMethod,
       item.indicatorCount,
       item.sortOrder,
+      departmentIdForCode(DEPARTMENT_CODE_BY_JABATAN[item.name] || ""),
       now,
       now,
     );
@@ -208,14 +297,16 @@ export function resolveJabatanId(
   getDb()
     .prepare(
       `INSERT INTO jabatan (
-        id, name, kelompok, score_method, indicator_count, origin, sort_order, active, created_at, updated_at
-      ) VALUES (?, ?, ?, '', 0, 'aplikasi', ?, 1, ?, ?)`,
+        id, name, kelompok, score_method, indicator_count, origin, sort_order, active,
+        department_id, created_at, updated_at
+      ) VALUES (?, ?, ?, '', 0, 'aplikasi', ?, 1, ?, ?, ?)`,
     )
     .run(
       id,
       name,
       KELOMPOK_BY_DEPT[departmentCode] || "Lainnya",
       maxSort.n + 10,
+      departmentIdForCode(departmentCode),
       now,
       now,
     );
@@ -250,6 +341,7 @@ export function seedJabatan() {
     }
   });
   tx();
+  assignJabatanDepartments();
   seedJabatanMenuIfMissing();
 }
 
@@ -306,6 +398,8 @@ function mapJabatan(row: JabatanRow, withStaff: boolean): JabatanRecord {
   return {
     id: row.id,
     name: row.name,
+    departmentId: row.department_id || null,
+    departmentName: departmentNameById(row.department_id),
     kelompok: row.kelompok,
     scoreMethod: asScoreMethod(row.score_method),
     indicatorCount: Number(row.indicator_count) || 0,
@@ -338,7 +432,7 @@ export function listJabatan(activeOnly = false, withStaff = true): JabatanRecord
 export function upsertJabatan(input: {
   id?: string;
   name: string;
-  kelompok?: string;
+  departmentId?: string;
   scoreMethod?: string;
   indicatorCount?: number;
   active?: boolean;
@@ -346,12 +440,18 @@ export function upsertJabatan(input: {
   ensureKpiJabatanCatalog();
   const name = input.name.trim();
   if (!name) return { error: "Nama jabatan wajib" };
+  const departmentId = (input.departmentId || "").trim();
+  const department = departmentId
+    ? (getDb()
+        .prepare("SELECT id, name FROM departments WHERE id = ?")
+        .get(departmentId) as { id: string; name: string } | undefined)
+    : undefined;
+  if (!department) return { error: "Departemen wajib" };
   const duplicate = findJabatanByName(name);
   if (duplicate && duplicate.id !== input.id) {
     return { error: "Nama jabatan sudah ada" };
   }
   const now = new Date().toISOString();
-  const kelompok = (input.kelompok || "Lainnya").trim() || "Lainnya";
   const scoreMethod = asScoreMethod(input.scoreMethod || "");
   const indicatorCount = Math.max(0, Number(input.indicatorCount) || 0);
   const active = input.active ?? true;
@@ -364,12 +464,14 @@ export function upsertJabatan(input: {
     getDb()
       .prepare(
         `UPDATE jabatan SET
-          name = ?, kelompok = ?, score_method = ?, indicator_count = ?, active = ?, updated_at = ?
+          name = ?, department_id = ?, kelompok = ?, score_method = ?,
+          indicator_count = ?, active = ?, updated_at = ?
          WHERE id = ?`,
       )
       .run(
         name,
-        kelompok,
+        department.id,
+        department.name,
         scoreMethod,
         indicatorCount,
         boolToInt(active),
@@ -389,17 +491,19 @@ export function upsertJabatan(input: {
   getDb()
     .prepare(
       `INSERT INTO jabatan (
-        id, name, kelompok, score_method, indicator_count, origin, sort_order, active, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, 'aplikasi', ?, ?, ?, ?)`,
+        id, name, kelompok, score_method, indicator_count, origin, sort_order, active,
+        department_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 'aplikasi', ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
       name,
-      kelompok,
+      department.name,
       scoreMethod,
       indicatorCount,
       maxSort.n + 10,
       boolToInt(active),
+      department.id,
       now,
       now,
     );

@@ -151,6 +151,25 @@ export type MajuRollupGroup = MajuGroup & {
  * Skor akhir = rata-rata berbobot grup yang sudah punya fungsi.
  * Grup kosong tidak ikut, supaya departemen yang belum punya fungsi di grup itu tidak otomatis jatuh ke nol.
  */
+/** Bobot grup mengikuti jumlah bobot indikator yang terisi, seperti lembar berbobot. */
+export function majuGroupsWeightedByItems(
+  items: MajuWeightedScore[],
+  source?: MajuGroup[],
+): MajuGroup[] {
+  return resolveMajuGroups(source).map((group) => {
+    const weight = items
+      .filter(
+        (item) =>
+          item.groupCode === group.code &&
+          item.score != null &&
+          item.weightPercent > 0,
+      )
+      .reduce((sum, item) => sum + item.weightPercent, 0);
+    if (weight <= 0) return group;
+    return { ...group, weightPercent: weight };
+  });
+}
+
 export function rollupMaju(
   items: MajuWeightedScore[],
   source?: MajuGroup[],

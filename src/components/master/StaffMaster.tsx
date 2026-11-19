@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Department, JabatanRecord, StaffMember } from "@/lib/types";
 
@@ -25,10 +26,8 @@ export function StaffMaster({
   const [items, setItems] = useState(initial);
   const [departments, setDepartments] = useState(initialDepartments);
   const [jabatan, setJabatan] = useState(initialJabatan);
-  const [editing, setEditing] = useState<StaffMember | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
   const [query, setQuery] = useState("");
   const [deptFilter, setDeptFilter] = useState("all");
@@ -168,53 +167,8 @@ export function StaffMaster({
       return;
     }
     setItems((prev) => prev.filter((x) => x.id !== s.id));
-    if (editing?.id === s.id) setEditing(null);
     setMessage(`Staf ${s.employeeCode} berhasil dihapus / dinonaktifkan`);
     router.refresh();
-  }
-
-  async function save(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setSaving(true);
-    setError(null);
-    setMessage(null);
-    try {
-      const fd = new FormData(e.currentTarget);
-      const res = await fetch("/api/master/staff", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: editing?.id,
-          employeeCode: fd.get("employeeCode"),
-          name: fd.get("name"),
-          email: fd.get("email"),
-          phone: fd.get("phone"),
-          departmentId: fd.get("departmentId"),
-          jabatanId: fd.get("jabatanId"),
-          position: fd.get("position"),
-          active: fd.get("status") !== "resign",
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(data.error || "Gagal menyimpan");
-        return;
-      }
-      setItems((prev) => {
-        const exists = prev.some((s) => s.id === data.staff.id);
-        if (exists) {
-          return prev.map((s) => (s.id === data.staff.id ? data.staff : s));
-        }
-        return [...prev, data.staff];
-      });
-      setEditing(null);
-      (e.target as HTMLFormElement).reset();
-      router.refresh();
-    } catch {
-      setError("Koneksi gagal / server error. Coba lagi.");
-    } finally {
-      setSaving(false);
-    }
   }
 
   return (
@@ -241,135 +195,13 @@ export function StaffMaster({
       {message ? (
         <p className="rounded-xl bg-ok-soft px-4 py-3 text-sm text-ok">{message}</p>
       ) : null}
+      {error ? (
+        <p className="rounded-xl bg-danger-soft px-4 py-3 text-sm text-danger">{error}</p>
+      ) : null}
 
-      <div className="grid gap-5 lg:grid-cols-[1fr_1.2fr]">
-        <form onSubmit={save} className="panel space-y-3 p-5">
-          <h2 className="font-semibold">
-            {editing ? "Edit staf" : "Tambah staf / manager"}
-          </h2>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block text-sm">
-              <span className="text-xs text-ink-muted">Kode karyawan</span>
-              <input
-                name="employeeCode"
-                required
-                defaultValue={editing?.employeeCode}
-                key={`code-${editing?.id ?? "new"}`}
-                className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-xs text-ink-muted">Jabatan</span>
-              <select
-                name="jabatanId"
-                required
-                defaultValue={editing?.jabatanId ?? ""}
-                key={`jab-${editing?.id ?? "new"}`}
-                className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
-              >
-                <option value="" disabled>
-                  Pilih jabatan
-                </option>
-                {jabatan.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <label className="block text-sm">
-            <span className="text-xs text-ink-muted">Judul di absensi</span>
-            <input
-              name="position"
-              defaultValue={editing?.position ?? ""}
-              key={`pos-${editing?.id ?? "new"}`}
-              className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="text-xs text-ink-muted">Nama</span>
-            <input
-              name="name"
-              required
-              defaultValue={editing?.name}
-              key={`name-${editing?.id ?? "new"}`}
-              className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="text-xs text-ink-muted">Departemen</span>
-            <select
-              name="departmentId"
-              required
-              defaultValue={editing?.departmentId ?? departments[0]?.id}
-              key={`dep-${editing?.id ?? "new"}`}
-              className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
-            >
-              {departments.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.code} — {d.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block text-sm">
-              <span className="text-xs text-ink-muted">Email</span>
-              <input
-                name="email"
-                type="email"
-                defaultValue={editing?.email}
-                key={`email-${editing?.id ?? "new"}`}
-                className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-xs text-ink-muted">Telepon</span>
-              <input
-                name="phone"
-                defaultValue={editing?.phone}
-                key={`phone-${editing?.id ?? "new"}`}
-                className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
-              />
-            </label>
-          </div>
-          <label className="block text-sm">
-            <span className="text-xs text-ink-muted">Status kepegawaian</span>
-            <select
-              name="status"
-              defaultValue={editing && !editing.active ? "resign" : "active"}
-              key={`status-${editing?.id ?? "new"}`}
-              className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
-            >
-              <option value="active">Aktif (masih bekerja)</option>
-              <option value="resign">Resign (tidak bekerja)</option>
-            </select>
-          </label>
-          {error ? <p className="text-sm text-danger">{error}</p> : null}
-          <div className="flex gap-2">
-            <button
-              type="submit"
-              disabled={saving}
-              className="rounded-xl bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-            >
-              {saving ? "Menyimpan..." : "Simpan"}
-            </button>
-            {editing ? (
-              <button
-                type="button"
-                onClick={() => setEditing(null)}
-                className="rounded-xl border border-line px-4 py-2 text-sm"
-              >
-                Batal
-              </button>
-            ) : null}
-          </div>
-        </form>
-
-        <div className="panel overflow-hidden">
+      <div className="panel overflow-hidden">
           <div className="space-y-3 border-b border-line px-4 py-3">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2 className="font-semibold">
                   Master staf ({filtered.length}
@@ -380,6 +212,12 @@ export function StaffMaster({
                   Cari & urutkan daftar karyawan
                 </p>
               </div>
+              <Link
+                href="/master/staff/new"
+                className="rounded-xl bg-brand px-4 py-2 text-sm font-medium text-white"
+              >
+                Tambah staf
+              </Link>
             </div>
 
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -482,13 +320,12 @@ export function StaffMaster({
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setEditing(s)}
-                      className="flex-1 rounded-lg border border-line px-3 py-2 text-xs sm:flex-none sm:px-2 sm:py-1"
+                    <Link
+                      href={`/master/staff/${s.id}/edit`}
+                      className="flex-1 rounded-lg border border-line px-3 py-2 text-center text-xs sm:flex-none sm:px-2 sm:py-1"
                     >
                       Edit
-                    </button>
+                    </Link>
                     <button
                       type="button"
                       onClick={() => removeStaff(s)}
@@ -572,7 +409,6 @@ export function StaffMaster({
               </div>
             ) : null}
           </div>
-        </div>
       </div>
     </div>
   );

@@ -94,7 +94,10 @@ export const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 
 export function getCompanyLogoUrl(): string | null {
   const url = getMeta(COMPANY_LOGO_META_KEY);
-  return url && url.trim() ? url : null;
+  if (!url || !url.trim()) return null;
+  const abs = absolutePathFromLogoUrl(url);
+  if (abs && !fs.existsSync(abs)) return null;
+  return url;
 }
 
 function absolutePathFromLogoUrl(url: string): string | null {

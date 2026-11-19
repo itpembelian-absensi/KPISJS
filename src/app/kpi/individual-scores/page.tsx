@@ -5,7 +5,7 @@ import {
 import { listAttendanceSummaries } from "@/lib/attendance-ops";
 import { disciplinePeriodFromDate } from "@/lib/discipline-period";
 import { listKpiActivities, listKpiAssessments } from "@/lib/kpi-ops";
-import { listKpiIndicatorActuals, syncActivityScoreActuals, syncTicketScoreActuals } from "@/lib/kpi-indicator-actuals-ops";
+import { listKpiIndicatorActuals, syncAutoScoreActualsIfStale } from "@/lib/kpi-indicator-actuals-ops";
 import {
   ensureDepartmentScoreRules,
   listKpiScoreIndicators,
@@ -35,8 +35,7 @@ export default async function IndividualScoresPage() {
   if (deptScope !== "all" && deptScope.length === 0) redirect("/");
 
   ensureDepartmentScoreRules();
-  syncTicketScoreActuals();
-  syncActivityScoreActuals();
+  syncAutoScoreActualsIfStale();
 
   const allDepartments = listDepartments(true);
   const departments =

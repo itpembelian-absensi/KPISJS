@@ -102,6 +102,7 @@ function NavLink({
   return (
     <Link
       href={item.href}
+      prefetch={false}
       onClick={onNavigate}
       className={`rounded-xl transition ${
         nested ? "px-3 py-2" : "px-3 py-2.5"

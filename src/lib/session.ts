@@ -1,5 +1,6 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { cache } from "react";
 import {
   canAccessMenu,
   canAccessSop,
@@ -10,11 +11,11 @@ import {
 import { getUserBySessionToken } from "./store";
 import type { SessionUser, UserRole } from "./types";
 
-export async function getSessionUser(): Promise<SessionUser | null> {
+export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
   const jar = await cookies();
   const token = jar.get(SESSION_COOKIE)?.value;
   return getUserBySessionToken(token);
-}
+});
 
 export async function requireUser(
   allowed?: UserRole[],

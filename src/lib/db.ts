@@ -13,6 +13,9 @@ declare global {
   var __waScheduleBoot: boolean | undefined;
 }
 
+/** Reset saat hot reload, jadi migrasi baru tetap jalan sekali. */
+let schemaConnection: Database.Database | null = null;
+
 function bootWaScheduleRunner() {
   if (global.__waScheduleBoot) return;
   global.__waScheduleBoot = true;
@@ -29,6 +32,7 @@ function bootWaScheduleRunner() {
 function createSchema(db: Database.Database) {
   db.exec(`
     PRAGMA journal_mode = WAL;
+    PRAGMA busy_timeout = 3000;
     PRAGMA foreign_keys = ON;
 
     CREATE TABLE IF NOT EXISTS meta (
@@ -1030,6 +1034,17 @@ function createSchema(db: Database.Database) {
       ON jabatan(kelompok, sort_order, name);
   `);
 
+  const jabatanCols = db
+    .prepare("PRAGMA table_info(jabatan)")
+    .all() as Array<{ name: string }>;
+  const jabatanColNames = new Set(jabatanCols.map((col) => col.name));
+  if (!jabatanColNames.has("department_id")) {
+    db.exec("ALTER TABLE jabatan ADD COLUMN department_id TEXT");
+  }
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_jabatan_department ON jabatan(department_id)",
+  );
+
   const staffCols = db
     .prepare("PRAGMA table_info(staff)")
     .all() as Array<{ name: string }>;
@@ -1145,9 +1160,10 @@ export function getDb(): Database.Database {
     global.__sjsSqlite = new Database(DB_PATH);
   }
 
-  // Selalu jalankan schema agar tabel baru (mis. kpi_functions) terbuat
-  // meski koneksi DB sudah di-cache hot reload.
-  createSchema(global.__sjsSqlite);
+  if (schemaConnection !== global.__sjsSqlite) {
+    createSchema(global.__sjsSqlite);
+    schemaConnection = global.__sjsSqlite;
+  }
   bootWaScheduleRunner();
   return global.__sjsSqlite;
 }

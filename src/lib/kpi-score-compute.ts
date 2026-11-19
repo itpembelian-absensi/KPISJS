@@ -64,9 +64,16 @@ export function computeIndicatorScore(
   }
 
   if (metricType === "ratio") {
+    if (config.rule === "kejadian") {
+      const count = Math.max(0, Math.round(actual));
+      if (count <= 0) return 100;
+      if (count === 1) return 70;
+      if (count === 2) return 40;
+      return 0;
+    }
     const target = resolveTarget(config, targetOverride);
-    const lower = config.direction === "lower";
-    if (lower && target === 0) {
+    const lower = config.rule === "batas" || config.direction === "lower";
+    if (config.direction === "lower" && config.rule !== "batas" && target === 0) {
       return actual <= 0 ? 100 : 0;
     }
     if (target == null || target <= 0) return 0;
@@ -92,6 +99,50 @@ export function indicatorAppliesToJabatan(
   return !jabatanIdOnIndicator || jabatanIdOnIndicator === staffJabatanId;
 }
 
+/** Jabatan punya lembar indikator sendiri di departemen ini. */
+export function jabatanOwnsScoreSheet(
+  indicators: Array<{ jabatanId: string | null; active?: boolean }>,
+  staffJabatanId: string | null | undefined,
+): boolean {
+  if (!staffJabatanId) return false;
+  return indicators.some(
+    (indicator) =>
+      indicator.active !== false && indicator.jabatanId === staffJabatanId,
+  );
+}
+
+/** Indikator yang masuk hitungan satu staf. Lembar khusus menggantikan indikator umum departemen. */
+export function indicatorsForStaffScore<
+  T extends { jabatanId: string | null; active?: boolean },
+>(indicators: T[], staffJabatanId: string | null | undefined): T[] {
+  const ownsSheet = jabatanOwnsScoreSheet(indicators, staffJabatanId);
+  return indicators.filter((indicator) => {
+    if (indicator.active === false) return false;
+    if (ownsSheet) return indicator.jabatanId === staffJabatanId;
+    return indicatorAppliesToJabatan(indicator.jabatanId, staffJabatanId);
+  });
+}
+
+export function indicatorsForStaffFunction<
+  T extends {
+    kpiFunctionId: string;
+    jabatanId: string | null;
+    active?: boolean;
+  },
+>(
+  indicators: T[],
+  functionId: string,
+  staffJabatanId: string | null | undefined,
+  ownsSheet: boolean,
+): T[] {
+  return indicators.filter((indicator) => {
+    if (indicator.kpiFunctionId !== functionId) return false;
+    if (indicator.active === false) return false;
+    if (ownsSheet) return indicator.jabatanId === staffJabatanId;
+    return indicatorAppliesToJabatan(indicator.jabatanId, staffJabatanId);
+  });
+}
+
 export function indicatorScoreCounts(
   indicator: KpiScoreIndicator,
   actualValue: number | null | undefined,
@@ -99,6 +150,7 @@ export function indicatorScoreCounts(
 ): boolean {
   if (actualValue == null || !Number.isFinite(actualValue)) return false;
   if (indicator.metricType !== "ratio") return true;
+  if (indicator.config.rule === "kejadian") return true;
   const target = resolveTarget(indicator.config, targetOverride);
   if (indicator.config.direction === "lower" && target === 0) return true;
   return target != null && target > 0;

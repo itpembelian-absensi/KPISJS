@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
   const result = upsertJabatan({
     id: body.id ? String(body.id) : undefined,
     name,
-    kelompok: String(body.kelompok || ""),
+    departmentId: String(body.departmentId || ""),
     scoreMethod: String(body.scoreMethod || ""),
     indicatorCount: Number(body.indicatorCount) || 0,
     active: body.active ?? true,

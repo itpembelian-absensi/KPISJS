@@ -1,12 +1,18 @@
 import { JabatanMaster } from "@/components/master/JabatanMaster";
 import { listJabatan } from "@/lib/jabatan-ops";
 import { requireMasterAccess } from "@/lib/session";
+import { listDepartments } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
 export default async function JabatanPage() {
   await requireMasterAccess();
   const jabatan = listJabatan();
+  const departments = listDepartments(true).map((dept) => ({
+    id: dept.id,
+    code: dept.code,
+    name: dept.name,
+  }));
 
   return (
     <div className="space-y-5">
@@ -21,11 +27,11 @@ export default async function JabatanPage() {
           Master Jabatan
         </h1>
         <p className="mt-2 max-w-3xl text-sm text-ink-muted">
-          Jabatan paket KPI MAJU dan jabatan yang sudah dipakai di data staf.
-          Setiap staf terhubung ke satu jabatan.
+          Setiap jabatan terhubung ke satu departemen. Skor jabatan itu
+          dihitung di halaman KPI departemen tersebut.
         </p>
       </div>
-      <JabatanMaster initial={jabatan} />
+      <JabatanMaster initial={jabatan} departments={departments} />
     </div>
   );
 }

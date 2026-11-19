@@ -5,13 +5,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { JabatanRecord } from "@/lib/types";
 
-const KELOMPOK = [
-  "Marketing & Sales",
-  "Accounting & Finance",
-  "Warehouse & Security",
-  "HRD, GA, Purchasing, IT",
-  "Lainnya",
-];
+type DepartmentOption = {
+  id: string;
+  code: string;
+  name: string;
+};
 
 function methodLabel(method: JabatanRecord["scoreMethod"]) {
   if (method === "bobot") return "Bobot per indikator";
@@ -25,14 +23,20 @@ function originLabel(origin: JabatanRecord["origin"]) {
   return "Dari data staf";
 }
 
-export function JabatanMaster({ initial }: { initial: JabatanRecord[] }) {
+export function JabatanMaster({
+  initial,
+  departments,
+}: {
+  initial: JabatanRecord[];
+  departments: DepartmentOption[];
+}) {
   const router = useRouter();
   const [items, setItems] = useState(initial);
   const [form, setForm] = useState<JabatanRecord | "new" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [query, setQuery] = useState("");
-  const [kelompok, setKelompok] = useState("all");
+  const [departmentId, setDepartmentId] = useState("all");
   const editing = form && form !== "new" ? form : null;
 
   useEffect(() => {
@@ -47,25 +51,55 @@ export function JabatanMaster({ initial }: { initial: JabatanRecord[] }) {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return items.filter((item) => {
-      if (kelompok !== "all" && item.kelompok !== kelompok) return false;
+      if (departmentId === "none" && item.departmentId) return false;
+      if (
+        departmentId !== "all" &&
+        departmentId !== "none" &&
+        item.departmentId !== departmentId
+      ) {
+        return false;
+      }
       if (!q) return true;
       const staff = item.staff.map((member) => member.name).join(" ");
-      return `${item.name} ${item.kelompok} ${staff}`.toLowerCase().includes(q);
+      return `${item.name} ${item.departmentName} ${staff}`
+        .toLowerCase()
+        .includes(q);
     });
-  }, [items, query, kelompok]);
+  }, [items, query, departmentId]);
 
   const groups = useMemo(() => {
-    const order = [...KELOMPOK];
+    const order = [...departments].sort((a, b) =>
+      a.name.localeCompare(b.name, "id"),
+    );
+    const known = new Set(order.map((dept) => dept.id));
+    const buckets: Array<{ id: string; name: string; items: JabatanRecord[] }> =
+      order.map((dept) => ({
+        id: dept.id,
+        name: `${dept.name} (${dept.code})`,
+        items: filtered.filter((item) => item.departmentId === dept.id),
+      }));
+    const extraNames = new Map<string, string>();
     for (const item of filtered) {
-      if (!order.includes(item.kelompok)) order.push(item.kelompok);
+      if (!item.departmentId || known.has(item.departmentId)) continue;
+      extraNames.set(item.departmentId, item.departmentName || "Departemen");
     }
-    return order
-      .map((name) => ({
+    for (const [id, name] of extraNames) {
+      buckets.push({
+        id,
         name,
-        items: filtered.filter((item) => item.kelompok === name),
-      }))
-      .filter((group) => group.items.length > 0);
-  }, [filtered]);
+        items: filtered.filter((item) => item.departmentId === id),
+      });
+    }
+    const unlinked = filtered.filter((item) => !item.departmentId);
+    if (unlinked.length > 0) {
+      buckets.push({
+        id: "none",
+        name: "Belum terhubung",
+        items: unlinked,
+      });
+    }
+    return buckets.filter((group) => group.items.length > 0);
+  }, [filtered, departments]);
 
   function openNew() {
     setError(null);
@@ -89,7 +123,7 @@ export function JabatanMaster({ initial }: { initial: JabatanRecord[] }) {
         body: JSON.stringify({
           id: editing?.id,
           name: fd.get("name"),
-          kelompok: fd.get("kelompok"),
+          departmentId: fd.get("departmentId"),
           scoreMethod: fd.get("scoreMethod"),
           indicatorCount: fd.get("indicatorCount"),
           active: fd.get("active") === "on",
@@ -169,16 +203,17 @@ export function JabatanMaster({ initial }: { initial: JabatanRecord[] }) {
             className="w-full rounded-xl border border-line bg-bg-elevated px-3 py-2 text-sm"
           />
           <select
-            value={kelompok}
-            onChange={(e) => setKelompok(e.target.value)}
+            value={departmentId}
+            onChange={(e) => setDepartmentId(e.target.value)}
             className="rounded-xl border border-line bg-bg-elevated px-3 py-2 text-sm"
           >
-            <option value="all">Semua kelompok</option>
-            {KELOMPOK.map((name) => (
-              <option key={name} value={name}>
-                {name}
+            <option value="all">Semua departemen</option>
+            {departments.map((dept) => (
+              <option key={dept.id} value={dept.id}>
+                {dept.name}
               </option>
             ))}
+            <option value="none">Belum terhubung</option>
           </select>
           <button
             type="button"
@@ -192,7 +227,7 @@ export function JabatanMaster({ initial }: { initial: JabatanRecord[] }) {
         {error && !form ? <p className="text-sm text-danger">{error}</p> : null}
 
         {groups.map((group) => (
-          <section key={group.name} className="panel overflow-hidden">
+          <section key={group.id} className="panel overflow-hidden">
             <h2 className="border-b border-line px-4 py-3 text-sm font-semibold">
               {group.name}
             </h2>
@@ -294,16 +329,17 @@ export function JabatanMaster({ initial }: { initial: JabatanRecord[] }) {
               />
             </label>
             <label className="block text-sm">
-              <span className="text-xs text-ink-muted">Kelompok</span>
+              <span className="text-xs text-ink-muted">Departemen</span>
               <select
-                name="kelompok"
-                defaultValue={editing?.kelompok || KELOMPOK[0]}
-                key={`kel-${editing?.id ?? "new"}`}
+                name="departmentId"
+                required
+                defaultValue={editing?.departmentId || departments[0]?.id || ""}
+                key={`dept-${editing?.id ?? "new"}`}
                 className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
               >
-                {KELOMPOK.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
+                {departments.map((dept) => (
+                  <option key={dept.id} value={dept.id}>
+                    {dept.name} ({dept.code})
                   </option>
                 ))}
               </select>

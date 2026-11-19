@@ -131,8 +131,10 @@ export type KpiScoreIndicatorConfig = {
   dataSource?: KpiScoreDataSource;
   /** Komponen fungsi Kedisiplinan (empat bagian sama rata) */
   disciplinePart?: "attendance" | "lateness" | "daily_report" | "violation";
-  /** ratio: higher = makin besar makin baik. lower = kejadian, makin kecil makin baik. */
+  /** ratio: higher = makin besar makin baik. lower = batas maksimum. */
   direction?: "higher" | "lower";
+  /** kejadian = 0/1/2/3+. batas = 100 bila di bawah target, selain itu target ÷ realisasi. */
+  rule?: "ratio" | "kejadian" | "batas";
   /** Kode baris di lembar KPI, mis. M1 */
   code?: string;
   /** Satuan tampilan: %, skor, kejadian */
@@ -461,6 +463,9 @@ export interface WorkOrder {
 export interface JabatanRecord {
   id: string;
   name: string;
+  /** Departemen tempat skor jabatan ini dihitung dan ditampilkan. */
+  departmentId: string | null;
+  departmentName: string;
   kelompok: string;
   /** "bobot" = bobot per indikator. "rata-rata" = rata-rata skor dalam fungsi. Kosong = belum diatur. */
   scoreMethod: "" | "bobot" | "rata-rata";

@@ -32,14 +32,16 @@ import {
 import {
   computeFunctionScoreFromIndicators,
   computeIndicatorScore,
-  indicatorAppliesToJabatan,
+  indicatorsForStaffFunction,
   indicatorScoreCounts,
+  jabatanOwnsScoreSheet,
 } from "@/lib/kpi-score-compute";
 import { formatScore, kpiGrade } from "@/lib/kpi-grade";
 import { KpiAmbangPanel } from "@/components/KpiAmbangPanel";
 import {
   groupKpiFunctions,
   majuContributionPoints,
+  majuGroupsWeightedByItems,
   rollupMaju,
   type MajuGroup,
   type MajuWeightedScore,
@@ -942,18 +944,44 @@ export function DepartmentKpiWorkspace({
     };
 
     const rows = functions.map((fn) => {
-      const fnIndicators = deptIndicators.filter((i) => {
-        if (i.kpiFunctionId !== fn.id) return false;
-        if (!staffFilter) return true;
-        return indicatorAppliesToJabatan(
-          i.jabatanId,
-          staffById.get(staffFilter)?.jabatanId,
-        );
-      });
+      const selectedJabatanId = staffFilter
+        ? staffById.get(staffFilter)?.jabatanId
+        : null;
+      const ownsSheet = staffFilter
+        ? jabatanOwnsScoreSheet(deptIndicators, selectedJabatanId)
+        : false;
+      const fnIndicators = staffFilter
+        ? indicatorsForStaffFunction(
+            deptIndicators,
+            fn.id,
+            selectedJabatanId,
+            ownsSheet,
+          )
+        : deptIndicators.filter((i) => i.kpiFunctionId === fn.id);
+      const functionHasIndicators = deptIndicators.some(
+        (i) => i.kpiFunctionId === fn.id,
+      );
+      if (staffFilter && functionHasIndicators && fnIndicators.length === 0) {
+        return {
+          id: fn.id,
+          name: fn.name,
+          focus: fn.focus,
+          weight: fn.weightPercent,
+          source: "indikator" as ScoreSource,
+          total: 0,
+          done: 0,
+          inProgress: 0,
+          planned: 0,
+          percent: 0,
+          score: null as number | null,
+          detail: "bukan indikator jabatan ini",
+        };
+      }
 
       if (hasScoreRules && fnIndicators.length > 0 && periodForRules) {
         const scores: number[] = [];
         let filledTotal = 0;
+        let rollupWeight = fn.weightPercent;
         let ticketCountUsed = 0;
         let activityCountUsed = 0;
         const usesTicket = fnIndicators.some((i) => isTicketSourcedIndicator(i));
@@ -980,13 +1008,14 @@ export function DepartmentKpiWorkspace({
             (a) => a.assigneeStaffId === sid,
           );
           activityCountUsed = Math.max(activityCountUsed, activityPool.length);
+          const sidJabatanId = staffById.get(sid)?.jabatanId;
           const result = computeFunctionScoreFromIndicators(
             fn.id,
-            fnIndicators.filter((ind) =>
-              indicatorAppliesToJabatan(
-                ind.jabatanId,
-                staffById.get(sid)?.jabatanId,
-              ),
+            indicatorsForStaffFunction(
+              deptIndicators,
+              fn.id,
+              sidJabatanId,
+              jabatanOwnsScoreSheet(deptIndicators, sidJabatanId),
             ),
             (ind) =>
               resolveActualForIndicator(
@@ -1001,6 +1030,9 @@ export function DepartmentKpiWorkspace({
           if (result.filledCount > 0) {
             scores.push(result.score);
             filledTotal += result.filledCount;
+            if (staffFilter && methodFor(sid) === "bobot") {
+              rollupWeight = result.weightUsed;
+            }
           }
         }
 
@@ -1049,6 +1081,7 @@ export function DepartmentKpiWorkspace({
             name: fn.name,
             focus: fn.focus,
             weight: fn.weightPercent,
+            rollupWeight,
             source: (usesTicket && ticketCountUsed > 0
               ? staffFilter && ticketScopeForStaff(staffFilter) === "team"
                 ? "tiket_tim"
@@ -1161,20 +1194,33 @@ export function DepartmentKpiWorkspace({
       };
     });
 
-    const majuItems: MajuWeightedScore[] = rows.map((r) => {
+    const scoredRows = rows.filter(
+      (row) => row.detail !== "bukan indikator jabatan ini",
+    );
+    const majuItems: MajuWeightedScore[] = scoredRows.map((r) => {
       const fn = functions.find((f) => f.id === r.id);
+      const rollupWeight =
+        "rollupWeight" in r && typeof r.rollupWeight === "number"
+          ? r.rollupWeight
+          : r.weight;
       return {
         groupCode: fn?.groupCode ?? "U",
-        weightPercent: r.weight,
+        weightPercent: rollupWeight,
         score: r.score,
       };
     });
-    const maju = rollupMaju(majuItems, majuGroups);
-    const rowsWithContribution = rows.map((r, index) => {
+    const personBobot = Boolean(
+      staffFilter && methodFor(staffFilter) === "bobot",
+    );
+    const rollupGroups = personBobot
+      ? majuGroupsWeightedByItems(majuItems, majuGroups)
+      : majuGroups;
+    const maju = rollupMaju(majuItems, rollupGroups);
+    const rowsWithContribution = scoredRows.map((r, index) => {
       const contribution = majuContributionPoints(
         majuItems[index],
         majuItems,
-        majuGroups,
+        rollupGroups,
       );
       const fn = functions.find((f) => f.id === r.id);
       const formula = fn
@@ -3003,13 +3049,14 @@ export function DepartmentKpiWorkspace({
                       const scoreStaff = staff.find(
                         (member) => member.id === scoreStaffId,
                       );
-                      const inds = deptIndicators.filter(
-                        (i) =>
-                          i.kpiFunctionId === fn.id &&
-                          indicatorAppliesToJabatan(
-                            i.jabatanId,
-                            scoreStaff?.jabatanId,
-                          ),
+                      const inds = indicatorsForStaffFunction(
+                        deptIndicators,
+                        fn.id,
+                        scoreStaff?.jabatanId,
+                        jabatanOwnsScoreSheet(
+                          deptIndicators,
+                          scoreStaff?.jabatanId,
+                        ),
                       );
                       if (inds.length === 0) return null;
                       return (
@@ -3060,6 +3107,9 @@ export function DepartmentKpiWorkspace({
                                     >
                                       <td className="px-3 py-2">
                                         <p className="font-medium">
+                                          {ind.config.code
+                                            ? `${ind.config.code} · `
+                                            : ""}
                                           {ind.name}
                                         </p>
                                         <p className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-ink-muted">

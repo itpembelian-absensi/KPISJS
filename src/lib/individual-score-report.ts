@@ -7,9 +7,15 @@ import {
 import { attendanceIndicatorActual } from "./discipline-score";
 import {
   computeFunctionScoreFromIndicators,
-  indicatorAppliesToJabatan,
+  indicatorsForStaffFunction,
+  jabatanOwnsScoreSheet,
 } from "./kpi-score-compute";
-import { rollupMaju, type MajuCode, type MajuGroup } from "./kpi-maju";
+import {
+  majuGroupsWeightedByItems,
+  rollupMaju,
+  type MajuCode,
+  type MajuGroup,
+} from "./kpi-maju";
 import {
   assigneeIdsForTicketScore,
   computeTicketScoreMetrics,
@@ -35,6 +41,8 @@ export type IndividualFunctionScore = {
   functionName: string;
   groupCode: MajuCode;
   weightPercent: number;
+  /** Bobot yang dipakai di nilai akhir. Untuk metode bobot ini jumlah bobot indikator terisi. */
+  scoreWeight?: number;
   score: number | null;
   source: "indikator" | "manual" | "absensi" | "kegiatan" | null;
 };
@@ -125,13 +133,31 @@ export function computeIndividualScore(input: {
     }),
   );
 
+  const deptIndicators = indicators.filter(
+    (i) => i.departmentId === staff.departmentId && i.active,
+  );
+  const ownsSheet = jabatanOwnsScoreSheet(deptIndicators, staff.jabatanId);
+
   const fnScores: IndividualFunctionScore[] = deptFns.map((fn) => {
-    const fnIndicators = indicators.filter(
-      (i) =>
-        i.kpiFunctionId === fn.id &&
-        i.active &&
-        indicatorAppliesToJabatan(i.jabatanId, staff.jabatanId),
+    const fnIndicators = indicatorsForStaffFunction(
+      deptIndicators,
+      fn.id,
+      staff.jabatanId,
+      ownsSheet,
     );
+    const functionHasIndicators = deptIndicators.some(
+      (i) => i.kpiFunctionId === fn.id,
+    );
+    if (functionHasIndicators && fnIndicators.length === 0) {
+      return {
+        functionId: fn.id,
+        functionName: fn.name,
+        groupCode: fn.groupCode,
+        weightPercent: fn.weightPercent,
+        score: null,
+        source: null,
+      };
+    }
 
     if (fnIndicators.length > 0) {
       const result = computeFunctionScoreFromIndicators(
@@ -192,6 +218,9 @@ export function computeIndividualScore(input: {
           functionName: fn.name,
           groupCode: fn.groupCode,
           weightPercent: fn.weightPercent,
+          ...(input.scoreMethod === "bobot"
+            ? { scoreWeight: result.weightUsed }
+            : {}),
           score: result.score,
           source: "indikator",
         };
@@ -276,13 +305,29 @@ export function computeIndividualScore(input: {
     };
   });
 
+  const visibleScores = fnScores.filter((row) => {
+    const applied = indicatorsForStaffFunction(
+      deptIndicators,
+      row.functionId,
+      staff.jabatanId,
+      ownsSheet,
+    );
+    const hasAny = deptIndicators.some(
+      (indicator) => indicator.kpiFunctionId === row.functionId,
+    );
+    return !(hasAny && applied.length === 0);
+  });
+
+  const majuItems = visibleScores.map((row) => ({
+    groupCode: row.groupCode,
+    weightPercent: row.scoreWeight ?? row.weightPercent,
+    score: row.score,
+  }));
   const maju = rollupMaju(
-    fnScores.map((row) => ({
-      groupCode: row.groupCode,
-      weightPercent: row.weightPercent,
-      score: row.score,
-    })),
-    input.majuGroups,
+    majuItems,
+    input.scoreMethod === "bobot"
+      ? majuGroupsWeightedByItems(majuItems, input.majuGroups)
+      : input.majuGroups,
   );
 
   return {
@@ -292,7 +337,7 @@ export function computeIndividualScore(input: {
     departmentId: staff.departmentId,
     position: staff.position,
     periodLabel,
-    functions: fnScores,
+    functions: visibleScores,
     overall: maju.overall,
     weightUsed: maju.weightUsed,
   };
