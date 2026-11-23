@@ -588,6 +588,7 @@ export function MeetingWorkspace({
   }
 
   function resetNewForm() {
+    const pending = pendingDrafts();
     setAllDepartments(false);
     setDepartmentIds(departments[0] ? [departments[0].id] : []);
     setTitle("");
@@ -597,8 +598,8 @@ export function MeetingWorkspace({
     setExternalAttendees("");
     setAttendeeQuery("");
     setSummary("");
-    setContinued([]);
-    setItems([emptyItem()]);
+    setContinued(pending);
+    setItems(pending.length > 0 ? [] : [emptyItem()]);
     setBahasanDraft(null);
     setError(null);
     setMessage(null);
@@ -1622,20 +1623,16 @@ export function MeetingWorkspace({
             />
           </label>
 
-          {editingId && continued.length > 0 ? (
+          {continued.length > 0 ? (
           <div className="space-y-2">
             <div>
               <p className="text-sm font-medium">Bahasan yang dilanjutkan</p>
               <p className="mt-1 text-[11px] text-ink-muted">
-                Tanggal pembahasan mengikuti tanggal notulen ini.
+                Bahasan yang masih berjalan ikut tercatat pada notulen ini.
+                Tanggal pembahasan mengikuti tanggal notulen.
               </p>
             </div>
-            {continued.length === 0 ? (
-              <p className="rounded-xl border border-dashed border-line px-3 py-3 text-xs text-ink-muted">
-                Tidak ada bahasan pending. Bahasan baru diisi di bagian bawah.
-              </p>
-            ) : (
-              <div className="max-h-[28rem] space-y-2 overflow-y-auto pr-1">
+            <div className="max-h-[28rem] space-y-2 overflow-y-auto pr-1">
               {continued.map((item) => (
                 <div
                   key={item.key}
@@ -1712,13 +1709,14 @@ export function MeetingWorkspace({
                 </div>
               ))}
               </div>
-            )}
           </div>
           ) : null}
 
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-medium">{editingId ? "Bahasan baru" : "Bahasan"}</p>
+              <p className="text-sm font-medium">
+                {editingId || continued.length > 0 ? "Bahasan baru" : "Bahasan"}
+              </p>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -2148,7 +2146,9 @@ export function MeetingWorkspace({
                   <h3 className="mt-4 text-sm font-semibold">Daftar bahasan</h3>
                   {rows.length === 0 ? (
                     <p className="mt-2 text-sm text-ink-muted">
-                      Tidak ada bahasan pada filter ini.
+                      {meeting.items.length === 0 && (meeting.linkedItems ?? []).length === 0
+                        ? "Belum ada bahasan pada notulen ini."
+                        : "Tidak ada bahasan pada filter ini."}
                     </p>
                   ) : (
                     <div className="mt-3 space-y-2">

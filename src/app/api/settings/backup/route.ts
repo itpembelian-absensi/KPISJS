@@ -95,8 +95,10 @@ export async function POST(req: NextRequest) {
       message: `Database berhasil ditimpa oleh ${name}. Muat ulang halaman. Jika sesi terputus, masuk ulang.`,
     });
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "Gagal merestor database";
+    const raw = err instanceof Error ? err.message : "";
+    const message = /formdata/i.test(raw)
+      ? "File backup tidak terbaca. Unggahan terpotong atau file rusak. Maksimal 200MB."
+      : raw || "Gagal merestor database";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
