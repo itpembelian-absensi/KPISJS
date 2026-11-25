@@ -53,3 +53,23 @@ export function formatSopDate(raw: string | null | undefined): string {
     year: "numeric",
   });
 }
+
+/** Nomor otomatis: DEPT-SOP/tahun/bulan/urut, contoh ACC-SOP/2026/11/001 */
+export function automaticSopCode(
+  deptCode: string,
+  seq: number,
+  when = new Date(),
+): string {
+  const safe = deptCode.replace(/[^A-Za-z0-9]/g, "").toUpperCase() || "GEN";
+  const year = when.getFullYear();
+  const month = String(when.getMonth() + 1).padStart(2, "0");
+  return `${safe}-SOP/${year}/${month}/${String(seq).padStart(3, "0")}`;
+}
+
+/** Nomor induk impor Word pada bulan yang sama, contoh ACC-SOP/2026/11/MASTER */
+export function automaticSopMasterCode(
+  deptCode: string,
+  when = new Date(),
+): string {
+  return automaticSopCode(deptCode, 1, when).replace(/\/\d{3}$/, "/MASTER");
+}

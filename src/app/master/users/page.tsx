@@ -1,7 +1,6 @@
 import { UserMaster } from "@/components/master/UserMaster";
 import { requireMasterMenu } from "@/lib/session";
 import {
-  listDepartments,
   listPendingPasswordResets,
   listStaff,
   listUsers,
@@ -13,7 +12,6 @@ export default async function UsersPage() {
   await requireMasterMenu("/master/users");
   const users = listUsers();
   const staff = listStaff(true);
-  const departments = listDepartments(true);
   const passwordResetRequests = listPendingPasswordResets();
 
   return (
@@ -37,7 +35,6 @@ export default async function UsersPage() {
       <UserMaster
         initial={users}
         staff={staff}
-        departments={departments}
         initialResets={passwordResetRequests}
       />
     </div>

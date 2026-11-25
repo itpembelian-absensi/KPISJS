@@ -96,6 +96,17 @@ export function writeSopDiskFile(
   };
 }
 
+/** Buang lampiran yang URL-nya ada di data tapi filenya tidak ada di disk. */
+export function sopWithFilesOnDisk(sop: SopDocument): SopDocument {
+  const attachments = sop.attachments.filter((a) => {
+    if (a.kind !== "file" && !a.url.startsWith("/uploads/sops/")) return true;
+    const abs = absolutePathFromSopPublicUrl(a.url);
+    return Boolean(abs && fs.existsSync(abs));
+  });
+  if (attachments.length === sop.attachments.length) return sop;
+  return { ...sop, attachments };
+}
+
 export function absolutePathFromSopPublicUrl(url: string): string | null {
   if (!url.startsWith("/uploads/sops/")) return null;
   const rel = url.replace(/^\//, "");

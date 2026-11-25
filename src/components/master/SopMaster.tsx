@@ -1,33 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type {
-  Department,
-  SopAttachment,
-  SopDisposition,
-  SopDocument,
-  SopStep,
-} from "@/lib/types";
-import {
-  defaultSopDispositions,
-  sopDivisionLabelFromDepartment,
-} from "@/lib/types";
-import { formatSopDate, toDateInputValue } from "@/lib/sop-format";
-import { primarySopDocx, primarySopPdf } from "@/lib/sop-attachments";
-
-function emptyStep(order: number): SopStep {
-  return { order, title: "", body: "" };
-}
-
-function emptyAttachment(): SopAttachment {
-  return { label: "", url: "", kind: "link" };
-}
-
-function isFileAttachment(att: SopAttachment) {
-  return att.kind === "file" || att.url.startsWith("/uploads/sops/");
-}
+import type { Department, SopDocument } from "@/lib/types";
+import { formatSopDate } from "@/lib/sop-format";
 
 const FILE_ACCEPT =
   ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.jpg,.jpeg,.png,.webp,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -83,15 +60,12 @@ export function SopMaster({
   initial,
   departments,
   canManage,
-  defaultDepartmentId,
 }: {
   initial: SopDocument[];
   departments: Department[];
   canManage: boolean;
-  defaultDepartmentId: string;
 }) {
   const router = useRouter();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
   const replaceTargetRef = useRef<{
     sopId: string;
@@ -101,41 +75,15 @@ export function SopMaster({
   const [items, setItems] = useState(() => sortSops(initial, "code"));
   const [listPage, setListPage] = useState(1);
   const [sortKey, setSortKey] = useState<SopSortKey>("code");
-  const [deptFilter, setDeptFilter] = useState(
-    defaultDepartmentId || (departments[0]?.id ?? "all"),
-  );
+  const [deptFilter, setDeptFilter] = useState("all");
   const [listQuery, setListQuery] = useState("");
   const [listNotice, setListNotice] = useState<string | null>(null);
-  const [editing, setEditing] = useState<SopDocument | null>(null);
-  const [title, setTitle] = useState("");
-  const [code, setCode] = useState("");
-  const [departmentId, setDepartmentId] = useState(defaultDepartmentId);
-  const [divisionLabel, setDivisionLabel] = useState(() => {
-    const d = departments.find((x) => x.id === defaultDepartmentId);
-    return d ? sopDivisionLabelFromDepartment(d.name) : "DIVISI";
-  });
-  const [documentType, setDocumentType] = useState(
-    "STANDARD OPERATING PROCEDURE",
+  const [importDepartmentId, setImportDepartmentId] = useState(
+    departments.length > 1 ? "" : (departments[0]?.id ?? ""),
   );
-  const [effectiveDate, setEffectiveDate] = useState("");
-  const [revision, setRevision] = useState("-");
-  const [revisionDate, setRevisionDate] = useState("");
-  const [purpose, setPurpose] = useState("");
-  const [materials, setMaterials] = useState("");
-  const [qualifications, setQualifications] = useState("");
-  const [notes, setNotes] = useState("");
-  const [active, setActive] = useState(true);
-  const [steps, setSteps] = useState<SopStep[]>([emptyStep(1)]);
-  const [dispositions, setDispositions] = useState<SopDisposition[]>(() => {
-    const d = departments.find((x) => x.id === defaultDepartmentId);
-    return defaultSopDispositions(d?.name ?? "");
-  });
-  const [attachments, setAttachments] = useState<SopAttachment[]>([]);
-  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [deletingSelected, setDeletingSelected] = useState(false);
@@ -150,60 +98,6 @@ export function SopMaster({
 
   function deptOf(id: string) {
     return departments.find((d) => d.id === id);
-  }
-
-  function applyDepartmentDefaults(id: string, forNew: boolean) {
-    const d = deptOf(id);
-    setDepartmentId(id);
-    setDeptFilter(id);
-    setListPage(1);
-    setSelected([]);
-    if (d) {
-      setDivisionLabel(sopDivisionLabelFromDepartment(d.name));
-      if (forNew) setDispositions(defaultSopDispositions(d.name));
-    }
-  }
-
-  function loadForm(sop: SopDocument | null) {
-    setEditing(sop);
-    setTitle(sop?.title ?? "");
-    setCode(sop?.code ?? "");
-    const nextDept =
-      sop?.departmentId && departments.some((d) => d.id === sop.departmentId)
-        ? sop.departmentId
-        : departmentId || defaultDepartmentId;
-    setDepartmentId(nextDept);
-    setDeptFilter(nextDept);
-    setListPage(1);
-    const d = deptOf(nextDept);
-    setDivisionLabel(
-      sop?.divisionLabel ??
-        (d ? sopDivisionLabelFromDepartment(d.name) : "DIVISI"),
-    );
-    setDocumentType(sop?.documentType ?? "STANDARD OPERATING PROCEDURE");
-    setEffectiveDate(toDateInputValue(sop?.effectiveDate ?? ""));
-    setRevision(sop?.revision ?? "-");
-    setRevisionDate(toDateInputValue(sop?.revisionDate ?? ""));
-    setPurpose(sop?.purpose ?? "");
-    setMaterials(sop?.materials ?? "");
-    setQualifications(sop?.qualifications ?? "");
-    setNotes(sop?.notes ?? "");
-    setActive(sop?.active ?? true);
-    setSteps(
-      sop && sop.steps.length > 0
-        ? sop.steps.map((s, i) => ({ ...s, order: i + 1 }))
-        : [emptyStep(1)],
-    );
-    setDispositions(
-      sop?.dispositions?.length
-        ? sop.dispositions.map((d) => ({ ...d }))
-        : defaultSopDispositions(d?.name ?? ""),
-    );
-    setAttachments(sop?.attachments?.length ? [...sop.attachments] : []);
-    setPendingFiles([]);
-    if (fileInputRef.current) fileInputRef.current.value = "";
-    setError(null);
-    setMessage(null);
   }
 
   function toggleSelect(id: string) {
@@ -228,11 +122,6 @@ export function SopMaster({
     return byDept.filter((s) => sopMatchesQuery(s, listQuery));
   }, [items, deptFilter, listQuery]);
 
-  const selectedDept = deptOf(departmentId);
-  const codePlaceholder = selectedDept
-    ? `${selectedDept.code}-SOP/${new Date().getFullYear()}/001`
-    : "IT-SOP/2026/001";
-
   const sortedItems = useMemo(
     () => sortSops(filteredItems, sortKey),
     [filteredItems, sortKey],
@@ -247,15 +136,6 @@ export function SopMaster({
     return sortedItems.slice(start, start + LIST_PAGE_SIZE);
   }, [sortedItems, currentListPage]);
 
-  const linkAttachments = useMemo(
-    () => attachments.filter((a) => !isFileAttachment(a)),
-    [attachments],
-  );
-  const fileAttachments = useMemo(
-    () => attachments.filter((a) => isFileAttachment(a)),
-    [attachments],
-  );
-
   function applySopToState(sop: SopDocument) {
     setItems((prev) => {
       const exists = prev.some((s) => s.id === sop.id);
@@ -264,84 +144,6 @@ export function SopMaster({
       }
       return [...prev, sop];
     });
-  }
-
-  async function uploadFilesToSop(sopId: string, files: File[]) {
-    if (!files.length) return null;
-    const fd = new FormData();
-    fd.append("sopId", sopId);
-    for (const f of files) fd.append("files", f);
-    const res = await fetch("/api/master/sops/files", {
-      method: "POST",
-      body: fd,
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.error || "Gagal mengunggah file");
-    }
-    return data.sop as SopDocument;
-  }
-
-  function onPickFiles(files: FileList | null) {
-    if (!files?.length) return;
-    const picked = Array.from(files);
-    setPendingFiles((prev) => [...prev, ...picked].slice(0, 10));
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  }
-
-  async function uploadPendingNow() {
-    if (!editing?.id || pendingFiles.length === 0) return;
-    setUploading(true);
-    setError(null);
-    try {
-      const sop = await uploadFilesToSop(editing.id, pendingFiles);
-      if (!sop) return;
-      applySopToState(sop);
-      setAttachments(sop.attachments);
-      setEditing(sop);
-      setPendingFiles([]);
-      setMessage("File SOP berhasil diunggah.");
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal unggah file");
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  async function removeFileAttachment(att: SopAttachment) {
-    if (!editing?.id) {
-      setAttachments((prev) => prev.filter((a) => a.url !== att.url));
-      return;
-    }
-    if (!window.confirm(`Hapus file "${att.label || att.originalName}"?`)) {
-      return;
-    }
-    setUploading(true);
-    setError(null);
-    try {
-      const fd = new FormData();
-      fd.append("sopId", editing.id);
-      fd.append("removeUrl", att.url);
-      const res = await fetch("/api/master/sops/files", {
-        method: "POST",
-        body: fd,
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(data.error || "Gagal menghapus file");
-        return;
-      }
-      const sop = data.sop as SopDocument;
-      applySopToState(sop);
-      setAttachments(sop.attachments);
-      setEditing(sop);
-      router.refresh();
-    } catch {
-      setError("Gagal menghapus file");
-    } finally {
-      setUploading(false);
-    }
   }
 
   function beginReplaceFile(
@@ -357,10 +159,10 @@ export function SopMaster({
 
   async function onReplaceFilePicked(files: FileList | null) {
     const target = replaceTargetRef.current;
+    const file = files?.[0] ?? null;
     replaceTargetRef.current = null;
     if (replaceInputRef.current) replaceInputRef.current.value = "";
-    if (!target || !files?.length) return;
-    const file = files[0];
+    if (!target || !file) return;
     if (!window.confirm(`Ganti file "${target.label}" dengan "${file.name}"?`)) {
       return;
     }
@@ -384,10 +186,6 @@ export function SopMaster({
       }
       const sop = data.sop as SopDocument;
       applySopToState(sop);
-      if (editing?.id === sop.id) {
-        setAttachments(sop.attachments);
-        setEditing(sop);
-      }
       setMessage(`File diganti: ${file.name}`);
       setListNotice(`File diganti: ${file.name}`);
       router.refresh();
@@ -399,74 +197,6 @@ export function SopMaster({
     }
   }
 
-  async function save(e: FormEvent) {
-    e.preventDefault();
-    setSaving(true);
-    setError(null);
-    setMessage(null);
-    const filesToUpload = [...pendingFiles];
-    try {
-      const res = await fetch("/api/master/sops", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: editing?.id,
-          departmentId,
-          code: code.trim() || undefined,
-          title,
-          divisionLabel,
-          documentType,
-          effectiveDate,
-          revision,
-          revisionDate,
-          purpose,
-          materials,
-          qualifications,
-          notes,
-          steps,
-          dispositions,
-          attachments,
-          active,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(data.error || "Gagal menyimpan");
-        return;
-      }
-
-      let sop = data.sop as SopDocument;
-      if (filesToUpload.length > 0) {
-        try {
-          const withFiles = await uploadFilesToSop(sop.id, filesToUpload);
-          if (withFiles) sop = withFiles;
-        } catch (err) {
-          applySopToState(sop);
-          setError(
-            err instanceof Error
-              ? `SOP tersimpan, tapi unggah file gagal: ${err.message}`
-              : "SOP tersimpan, tapi unggah file gagal",
-          );
-          loadForm(sop);
-          router.refresh();
-          return;
-        }
-      }
-
-      applySopToState(sop);
-      loadForm(null);
-      setMessage(
-        filesToUpload.length > 0
-          ? "SOP dan file lampiran tersimpan."
-          : "SOP tersimpan.",
-      );
-      router.refresh();
-    } catch {
-      setError("Koneksi gagal / server error.");
-    } finally {
-      setSaving(false);
-    }
-  }
 
   async function remove(id: string) {
     if (!window.confirm("Hapus SOP ini?")) return;
@@ -480,7 +210,6 @@ export function SopMaster({
     }
     setItems((prev) => prev.filter((s) => s.id !== id));
     setSelected((prev) => prev.filter((x) => x !== id));
-    if (editing?.id === id) loadForm(null);
     router.refresh();
   }
 
@@ -521,7 +250,6 @@ export function SopMaster({
       const removed = new Set(data.ids ?? selected);
       setItems((prev) => prev.filter((s) => !removed.has(s.id)));
       setSelected((prev) => prev.filter((id) => !removed.has(id)));
-      if (editing && removed.has(editing.id)) loadForm(null);
       const n = data.deleted ?? removed.size;
       const failN = data.errors?.length ?? 0;
       setListNotice(
@@ -557,10 +285,6 @@ export function SopMaster({
       }
       const next = data.sop as SopDocument;
       applySopToState(next);
-      if (editing?.id === next.id) {
-        setEditing(next);
-        setActive(next.active);
-      }
       setListNotice(next.active ? `${next.code} diaktifkan` : `${next.code} dinonaktifkan`);
       router.refresh();
     } catch {
@@ -575,7 +299,7 @@ export function SopMaster({
     const file = files?.[0];
     if (wordInputRef.current) wordInputRef.current.value = "";
     if (!file) return;
-    if (!departmentId) {
+    if (!importDepartmentId) {
       setError("Pilih departemen dulu, lalu unggah Word.");
       return;
     }
@@ -587,7 +311,7 @@ export function SopMaster({
     setWordFileName(file.name);
     try {
       const fd = new FormData();
-      fd.append("departmentId", departmentId);
+      fd.append("departmentId", importDepartmentId);
       fd.append("preview", "1");
       fd.append("file", file);
       const res = await fetch("/api/master/sops/import-word", {
@@ -615,11 +339,11 @@ export function SopMaster({
 
   async function confirmWordImport() {
     const file = wordFileRef.current;
-    if (!file || !departmentId) return;
+    if (!file || !importDepartmentId) return;
     const n = wordPreview?.length ?? 0;
     if (
       !window.confirm(
-        `Impor ${n} SOP ke ${deptOf(departmentId)?.name ?? "departemen ini"}?\n\nSOP dengan nomor yang sama akan diperbarui. SOP baru berstatus Draft (Off).`,
+        `Impor ${n} SOP ke ${deptOf(importDepartmentId)?.name ?? "departemen ini"}?\n\nSOP dengan nomor yang sama akan diperbarui. SOP baru berstatus Draft (Off).`,
       )
     ) {
       return;
@@ -629,7 +353,7 @@ export function SopMaster({
     setMessage(null);
     try {
       const fd = new FormData();
-      fd.append("departmentId", departmentId);
+      fd.append("departmentId", importDepartmentId);
       fd.append("preview", "0");
       fd.append("file", file);
       const res = await fetch("/api/master/sops/import-word", {
@@ -651,7 +375,7 @@ export function SopMaster({
         }
         return next;
       });
-      setDeptFilter(departmentId);
+      setDeptFilter(importDepartmentId);
       setListPage(1);
       setWordPreview(null);
       setWordFileName(null);
@@ -672,6 +396,14 @@ export function SopMaster({
 
   return (
     <div className="space-y-5">
+      {message ? (
+        <p className="rounded-xl bg-ok-soft px-4 py-3 text-sm text-ok">{message}</p>
+      ) : null}
+      {error ? (
+        <p className="rounded-xl bg-danger-soft px-4 py-3 text-sm text-danger">
+          {error}
+        </p>
+      ) : null}
       {selected.length > 0 ? (
         <div className="panel flex flex-wrap items-center gap-2 p-4">
           <p className="mr-2 text-sm text-ink-muted">
@@ -717,10 +449,27 @@ export function SopMaster({
             <p className="mt-1 text-xs text-ink-muted">
               Unggah file Master SOP (.docx). Sistem memecah per judul/nomor
               sesuai isi Word, menempelkan pecahan Word asli, lalu membuat PDF
-              dengan layout yang sama. Pilih departemen di form dulu.
+              dengan layout yang sama. Pilih departemen, lalu unggah file Word.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {departments.length > 1 ? (
+              <label className="flex items-center gap-1.5 text-xs text-ink-muted">
+                <span>Dept</span>
+                <select
+                  value={importDepartmentId}
+                  onChange={(e) => setImportDepartmentId(e.target.value)}
+                  className="rounded-lg border border-line bg-bg-elevated px-2 py-1 text-xs text-ink"
+                >
+                  <option value="">Semua departemen</option>
+                  {departments.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.code} — {d.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <input
               ref={wordInputRef}
               type="file"
@@ -730,7 +479,7 @@ export function SopMaster({
             />
             <button
               type="button"
-              disabled={wordBusy || !departmentId}
+              disabled={wordBusy || !importDepartmentId}
               onClick={() => wordInputRef.current?.click()}
               className="rounded-xl bg-brand px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
             >
@@ -806,465 +555,7 @@ export function SopMaster({
         </div>
       ) : null}
 
-      <div className={`grid gap-5 ${canManage ? "xl:grid-cols-[1.15fr_0.95fr]" : ""}`}>
-        {canManage ? (
-        <form
-          id="sop-editor-form"
-          onSubmit={save}
-          className="panel space-y-3 p-5"
-        >
-          <h2 className="font-semibold">
-            {editing ? "Edit SOP" : "Tambah SOP"}
-          </h2>
-          <p className="text-xs text-ink-muted">
-            Isi manual (A–E) dan/atau unggah file SOP (PDF, Word, Excel, dll).
-          </p>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block text-sm sm:col-span-2">
-              <span className="text-xs text-ink-muted">Departemen</span>
-              <select
-                required
-                value={departmentId}
-                onChange={(e) =>
-                  applyDepartmentDefaults(e.target.value, !editing)
-                }
-                className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
-              >
-                {departments.length === 0 ? (
-                  <option value="">Tidak ada departemen</option>
-                ) : null}
-                {departments.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.code} — {d.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm sm:col-span-2">
-              <span className="text-xs text-ink-muted">Judul SOP</span>
-              <input
-                required
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
-                placeholder="Update Credit Limit dan atau Term Of Payment..."
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-xs text-ink-muted">
-                Nomor dokumen (kosong = otomatis)
-              </span>
-              <input
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
-                placeholder={codePlaceholder}
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-xs text-ink-muted">Mulai berlaku</span>
-              <input
-                type="date"
-                value={effectiveDate}
-                onChange={(e) => setEffectiveDate(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-xs text-ink-muted">Revisi</span>
-              <input
-                value={revision}
-                onChange={(e) => setRevision(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
-                placeholder="-"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-xs text-ink-muted">Tanggal revisi</span>
-              <input
-                type="date"
-                value={revisionDate}
-                onChange={(e) => setRevisionDate(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-xs text-ink-muted">Label header (divisi)</span>
-              <input
-                value={divisionLabel}
-                onChange={(e) => setDivisionLabel(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
-              />
-            </label>
-            <label className="block text-sm sm:col-span-2">
-              <span className="text-xs text-ink-muted">Tipe dokumen</span>
-              <input
-                value={documentType}
-                onChange={(e) => setDocumentType(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
-              />
-            </label>
-          </div>
-
-          <div className="space-y-2 rounded-xl border border-dashed border-brand/40 bg-brand/5 px-3 py-3">
-            <h3 className="text-sm font-semibold">Unggah file SOP</h3>
-            <p className="text-xs text-ink-muted">
-              PDF, Word (.doc/.docx), Excel (.xls/.xlsx), PowerPoint, TXT/CSV,
-              atau gambar — max 20MB per file, total 10 lampiran.
-            </p>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept={FILE_ACCEPT}
-              onChange={(e) => onPickFiles(e.target.files)}
-              className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-brand file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-white"
-            />
-            {pendingFiles.length > 0 ? (
-              <div className="space-y-1">
-                <p className="text-xs font-medium text-ink-muted">
-                  Menunggu unggah ({pendingFiles.length}):
-                </p>
-                <ul className="space-y-1">
-                  {pendingFiles.map((f, i) => (
-                    <li
-                      key={`${f.name}-${i}`}
-                      className="flex items-center justify-between gap-2 text-sm"
-                    >
-                      <span className="truncate">{f.name}</span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setPendingFiles((prev) =>
-                            prev.filter((_, idx) => idx !== i),
-                          )
-                        }
-                        className="shrink-0 text-xs text-danger"
-                      >
-                        Buang
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-                {editing?.id ? (
-                  <button
-                    type="button"
-                    disabled={uploading}
-                    onClick={uploadPendingNow}
-                    className="rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
-                  >
-                    {uploading ? "Mengunggah..." : "Unggah sekarang"}
-                  </button>
-                ) : (
-                  <p className="text-xs text-ink-muted">
-                    File akan diunggah otomatis saat Anda klik Simpan.
-                  </p>
-                )}
-              </div>
-            ) : null}
-            {fileAttachments.length > 0 ? (
-              <ul className="space-y-1 border-t border-line/60 pt-2">
-                {fileAttachments.map((att) => (
-                  <li
-                    key={att.url}
-                    className="flex flex-wrap items-center justify-between gap-2 text-sm"
-                  >
-                    <a
-                      href={att.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="truncate text-brand underline"
-                      download={att.originalName || att.label}
-                    >
-                      {att.originalName || att.label}
-                    </a>
-                    <div className="flex shrink-0 items-center gap-2">
-                      {editing?.id ? (
-                        <button
-                          type="button"
-                          disabled={uploading}
-                          onClick={() =>
-                            beginReplaceFile(
-                              editing.id,
-                              att.url,
-                              att.originalName || att.label,
-                            )
-                          }
-                          className="text-xs text-brand disabled:opacity-60"
-                        >
-                          Ganti
-                        </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        disabled={uploading}
-                        onClick={() => removeFileAttachment(att)}
-                        className="text-xs text-danger disabled:opacity-60"
-                      >
-                        Hapus file
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-
-          <label className="block text-sm">
-            <span className="text-xs font-medium text-ink-muted">
-              A. TUJUAN
-            </span>
-            <textarea
-              rows={3}
-              value={purpose}
-              onChange={(e) => setPurpose(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
-              placeholder="Menjelaskan proses... (opsional jika sudah unggah file)"
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="text-xs font-medium text-ink-muted">
-              B. BAHAN DAN PERALATAN
-            </span>
-            <textarea
-              rows={2}
-              value={materials}
-              onChange={(e) => setMaterials(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="text-xs font-medium text-ink-muted">
-              C. KUALIFIKASI PERSONEL
-            </span>
-            <textarea
-              rows={2}
-              value={qualifications}
-              onChange={(e) => setQualifications(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
-            />
-          </label>
-
-          <div className="space-y-2 border-t border-line pt-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold">
-                D. PROSEDUR PELAKSANAAN
-              </h3>
-              <button
-                type="button"
-                onClick={() =>
-                  setSteps((prev) => [...prev, emptyStep(prev.length + 1)])
-                }
-                className="rounded-lg border border-line px-2 py-1 text-xs"
-              >
-                + Langkah
-              </button>
-            </div>
-            {steps.map((step, idx) => (
-              <div
-                key={`step-${idx}`}
-                className="space-y-2 rounded-xl border border-line bg-bg px-3 py-3"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="mono text-xs text-ink-muted">
-                    {idx + 1}.
-                  </span>
-                  {steps.length > 1 ? (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSteps((prev) =>
-                          prev
-                            .filter((_, i) => i !== idx)
-                            .map((s, i) => ({ ...s, order: i + 1 })),
-                        )
-                      }
-                      className="text-xs text-danger"
-                    >
-                      Hapus
-                    </button>
-                  ) : null}
-                </div>
-                <input
-                  value={step.title}
-                  onChange={(e) =>
-                    setSteps((prev) =>
-                      prev.map((s, i) =>
-                        i === idx ? { ...s, title: e.target.value } : s,
-                      ),
-                    )
-                  }
-                  placeholder="Peran / aktor (contoh: Requestor)"
-                  className="w-full rounded-xl border border-line bg-bg-elevated px-3 py-2 text-sm"
-                />
-                <textarea
-                  rows={2}
-                  value={step.body}
-                  onChange={(e) =>
-                    setSteps((prev) =>
-                      prev.map((s, i) =>
-                        i === idx ? { ...s, body: e.target.value } : s,
-                      ),
-                    )
-                  }
-                  placeholder="Uraian prosedur..."
-                  className="w-full rounded-xl border border-line bg-bg-elevated px-3 py-2 text-sm"
-                />
-              </div>
-            ))}
-          </div>
-
-          <label className="block text-sm">
-            <span className="text-xs font-medium text-ink-muted">E. NOTE</span>
-            <textarea
-              rows={3}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-line bg-bg-elevated px-3 py-2"
-              placeholder="Catatan tambahan, pengecualian, referensi..."
-            />
-          </label>
-
-          <div className="space-y-2 border-t border-line pt-3">
-            <h3 className="text-sm font-semibold">Disposisi / tanda tangan</h3>
-            {dispositions.map((d, idx) => (
-              <div
-                key={`disp-${idx}`}
-                className="grid gap-2 rounded-xl border border-line bg-bg px-3 py-3 sm:grid-cols-3"
-              >
-                <input
-                  value={d.role}
-                  onChange={(e) =>
-                    setDispositions((prev) =>
-                      prev.map((row, i) =>
-                        i === idx ? { ...row, role: e.target.value } : row,
-                      ),
-                    )
-                  }
-                  placeholder="Disposisi"
-                  className="rounded-xl border border-line bg-bg-elevated px-3 py-2 text-sm"
-                />
-                <input
-                  value={d.name}
-                  onChange={(e) =>
-                    setDispositions((prev) =>
-                      prev.map((row, i) =>
-                        i === idx ? { ...row, name: e.target.value } : row,
-                      ),
-                    )
-                  }
-                  placeholder="Nama"
-                  className="rounded-xl border border-line bg-bg-elevated px-3 py-2 text-sm"
-                />
-                <input
-                  value={d.position}
-                  onChange={(e) =>
-                    setDispositions((prev) =>
-                      prev.map((row, i) =>
-                        i === idx ? { ...row, position: e.target.value } : row,
-                      ),
-                    )
-                  }
-                  placeholder="Jabatan"
-                  className="rounded-xl border border-line bg-bg-elevated px-3 py-2 text-sm"
-                />
-              </div>
-            ))}
-          </div>
-
-          <div className="space-y-2 border-t border-line pt-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold">Link tambahan</h3>
-              <button
-                type="button"
-                onClick={() =>
-                  setAttachments((prev) => [...prev, emptyAttachment()])
-                }
-                className="rounded-lg border border-line px-2 py-1 text-xs"
-              >
-                + Link
-              </button>
-            </div>
-            {linkAttachments.map((att) => {
-              const idx = attachments.indexOf(att);
-              return (
-                <div
-                  key={`att-link-${idx}`}
-                  className="grid gap-2 rounded-xl border border-line bg-bg px-3 py-3 sm:grid-cols-[1fr_1.2fr_auto]"
-                >
-                  <input
-                    value={att.label}
-                    onChange={(e) =>
-                      setAttachments((prev) =>
-                        prev.map((a, i) =>
-                          i === idx ? { ...a, label: e.target.value } : a,
-                        ),
-                      )
-                    }
-                    placeholder="Label"
-                    className="rounded-xl border border-line bg-bg-elevated px-3 py-2 text-sm"
-                  />
-                  <input
-                    value={att.url}
-                    onChange={(e) =>
-                      setAttachments((prev) =>
-                        prev.map((a, i) =>
-                          i === idx
-                            ? { ...a, url: e.target.value, kind: "link" }
-                            : a,
-                        ),
-                      )
-                    }
-                    placeholder="https://..."
-                    className="rounded-xl border border-line bg-bg-elevated px-3 py-2 text-sm"
-                  />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setAttachments((prev) => prev.filter((_, i) => i !== idx))
-                    }
-                    className="text-xs text-danger sm:self-center"
-                  >
-                    Hapus
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={active}
-              onChange={(e) => setActive(e.target.checked)}
-            />
-            Aktif (bisa dipakai; Off = masih draft)
-          </label>
-
-          {error ? <p className="text-sm text-danger">{error}</p> : null}
-          {message ? <p className="text-sm text-ok">{message}</p> : null}
-
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="submit"
-              disabled={saving || uploading}
-              className="rounded-xl bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-            >
-              {saving ? "Menyimpan..." : "Simpan"}
-            </button>
-            {editing ? (
-              <button
-                type="button"
-                onClick={() => loadForm(null)}
-                className="rounded-xl border border-line px-4 py-2 text-sm"
-              >
-                Batal
-              </button>
-            ) : null}
-          </div>
-        </form>
-        ) : null}
+      <div>
 
         <div className="panel overflow-hidden">
           <input
@@ -1295,23 +586,27 @@ export function SopMaster({
               ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              {canManage ? (
+                <Link
+                  href="/master/sops/new"
+                  className="rounded-xl bg-brand px-4 py-2 text-sm font-medium text-white"
+                >
+                  Tambah
+                </Link>
+              ) : null}
               {departments.length > 1 ? (
                 <label className="flex items-center gap-1.5 text-xs text-ink-muted">
                   <span>Dept</span>
                   <select
                     value={deptFilter}
                     onChange={(e) => {
-                      const v = e.target.value;
-                      setDeptFilter(v);
+                      setDeptFilter(e.target.value);
                       setListPage(1);
                       setSelected([]);
-                      if (v !== "all" && !editing) {
-                        applyDepartmentDefaults(v, true);
-                      }
                     }}
                     className="rounded-lg border border-line bg-bg-elevated px-2 py-1 text-xs text-ink"
                   >
-                    <option value="all">Semua</option>
+                    <option value="all">Semua departemen</option>
                     {departments.map((d) => (
                       <option key={d.id} value={d.id}>
                         {d.code}
@@ -1362,24 +657,52 @@ export function SopMaster({
             <label className="sr-only" htmlFor="sop-list-search">
               Cari SOP
             </label>
-            <input
-              id="sop-list-search"
-              type="search"
-              value={listQuery}
-              onChange={(e) => {
-                setListQuery(e.target.value);
-                setListPage(1);
-              }}
-              placeholder="Cari nomor, judul, atau isi SOP..."
-              className="w-full rounded-lg border border-line bg-bg-elevated px-3 py-2 text-sm text-ink placeholder:text-ink-muted"
-            />
+            <div className="relative">
+              <input
+                id="sop-list-search"
+                type="text"
+                value={listQuery}
+                onChange={(e) => {
+                  setListQuery(e.target.value);
+                  setListPage(1);
+                }}
+                placeholder="Cari nomor, judul, atau isi SOP..."
+                className={`w-full rounded-lg border border-line bg-bg-elevated py-2 pl-3 text-sm text-ink placeholder:text-ink-muted outline-none focus:border-brand ${
+                  listQuery ? "pr-9" : "pr-3"
+                }`}
+              />
+              {listQuery ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setListQuery("");
+                    setListPage(1);
+                  }}
+                  className="absolute top-1/2 right-2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-ink-muted hover:bg-line hover:text-ink"
+                  aria-label="Hapus pencarian"
+                  title="Hapus pencarian"
+                >
+                  <svg
+                    viewBox="0 0 16 16"
+                    className="h-3.5 w-3.5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M4 4l8 8M12 4l-8 8" />
+                  </svg>
+                </button>
+              ) : null}
+            </div>
           </div>
           {filteredItems.length === 0 ? (
             <p className="px-4 py-8 text-sm text-ink-muted">
               {listQuery.trim()
                 ? "Tidak ada SOP yang cocok. Coba kata lain, atau kosongkan pencarian."
                 : canManage
-                  ? "Belum ada SOP. Buat dokumen pertama di formulir kiri."
+                  ? "Belum ada SOP. Klik Tambah untuk membuat dokumen."
                   : "Belum ada SOP untuk departemen Anda."}
             </p>
           ) : (
@@ -1389,8 +712,6 @@ export function SopMaster({
                   (a) =>
                     a.kind === "file" || a.url.startsWith("/uploads/sops/"),
                 );
-                const pdfAtt = primarySopPdf(sop);
-                const docxAtt = primarySopDocx(sop);
                 return (
                   <div
                     key={sop.id}
@@ -1419,11 +740,14 @@ export function SopMaster({
                               className="flex flex-wrap items-center gap-2"
                             >
                               <a
-                                href={f.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
+                                href={
+                                  /\.pdf($|\?)/i.test(f.url)
+                                    ? `/api/sop/export?format=pdf&ids=${encodeURIComponent(sop.id)}&v=${encodeURIComponent(sop.updatedAt)}`
+                                    : /\.docx($|\?)/i.test(f.url)
+                                      ? `/api/sop/export?format=docx&ids=${encodeURIComponent(sop.id)}&v=${encodeURIComponent(sop.updatedAt)}`
+                                      : `${f.url}${f.url.includes("?") ? "&" : "?"}v=${encodeURIComponent(sop.updatedAt)}`
+                                }
                                 className="rounded-md bg-bg px-1.5 py-0.5 text-[11px] text-brand underline"
-                                download={f.originalName || f.label}
                               >
                                 {f.originalName || f.label}
                               </a>
@@ -1448,19 +772,12 @@ export function SopMaster({
                         </div>
                       ) : canManage ? (
                         <div className="mt-1.5">
-                          <button
-                            type="button"
-                            disabled={uploading}
-                            onClick={() => {
-                              loadForm(sop);
-                              setMessage(
-                                "Pilih file di bagian Unggah file SOP, lalu Simpan atau Unggah sekarang.",
-                              );
-                            }}
-                            className="rounded-md border border-dashed border-line px-1.5 py-0.5 text-[11px] text-ink-muted hover:border-brand hover:text-brand disabled:opacity-50"
+                          <Link
+                            href={`/master/sops/${sop.id}/edit#unggah-file`}
+                            className="rounded-md border border-dashed border-line px-1.5 py-0.5 text-[11px] text-ink-muted hover:border-brand hover:text-brand"
                           >
                             + Tambah file
-                          </button>
+                          </Link>
                         </div>
                       ) : null}
                       <div className="mt-2 flex flex-wrap gap-1.5">
@@ -1471,46 +788,25 @@ export function SopMaster({
                           Baca
                         </Link>
                         <a
-                          href={
-                            pdfAtt
-                              ? pdfAtt.url
-                              : `/api/sop/export?format=pdf&ids=${sop.id}`
-                          }
-                          {...(pdfAtt
-                            ? {
-                                target: "_blank" as const,
-                                rel: "noopener noreferrer",
-                                download: pdfAtt.originalName || pdfAtt.label,
-                              }
-                            : {})}
+                          href={`/api/sop/export?format=pdf&ids=${encodeURIComponent(sop.id)}&v=${encodeURIComponent(sop.updatedAt)}`}
                           className="rounded-lg border border-line px-2 py-1 text-xs hover:bg-bg"
                         >
                           PDF
                         </a>
                         <a
-                          href={
-                            docxAtt
-                              ? docxAtt.url
-                              : `/api/sop/export?format=docx&ids=${sop.id}`
-                          }
-                          {...(docxAtt
-                            ? {
-                                download: docxAtt.originalName || docxAtt.label,
-                              }
-                            : {})}
+                          href={`/api/sop/export?format=docx&ids=${encodeURIComponent(sop.id)}&v=${encodeURIComponent(sop.updatedAt)}`}
                           className="rounded-lg border border-line px-2 py-1 text-xs hover:bg-bg"
                         >
                           Word
                         </a>
                         {canManage ? (
                           <>
-                            <button
-                              type="button"
-                              onClick={() => loadForm(sop)}
+                            <Link
+                              href={`/master/sops/${sop.id}/edit`}
                               className="rounded-lg border border-line px-2 py-1 text-xs"
                             >
                               Edit
-                            </button>
+                            </Link>
                             <button
                               type="button"
                               onClick={() => remove(sop.id)}

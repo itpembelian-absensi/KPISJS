@@ -714,7 +714,7 @@ export interface SopDocument {
   departmentId: string;
   departmentCode: string;
   departmentName: string;
-  /** NOMOR DOCUMENT, contoh IT-SOP/2026/001 */
+  /** NOMOR DOCUMENT, contoh IT-SOP/2026/11/001 */
   code: string;
   title: string;
   divisionLabel: string;

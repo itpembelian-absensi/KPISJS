@@ -205,17 +205,22 @@ export function SopDocumentView({
 }) {
   const pdf = preferPdfFile ? primarySopPdf(sop) : null;
   const docx = primarySopDocx(sop);
+  const version = encodeURIComponent(sop.updatedAt || sop.id);
 
   const pdfHref = pdf
-    ? pdf.url
-    : `/api/sop/export?format=pdf&ids=${sop.id}&inline=1`;
+    ? `${pdf.url}${pdf.url.includes("?") ? "&" : "?"}v=${version}`
+    : `/api/sop/export?format=pdf&ids=${encodeURIComponent(sop.id)}&inline=1&v=${version}`;
 
   return (
     <article className="overflow-hidden rounded-none border-0 bg-transparent shadow-none">
       {showActions ? (
         <div className="mb-3 flex flex-wrap gap-2">
           <a
-            href={pdf ? pdf.url : `/api/sop/export?format=pdf&ids=${sop.id}`}
+            href={
+              pdf
+                ? `${pdf.url}${pdf.url.includes("?") ? "&" : "?"}v=${version}`
+                : `/api/sop/export?format=pdf&ids=${encodeURIComponent(sop.id)}&v=${version}`
+            }
             {...(pdf
               ? {
                   target: "_blank" as const,
@@ -230,8 +235,8 @@ export function SopDocumentView({
           <a
             href={
               docx
-                ? docx.url
-                : `/api/sop/export?format=docx&ids=${sop.id}`
+                ? `${docx.url}${docx.url.includes("?") ? "&" : "?"}v=${version}`
+                : `/api/sop/export?format=docx&ids=${encodeURIComponent(sop.id)}&v=${version}`
             }
             {...(docx
               ? {

@@ -3,6 +3,7 @@ import { SopDocumentView } from "@/components/SopDocumentView";
 import { requireSopAccess } from "@/lib/session";
 import { primarySopPdf } from "@/lib/sop-attachments";
 import { ensureSopOriginalPdf } from "@/lib/sop-ensure-pdf";
+import { sopWithFilesOnDisk } from "@/lib/sop-files";
 import { getSopsByIds, userCanViewSop } from "@/lib/sop-ops";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +22,7 @@ export default async function SopCombinedPage({
     .filter(Boolean);
   const sops = [];
   for (const sop of getSopsByIds(ids).filter((s) => userCanViewSop(user, s))) {
-    sops.push(await ensureSopOriginalPdf(sop));
+    sops.push(sopWithFilesOnDisk(await ensureSopOriginalPdf(sop)));
   }
   const idsQuery = sops.map((s) => s.id).join(",");
   const hasOriginalPdf = sops.some((s) => primarySopPdf(s));

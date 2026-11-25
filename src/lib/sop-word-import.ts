@@ -1,4 +1,5 @@
 import { getDb } from "./db";
+import { automaticSopCode, automaticSopMasterCode } from "./sop-format";
 import { splitOriginalDocx } from "./sop-docx-split";
 import {
   appendSopAttachments,
@@ -36,7 +37,7 @@ export type ParsedSopDraft = {
 };
 
 const CODE_RE =
-  /\b([A-Za-z][A-Za-z0-9]{1,10}-SOP\/\d{4}\/\d{2,4}|[A-Za-z][A-Za-z0-9]{1,10}-SOP-\d{2,4})\b/gi;
+  /\b([A-Za-z][A-Za-z0-9]{1,10}-SOP\/\d{4}(?:\/\d{2})?\/\d{2,4}|[A-Za-z][A-Za-z0-9]{1,10}-SOP-\d{2,4})\b/gi;
 
 const BODY_HINT =
   /STANDARD\s+OPERATING\s+PROCEDURE|A\.\s*TUJUAN|1\.\s*Tujuan|PROSEDUR\s+PELAKSANAAN|NOMOR\s+DOCUMENT|MULAI\s+BERLAKU|Ruang\s+Lingkup/i;
@@ -452,7 +453,7 @@ function draftsFromChunks(
     const fallbackMatch = new RegExp(CODE_RE.source, "i").exec(chunk);
     const fallback = fallbackMatch
       ? preserveCode(fallbackMatch[1])
-      : `${deptCode.toUpperCase()}-SOP/${new Date().getFullYear()}/${String(drafts.length + 1).padStart(3, "0")}`;
+      : automaticSopCode(deptCode, drafts.length + 1);
     const code = extractCodeFromChunk(chunk, fallback);
     const key = code.toUpperCase();
     if (used.has(key)) continue;
@@ -590,7 +591,7 @@ export function parseSopWordText(
   CODE_RE.lastIndex = 0;
   const code = any
     ? preserveCode(any[1])
-    : `${deptCode.toUpperCase()}-SOP/${new Date().getFullYear()}/001`;
+    : automaticSopCode(deptCode, 1);
   const draft = parseChunk(
     recovered,
     extractCodeFromChunk(recovered, code),
@@ -763,8 +764,7 @@ export async function importSopsFromWord(input: {
   let created = 0;
   let updated = 0;
   const saved: SopDocument[] = [];
-  const year = new Date().getFullYear();
-  const masterCode = `${dept.code.toUpperCase()}-SOP/${year}/MASTER`;
+  const masterCode = automaticSopMasterCode(dept.code);
   const originals = splitOriginalDocx(input.buffer, drafts.length);
   if (
     drafts.length > 1 &&

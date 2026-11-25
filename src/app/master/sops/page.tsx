@@ -14,10 +14,6 @@ export default async function MasterSopsPage() {
   const departments = departmentsVisibleToUser(user, listDepartments(true));
   const sops = listSopsForUser(user);
   const canManage = canManageSop(user);
-  const defaultDepartmentId =
-    user.departmentId && departments.some((d) => d.id === user.departmentId)
-      ? user.departmentId
-      : (departments[0]?.id ?? "");
   const scopeLabel =
     departments.length === 1
       ? departments[0].name
@@ -38,16 +34,14 @@ export default async function MasterSopsPage() {
           SOP
         </h1>
         <p className="mt-2 max-w-2xl text-sm text-ink-muted">
-          Prosedur kerja per departemen: header nomor dokumen, bagian A–D
-          (Tujuan, Bahan, Kualifikasi, Prosedur), dan tabel disposisi. Baca di
-          web atau unduh PDF/Word per dokumen / digabung.
+          Satu SOP per departemen, cukup satu file. Baca di web atau unduh
+          PDF/Word.
         </p>
       </div>
       <SopMaster
         initial={sops}
         departments={departments}
         canManage={canManage}
-        defaultDepartmentId={defaultDepartmentId}
       />
     </div>
   );

@@ -1829,6 +1829,18 @@ export function listUsers(): Omit<UserAccount, "passwordHash">[] {
     .map(({ passwordHash: _, ...rest }) => rest);
 }
 
+export function getUserById(
+  id: string,
+): Omit<UserAccount, "passwordHash"> | null {
+  ensureDb();
+  const row = getDb()
+    .prepare("SELECT * FROM users WHERE id = ?")
+    .get(id) as UserRow | undefined;
+  if (!row) return null;
+  const { passwordHash: _, ...rest } = mapUser(row);
+  return rest;
+}
+
 /** staffId yang terhubung akun role admin — tidak ikut penilaian KPI */
 export function listAdminStaffIds(): string[] {
   return listUsers()

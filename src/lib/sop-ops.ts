@@ -8,6 +8,7 @@ import type {
   SopDocument,
   SopStep,
 } from "./types";
+import { automaticSopCode } from "./sop-format";
 import {
   DEFAULT_SOP_DISPOSITIONS,
   defaultSopDispositions,
@@ -233,10 +234,9 @@ export function getSopsByIds(ids: string[]): SopDocument[] {
     .filter((s): s is SopDocument => Boolean(s));
 }
 
-function nextSopCode(deptCode: string): string {
-  const year = new Date().getFullYear();
-  const safe = deptCode.replace(/[^A-Za-z0-9]/g, "").toUpperCase() || "GEN";
-  const prefix = `${safe}-SOP/${year}/`;
+function nextSopCode(deptCode: string, when = new Date()): string {
+  const sample = automaticSopCode(deptCode, 1, when);
+  const prefix = sample.slice(0, sample.lastIndexOf("/") + 1);
   const rows = getDb()
     .prepare("SELECT code FROM sops WHERE code LIKE ?")
     .all(`${prefix}%`) as Array<{ code: string }>;
@@ -245,7 +245,7 @@ function nextSopCode(deptCode: string): string {
     const n = Number(r.code.slice(prefix.length));
     if (!Number.isNaN(n) && n > max) max = n;
   }
-  return `${prefix}${String(max + 1).padStart(3, "0")}`;
+  return automaticSopCode(deptCode, max + 1, when);
 }
 
 export function upsertSop(input: {
@@ -456,13 +456,17 @@ export function replaceSopAttachment(
   if (!oldUrl) return { error: "URL file lama wajib" };
   if (replacement.length === 0) return { error: "File pengganti wajib" };
 
-  const withoutOld = existing.attachments.filter((a) => a.url !== oldUrl);
-  if (withoutOld.length + replacement.length > maxTotal) {
+  const index = existing.attachments.findIndex((a) => a.url === oldUrl);
+  if (index < 0) {
+    return { error: "File yang diganti tidak ditemukan. Muat ulang halaman lalu coba lagi." };
+  }
+  const next = existing.attachments.slice();
+  next.splice(index, 1, ...replacement);
+  if (next.length > maxTotal) {
     return {
       error: `Maksimal ${maxTotal} lampiran`,
     };
   }
-  const next = [...withoutOld, ...replacement];
   const now = new Date().toISOString();
   getDb()
     .prepare(
