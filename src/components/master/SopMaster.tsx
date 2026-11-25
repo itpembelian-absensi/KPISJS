@@ -340,10 +340,11 @@ export function SopMaster({
   async function confirmWordImport() {
     const file = wordFileRef.current;
     if (!file || !importDepartmentId) return;
-    const n = wordPreview?.length ?? 0;
+    const draft = wordPreview?.[0];
+    if (!draft) return;
     if (
       !window.confirm(
-        `Impor ${n} SOP ke ${deptOf(importDepartmentId)?.name ?? "departemen ini"}?\n\nSOP dengan nomor yang sama akan diperbarui. SOP baru berstatus Draft (Off).`,
+        `Simpan satu file untuk ${deptOf(importDepartmentId)?.name ?? "departemen ini"}?\n\nJudul: ${draft.title}\nNomor: ${draft.code}\n\nIsi Word tidak dipecah. File lama pada SOP ini akan diganti.`,
       )
     ) {
       return;
@@ -447,9 +448,10 @@ export function SopMaster({
           <div>
             <h2 className="font-semibold">Impor dari Word</h2>
             <p className="mt-1 text-xs text-ink-muted">
-              Unggah file Master SOP (.docx). Sistem memecah per judul/nomor
-              sesuai isi Word, menempelkan pecahan Word asli, lalu membuat PDF
-              dengan layout yang sama. Pilih departemen, lalu unggah file Word.
+              Satu file Word untuk satu departemen, tidak dipecah. Jika
+              departemen sudah punya SOP, file itu yang diganti dan judulnya
+              tetap. Jika belum ada, judulnya mengikuti pola yang sudah ada,
+              contoh SOP IT Departemen.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -496,7 +498,7 @@ export function SopMaster({
                   onClick={confirmWordImport}
                   className="rounded-xl border border-brand px-3 py-2 text-sm font-medium text-brand disabled:opacity-60"
                 >
-                  Impor {wordPreview.length} SOP
+                  Simpan 1 SOP
                 </button>
                 <button
                   type="button"
@@ -521,7 +523,7 @@ export function SopMaster({
                   <tr>
                     <th className="px-3 py-2 font-medium">Nomor</th>
                     <th className="px-3 py-2 font-medium">Judul</th>
-                    <th className="px-3 py-2 font-medium">Langkah</th>
+                    <th className="px-3 py-2 font-medium">File</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -537,7 +539,7 @@ export function SopMaster({
                         </p>
                       </td>
                       <td className="px-3 py-2 text-xs text-ink-muted">
-                        {d.steps}
+                        1 file
                       </td>
                     </tr>
                   ))}

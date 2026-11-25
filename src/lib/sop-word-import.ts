@@ -1,10 +1,10 @@
 import { getDb } from "./db";
-import { automaticSopCode, automaticSopMasterCode } from "./sop-format";
-import { splitOriginalDocx } from "./sop-docx-split";
+import { automaticSopCode } from "./sop-format";
 import {
   appendSopAttachments,
   getSop,
   listSops,
+  nextSopCode,
   replaceSopAttachment,
   upsertSop,
 } from "./sop-ops";
@@ -707,6 +707,12 @@ async function attachPdfFromDocx(
   }
 }
 
+/** Judul satu SOP per departemen, sama seperti unggahan yang sudah ada. */
+export function departmentSopTitle(deptCode: string): string {
+  const safe = deptCode.replace(/[^A-Za-z0-9]/g, "").toUpperCase() || "GEN";
+  return `SOP ${safe} Departemen`;
+}
+
 export async function importSopsFromWord(input: {
   buffer: Buffer;
   filename: string;
@@ -739,149 +745,88 @@ export async function importSopsFromWord(input: {
     };
   }
 
-  const drafts = parseDocxToDrafts(input.buffer, dept.name, dept.code);
-  if (drafts.length === 0) {
-    return {
-      error:
-        "Tidak ada SOP terdeteksi. Pastikan file berisi nomor dokumen (Kode / NOMOR DOCUMENT) dan bagian Tujuan / Prosedur.",
-    };
-  }
-
+  const canonicalTitle = departmentSopTitle(dept.code);
+  const inDept = listSops({ departmentId: dept.id });
+  const existing =
+    inDept.find(
+      (s) => s.title.trim().toLowerCase() === canonicalTitle.toLowerCase(),
+    ) ?? inDept[0];
+  const title = existing?.title.trim() || canonicalTitle;
+  const code = existing?.code ?? nextSopCode(dept.code);
+  const filename = input.filename.trim() || "sop.docx";
   const warnings: string[] = [];
-  if (drafts.length === 1) {
+  if (inDept.length > 1 && existing) {
     warnings.push(
-      "Hanya 1 SOP terdeteksi. Jika file master berisi banyak SOP, pastikan tiap dokumen punya nomor sendiri (Kode / NOMOR DOCUMENT) atau judul STANDARD OPERATING PROCEDURE.",
+      `Departemen ini punya ${inDept.length} SOP. File disimpan ke ${existing.code}. SOP lain tidak diubah.`,
     );
   }
+
+  const draft: ParsedSopDraft = {
+    code,
+    title,
+    divisionLabel:
+      existing?.divisionLabel || sopDivisionLabelFromDepartment(dept.name),
+    documentType: existing?.documentType || "STANDARD OPERATING PROCEDURE",
+    effectiveDate: existing?.effectiveDate || "",
+    revision: existing?.revision || "-",
+    revisionDate: existing?.revisionDate || "",
+    purpose: filename,
+    materials: existing?.materials || "",
+    qualifications: existing?.qualifications || "",
+    notes: existing?.notes || "",
+    steps: existing?.steps ?? [],
+    dispositions: existing?.dispositions ?? defaultSopDispositions(dept.name),
+  };
 
   if (input.preview) {
-    return { preview: true, drafts, warnings };
+    return { preview: true, drafts: [draft], warnings };
   }
 
-  const existingByCode = new Map(
-    listSops().map((s) => [s.code.toLowerCase(), s]),
-  );
-  let created = 0;
-  let updated = 0;
-  const saved: SopDocument[] = [];
-  const masterCode = automaticSopMasterCode(dept.code);
-  const originals = splitOriginalDocx(input.buffer, drafts.length);
-  if (
-    drafts.length > 1 &&
-    originals.some((b) => b.length === input.buffer.length)
-  ) {
-    warnings.push(
-      "Sebagian pecahan Word memakai file master utuh. Unduh Word per SOP lalu periksa apakah isinya sudah terpisah.",
+  const result = upsertSop({
+    id: existing?.id,
+    departmentId: dept.id,
+    code,
+    title,
+    divisionLabel: draft.divisionLabel,
+    documentType: draft.documentType,
+    effectiveDate: draft.effectiveDate,
+    revision: draft.revision,
+    revisionDate: draft.revisionDate,
+    purpose: existing?.purpose ?? "",
+    materials: draft.materials,
+    qualifications: draft.qualifications,
+    notes: draft.notes,
+    steps: draft.steps,
+    dispositions: draft.dispositions,
+    attachments: existing?.attachments ?? [],
+    active: existing?.active ?? true,
+    createdBy: input.createdBy,
+  });
+  if ("error" in result) return { error: result.error };
+
+  stripGeneratedPdfAttachments(result.id);
+  const withWord = attachOriginalDocx(result.id, input.buffer, filename);
+  let current: SopDocument =
+    "error" in withWord ? getSop(result.id) ?? result : withWord;
+  if ("error" in withWord) {
+    warnings.push(`SOP tersimpan, file Word gagal dilampirkan (${withWord.error})`);
+  } else {
+    const pdfName = filename.replace(/\.docx$/i, ".pdf");
+    current = await attachPdfFromDocx(
+      result.id,
+      input.buffer,
+      pdfName.toLowerCase().endsWith(".pdf") ? pdfName : `${filename}.pdf`,
+      warnings,
+      result.code,
+      current,
     );
-  }
-
-  for (const [i, draft] of drafts.entries()) {
-    const existing = existingByCode.get(draft.code.toLowerCase());
-    if (existing && existing.departmentId !== dept.id) {
-      warnings.push(
-        `${draft.code}: nomor sudah dipakai ${existing.departmentName}, dilewati agar tidak menimpa.`,
-      );
-      continue;
-    }
-    const result = upsertSop({
-      id: existing?.id,
-      departmentId: dept.id,
-      code: draft.code,
-      title: draft.title,
-      divisionLabel: draft.divisionLabel,
-      documentType: draft.documentType,
-      effectiveDate: draft.effectiveDate,
-      revision: draft.revision,
-      revisionDate: draft.revisionDate,
-      purpose: draft.purpose,
-      materials: draft.materials,
-      qualifications: draft.qualifications,
-      notes: draft.notes,
-      steps: draft.steps,
-      dispositions: draft.dispositions,
-      attachments: existing?.attachments ?? [],
-      active: existing?.active ?? false,
-      createdBy: input.createdBy,
-    });
-    if ("error" in result) {
-      warnings.push(`${draft.code}: ${result.error}`);
-      continue;
-    }
-    if (existing) updated += 1;
-    else created += 1;
-    existingByCode.set(result.code.toLowerCase(), result);
-
-    stripGeneratedPdfAttachments(result.id);
-    const slice = originals[i] ?? input.buffer;
-    const fname = `${draft.code.replace(/\//g, "-")} – ${draft.title.slice(0, 80)}.docx`;
-    const withWord = attachOriginalDocx(result.id, slice, fname);
-    let current: SopDocument =
-      "error" in withWord ? getSop(result.id) ?? result : withWord;
-    if ("error" in withWord) {
-      warnings.push(`${draft.code}: SOP tersimpan, file Word asli gagal (${withWord.error})`);
-    } else {
-      current = await attachPdfFromDocx(
-        result.id,
-        slice,
-        fname.replace(/\.docx$/i, ".pdf"),
-        warnings,
-        draft.code,
-        current,
-      );
-    }
-    saved.push(current);
-  }
-
-  if (drafts.length >= 2) {
-    const masterExisting = existingByCode.get(masterCode.toLowerCase());
-    const master = upsertSop({
-      id: masterExisting?.id,
-      departmentId: dept.id,
-      code: masterCode,
-      title: `Master SOP ${dept.name} (file sumber)`,
-      divisionLabel: sopDivisionLabelFromDepartment(dept.name),
-      documentType: "MASTER STANDARD OPERATING PROCEDURE",
-      purpose: `Dokumen induk ${drafts.length} SOP ${dept.name} yang dipecah otomatis dari file Word.`,
-      materials: `File sumber: ${input.filename}`,
-      qualifications: `Pemilik proses: ${dept.name}`,
-      notes: `Diimpor ${new Date().toISOString().slice(0, 10)}. SOP pecahan: ${drafts.map((d) => d.code).join(", ")}.`,
-      steps: [
-        {
-          order: 1,
-          title: "Pakai pecahan per nomor",
-          body: "Isi operasional ada pada entri SOP per nomor. File Word master terlampir di sini.",
-        },
-      ],
-      dispositions: defaultSopDispositions(dept.name),
-      attachments: masterExisting?.attachments ?? [],
-      active: false,
-      createdBy: input.createdBy,
-    });
-    if (!("error" in master)) {
-      if (!masterExisting) created += 1;
-      else updated += 1;
-      stripGeneratedPdfAttachments(master.id);
-      const withWord = attachOriginalDocx(master.id, input.buffer, input.filename);
-      let current: SopDocument = "error" in withWord ? master : withWord;
-      if (!("error" in withWord)) {
-        current = await attachPdfFromDocx(
-          master.id,
-          input.buffer,
-          input.filename.replace(/\.docx$/i, ".pdf") || "master.pdf",
-          warnings,
-          master.code,
-          current,
-        );
-      }
-      saved.push(current);
-    }
   }
 
   return {
     preview: false,
-    created,
-    updated,
-    sops: saved,
+    created: existing ? 0 : 1,
+    updated: existing ? 1 : 0,
+    sops: [current],
     warnings,
   };
 }

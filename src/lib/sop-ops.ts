@@ -234,7 +234,7 @@ export function getSopsByIds(ids: string[]): SopDocument[] {
     .filter((s): s is SopDocument => Boolean(s));
 }
 
-function nextSopCode(deptCode: string, when = new Date()): string {
+export function nextSopCode(deptCode: string, when = new Date()): string {
   const sample = automaticSopCode(deptCode, 1, when);
   const prefix = sample.slice(0, sample.lastIndexOf("/") + 1);
   const rows = getDb()
